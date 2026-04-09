@@ -1,15 +1,19 @@
 ﻿#include "../include/platform-nes.h"
 #include "main.h"
-
-uint8_t game_exit = 0;
+#include "tracks.h"
 
 uint8_t port1;
 uint8_t port2;
-
 RESET() {
+    EnableRendering(0);
+    AudioInit();
+    TrackPlay(0);
     while (!quit) {
         if (port1 & START) {
-            game_exit = 1;
+#ifndef  TARGET_NES
+            quit = 1
+#endif
+
         }
 
         WaitForPresent();
@@ -18,4 +22,5 @@ RESET() {
 
 NMI() {
     PollControllers(&port1, &port2);
+    AudioUpdate();
 }

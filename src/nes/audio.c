@@ -1,50 +1,73 @@
 ﻿#include "../include/audio.h"
 #include <stdint.h>
 
-extern const uint8_t region;
-extern const uint8_t* pTracks;
-extern const uint8_t* pSFX;
-extern const uint8_t* pSSFX;
-extern const uint8_t* pUseSampleBitfield;
+#if defined(__clangd__) || defined(__JETBRAINS_IDE__)
+    #define FASTCALL void
+#else
+    // 2. SATISFY THE HARDWARE: The real compiler gets the hyphenated attribute
+    // If your compiler version panics on '-', change it to cc65_fastcall
+    #define FASTCALL __attribute__((cc65_fastcall)) void
+#endif
 
-extern void famistudio_init(const uint8_t* data, uint8_t region);
-extern void famistudio_play(uint8_t index);
-extern void famistudio_music_pause();
-extern void famistudio_music_stop();
+// FamiStudio C bindings — these are the actual exported symbol names
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wattributes"
+extern FASTCALL __attribute__((leaf)) famistudio_init(uint8_t lo, uint8_t hi);
+extern FASTCALL __attribute__((leaf)) famistudio_music_play(uint8_t song_index);
+extern FASTCALL __attribute__((leaf)) famistudio_music_pause(uint8_t pause);
+extern FASTCALL __attribute__((leaf)) famistudio_music_stop(void);
+extern FASTCALL __attribute__((leaf)) famistudio_sfx_init(void *sfx_data);
+extern FASTCALL __attribute__((leaf)) famistudio_sfx_play(uint8_t sfx_index, uint8_t channel);
+extern FASTCALL __attribute__((leaf)) famistudio_update(void);
+#pragma clang diagnostic pop
 
-extern void famistudio_sfx_init(const uint8_t* data);
-extern void famistudio_sfx_sample_init(const uint8_t* samples);
-extern void famistudio_sfx_sample_play(uint8_t index);
-extern void famistudio_sfx_play(uint8_t index);
 
-extern void famistudio_update();
 
-inline void AudioInit() {
-    famistudio_init(pTracks, region);
-    famistudio_sfx_init(pSFX);
-    famistudio_sfx_sample_init(pSSFX);
+
+void AudioInit(void) {
+    __asm__ volatile (
+        "ldx #<%0\n"
+        "ldy #>%0\n"
+        "lda #1\n"
+        "jsr famistudio_init\n"
+        :
+        : "i"(tracks)
+        : "memory"
+    );
 }
 
-inline void TrackPlay(uint8_t index) {
-    famistudio_play(index);
+void TrackPlay(const uint8_t index) {
+    __asm__ volatile (
+        "lda #<%0\n"
+        "jsr famistudio_music_play\n"
+        :
+        : "i"(index)
+        : "memory"
+    );
 }
 
-inline void TrackPause() {
-    famistudio_music_pause();
+void TrackPause(const uint8_t pause) {
+    __asm__ volatile (
+        "lda #<%0\n"
+        "jsr famistudio_music_pause\n"
+        :
+        : "i"(pause)
+        : "memory"
+    );
 }
 
-inline void TrackStop() {
+void TrackStop(void) {
     famistudio_music_stop();
 }
 
-inline void AudioUpdate() {
+void AudioUpdate(void) {
     famistudio_update();
 }
 
-inline void SFXPlay(uint8_t index) {
-    famistudio_sfx_sample_play(index);
+void SfxPlay(const uint8_t index, const uint8_t channel) {
+    famistudio_sfx_play(index, channel);
 }
 
-inline void SfxSamplePlay(uint8_t index) {
-    famistudio_sfx_play(index);
+void SfxSamplePlay(const uint8_t index) {
+    famistudio_sfx_play(index, 1);
 }

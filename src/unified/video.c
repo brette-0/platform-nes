@@ -10,6 +10,10 @@ uint32_t vblank_tick(void *userdata, SDL_TimerID id, uint32_t interval) {
 
 static uint64_t last_frame;
 
+void EnableRendering(uint8_t ppuMask) {
+    // TODO: write this
+}
+
 void WaitForPresent()
 {
     SDL_RenderPresent(renderer);

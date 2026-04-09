@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
 #include "../../include/reset.h"
+#include "../../include/audio.h"
 #include "../unified/internal.h"
 
 SDL_Window *window;
@@ -13,7 +14,7 @@ void (*_nmi_callback)(void);
 int quit;
 
 void init() {
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return;
     }
