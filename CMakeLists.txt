@@ -189,14 +189,6 @@ ${FAMISTUDIO_CFG}")
             ${DEMO_ASM_OBJECTS}
     )
 
-    # Custom linker scripts are only used by the desktop targets.
-    if(NOT TARGET_PLATFORM STREQUAL "nes")
-        target_link_options(demo PRIVATE
-                -T ${CMAKE_SOURCE_DIR}/scripts/base.ld
-                -T ${CMAKE_SOURCE_DIR}/scripts/chr_rom.ld
-        )
-    endif()
-
     # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
