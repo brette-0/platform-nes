@@ -1,8 +1,7 @@
-﻿#include "../include/audio.h"
+﻿#include "../../include/platform-nes/audio.h"
 
 #include <SDL3/SDL.h>
 #include "internal.h"
-#include "types.h"
 
 typedef struct {
     uint32_t offset;

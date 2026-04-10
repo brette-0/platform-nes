@@ -9,10 +9,10 @@
 #endif
 
 #ifdef TARGET_NES
-#include "../include/nes_macro.h"
+#include "nes_macro.h"
 #define quit 0
 #else
-#include "../include/unified_macro.h"
+#include "unified_macro.h"
 extern int quit;
 #endif
 

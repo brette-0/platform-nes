@@ -1,4 +1,4 @@
-﻿#include "../include/video.h"
+﻿#include "../../include/platform-nes/video.h"
 #include "../unified/internal.h"
 #include <stdint.h>
 #include <SDL3/SDL.h>

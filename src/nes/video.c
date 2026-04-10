@@ -1,4 +1,4 @@
-﻿#include "../include/video.h"
+﻿#include "../../include/platform-nes/video.h"
 #include <stdint.h>
 
 void WaitForPresent() {

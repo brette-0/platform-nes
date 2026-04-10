@@ -1,4 +1,4 @@
-﻿#include "../include/audio.h"
+﻿#include "../../include/platform-nes/audio.h"
 #include <stdint.h>
 
 #if defined(__clangd__) || defined(__JETBRAINS_IDE__)

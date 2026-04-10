@@ -2,8 +2,7 @@
 
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
-#include "../../include/reset.h"
-#include "../../include/audio.h"
+#include "../../include/platform-nes/reset.h"
 #include "../unified/internal.h"
 
 SDL_Window *window;

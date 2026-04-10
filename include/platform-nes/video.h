@@ -2,7 +2,6 @@
 #define VIDEO_H
 
 #include <stdint.h>
-#include <platform-nes.h>
 
 #define CHARACTER_ROM(name, path)   \
 __asm__(                            \

@@ -1,4 +1,4 @@
-﻿#include "audio.h"
+﻿#include "../include/platform-nes/audio.h"
 #include <stdint.h>
 
 #ifndef TARGET_NES

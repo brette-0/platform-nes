@@ -1,7 +1,5 @@
-﻿#include "../include/platform-nes.h"
+﻿#include "../include/platform-nes/platform-nes.h"
 #include "main.h"
-#include "tracks.h"
-#include "graphics.h"
 
 uint8_t port1;
 uint8_t port2;
