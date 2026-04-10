@@ -100,7 +100,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = 1
     file(GLOB NES_SOURCES src/nes/*.c)
     add_library(platform-nes STATIC ${NES_SOURCES})
     target_include_directories(platform-nes PUBLIC
-            include/
+            ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_BINARY_DIR}/famistudio_include
     )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
@@ -221,7 +221,9 @@ else()
     file(GLOB PLATFORM_SOURCES src/${PLATFORM_DIR}/*.c)
 
     add_library(platform-nes STATIC ${UNIFIED_SOURCES} ${PLATFORM_SOURCES})
-    target_include_directories(platform-nes PUBLIC include/)
+    target_include_directories(platform-nes PUBLIC
+            ${CMAKE_SOURCE_DIR}/include
+    )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
     target_link_libraries(platform-nes PRIVATE SDL3::SDL3)
 

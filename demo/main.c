@@ -1,4 +1,4 @@
-﻿#include "../include/platform-nes/platform-nes.h"
+﻿#include <platform-nes/platform-nes.h>
 #include "main.h"
 
 uint8_t port1;
