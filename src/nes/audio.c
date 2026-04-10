@@ -26,12 +26,18 @@ extern FASTCALL __attribute__((leaf)) famistudio_update(void);
 
 void AudioInit(void) {
     __asm__ volatile (
+        // Init music
         "ldx #<%0\n"
         "ldy #>%0\n"
         "lda #1\n"
         "jsr famistudio_init\n"
+
+        // Init SFX
+        "ldx #<%1\n"
+        "ldy #>%1\n"
+        "jsr famistudio_sfx_init\n"
         :
-        : "i"(tracks)
+        : "i"(tracks), "i"(sfx)
         : "memory"
     );
 }

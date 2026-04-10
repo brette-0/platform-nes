@@ -36,9 +36,12 @@ extern const uint8_t nTracks;
     const uint8_t nTracks = sizeof(tracks) / sizeof(music_t);
 #else
 extern const uint8_t* tracks;
-
-#define TRACKS(ptr)             \
+extern const uint8_t* sfx;
+#define TRACKS(ptr)                     \
     const uint8_t* tracks = (void*)ptr
+
+#define SFX(ptr)                        \
+    const uint8_t* sfx = (void*)ptr;
 
 #endif
 

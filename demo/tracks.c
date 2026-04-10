@@ -8,6 +8,8 @@ TRACKS(
 #else
 
 extern const uint8_t _music_data_mega_man_2[];
+extern const uint8_t _sounds[];
 
 TRACKS(_music_data_mega_man_2);
+SFX(_sounds);
 #endif

@@ -11,7 +11,7 @@ RESET() {
     while (!quit) {
         if (port1 & START) {
 #ifndef  TARGET_NES
-            quit = 1
+            quit = 1;
 #endif
 
         }
