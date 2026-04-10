@@ -14,6 +14,16 @@ void EnableRendering(uint8_t ppuMask) {
     // TODO: write this
 }
 
+static void toggle_fullscreen(void) {
+    const uint32_t flags = SDL_GetWindowFlags(window);
+
+    if (flags & SDL_WINDOW_FULLSCREEN) {
+        SDL_SetWindowFullscreen(window, 0); // back to windowed
+    } else {
+        SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+    }
+}
+
 void WaitForPresent()
 {
     SDL_RenderPresent(renderer);
@@ -21,8 +31,36 @@ void WaitForPresent()
     // pump events once
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
-        if (e.type == SDL_EVENT_QUIT) quit = 1;
-        input_handle_event(&e);
+
+        switch (e.type) {
+
+        case SDL_EVENT_QUIT:
+            quit = 1;
+            break;
+
+        case SDL_EVENT_KEY_DOWN: {
+                SDL_Keycode key = e.key.key;
+
+                SDL_Keymod mod = SDL_GetModState();
+
+                // Alt + Enter toggle fullscreen
+                if (key == SDLK_RETURN && (mod & SDL_KMOD_ALT)) {
+                    toggle_fullscreen(); // your function
+                }
+
+                // F11 toggle fullscreen (common convention)
+                if (key == SDLK_F11) {
+                    toggle_fullscreen();
+                }
+
+                input_handle_event(&e);
+                break;
+        }
+
+        default:
+            input_handle_event(&e);
+            break;
+        }
     }
 
     // sleep the exact remaining time

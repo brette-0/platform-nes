@@ -39,7 +39,7 @@ void init() {
 #endif
 
 
-    if (!SDL_CreateWindowAndRenderer("My Game", mode->w, mode->h, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("My Game", mode->w >> 1, mode->h >> 1, 0, &window, &renderer)) {
         SDL_Log("Window creation failed: %s", SDL_GetError());
         return;
     }
