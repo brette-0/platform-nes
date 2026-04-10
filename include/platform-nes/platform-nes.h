@@ -2,6 +2,16 @@
 #define PLATFORM_NES_LIBRARY_H
 #include <stdint.h>
 
+#if defined(LANDSCAPE) && defined(PORTRAIT)
+#error "Must not define both Mirroring"
+#endif
+
+#if !defined(LANDSCAPE) && !defined(PORTRAIT)
+#error "Must define Mirroring"
+#endif
+
+
+
 #ifdef __JETBRAINS_IDE__
     // The IDE doesn't know what this is, so we tell it to treat
     // the attribute as "nothing" (whitespace).

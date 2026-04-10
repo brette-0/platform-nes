@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
-#include "../../include/platform-nes/reset.h"
+#include <stdlib.h>
+#include <platform-nes/reset.h>
+#include <platform-nes/video.h>
 #include "../unified/internal.h"
 
 SDL_Window *window;
@@ -12,13 +14,32 @@ atomic_int _vblank_flag;
 void (*_nmi_callback)(void);
 int quit;
 
+const uint8_t* VideoRAM;
+
 void init() {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return;
     }
 
-    if (!SDL_CreateWindowAndRenderer("My Game", 3840, 2160, 0, &window, &renderer)) {
+    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
+
+#ifdef LANDSCAPE
+    const int scale = mode->h / 240;
+    VideoRAM = malloc(
+        mode->w / scale < 512 ? 0x2000 : mode->w / scale * 0x1000
+    );
+#endif
+#if PORTRAIT
+    const int scale = mode->w / 256;
+    VideoRAM = malloc(
+        mode->h / scale < 480 ? 0x2000 : mode->w / scale * 0x1000
+    );
+#endif
+
+
+    if (!SDL_CreateWindowAndRenderer("My Game", mode->w, mode->h, 0, &window, &renderer)) {
         SDL_Log("Window creation failed: %s", SDL_GetError());
         return;
     }

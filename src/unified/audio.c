@@ -116,16 +116,9 @@ void AudioInit(void) {
         SDL_Log("AUDIO: stream creation failed: %s", SDL_GetError());
         return;
     }
-    SDL_Log("AUDIO: stream created OK");
     SDL_ResumeAudioStreamDevice(music_stream);
 
     BuildPCMBuffer();
-    SDL_Log("AUDIO: buffer built, %u bytes, %d tracks", pcm_buffer_size, nTracks);
-
-    for (int i = 0; i < nTracks; i++) {
-        SDL_Log("AUDIO: track %d: offset=%u length=%u loop=%u",
-            i, track_info[i].offset, track_info[i].length, track_info[i].loop_start);
-    }
 }
 
 void AudioUpdate(void) {

@@ -39,4 +39,9 @@ enum MASK {
 void WaitForPresent();
 void EnableRendering(uint8_t ppuMask);
 
+#ifndef TARGET_NES
+extern const uint8_t* VideoRAM;
+#endif
+
+
 #endif
