@@ -2,6 +2,7 @@
 #define VIDEO_H
 
 #include <stdint.h>
+#include <platform-nes.h>
 
 #ifdef TARGET_NES
 enum PPU {
@@ -21,6 +22,21 @@ enum MASK {
     BG      = 0x08,
     SPRITE  = 0x10,
 };
+
+#define CHARACTER_ROM(name, path)       \
+    __asm__(                            \
+        ".pushsection .chr_rom,\"a\"\n" \
+        ".global " #name "_start\n"     \
+        ".global " #name "_end\n"       \
+        #name "_start:\n"               \
+        ".incbin \"" path "\"\n"        \
+        #name "_end:\n"                 \
+        ".popsection\n"                 \
+    );                                  \
+    extern const uint8_t name##_start;  \
+    extern const uint8_t name##_end;
+
+#define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
 
 #else
 
