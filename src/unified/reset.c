@@ -13,9 +13,9 @@ SDL_TimerID timer_id;
 atomic_int _vblank_flag;
 void (*_nmi_callback)(void);
 int quit;
+const SDL_DisplayMode *mode;
 
 const uint8_t *patternTable = CHR_ROM;
-
 const uint8_t* VideoRAM;
 
 void init() {
@@ -25,7 +25,7 @@ void init() {
     }
 
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
-    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display);
+    mode = SDL_GetCurrentDisplayMode(display);
 
 #ifdef LANDSCAPE
     const int scale = mode->h / 240;

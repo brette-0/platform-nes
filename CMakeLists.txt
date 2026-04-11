@@ -111,7 +111,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = 1
     add_custom_command(
             OUTPUT ${PASS1_ELF}
             COMMAND ${CMAKE_C_COMPILER}
-            -Os -DTARGET_NES
+            -Os -DTARGET_NES -DLANDSCAPE
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_BINARY_DIR}/famistudio_include
             ${DEMO_C_SOURCES}

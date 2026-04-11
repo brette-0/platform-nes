@@ -1,7 +1,15 @@
 ﻿#ifndef MACRO_H
 #define MACRO_H
 
-#define RESET int main
+#include <platform-nes/shadow.h>
+
+#define RESET                   \
+    void __main();              \
+    GEN_SHADOW_REGISTERS        \
+    int main(){                 \
+        __main();               \
+    }                           \
+    inline void __main
 
 #define NMI                             \
 __attribute__((used, interrupt_norecurse))    \

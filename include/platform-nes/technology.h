@@ -1,0 +1,52 @@
+﻿#ifndef TECHNOLOGY_H
+#define TECHNOLOGY_H
+
+#define PEEK(addr) (*(volatile const unsigned char *)(addr))
+#define POKE(addr, data) (*(volatile unsigned char *)(addr)) = data
+
+#define CM(ch, val) \
+"  .elseif \\c == " #ch "\n" \
+"    .byte " #val "\n"
+
+#if defined(__NES__) || defined(TARGET_NES)
+  #define _RODATA_SECTION ".section .rodata\n"
+  #define _SYM(name) #name
+#elif defined(__APPLE__)
+  #define _RODATA_SECTION ".section __TEXT,__const\n"
+  #define _SYM(name) "_" #name
+#elif defined(_WIN32)
+  #define _RODATA_SECTION ".section .rdata,\"dr\"\n"
+  #define _SYM(name) #name
+#else
+  #define _RODATA_SECTION ".section .rodata\n"
+  #define _SYM(name) #name
+#endif
+
+#define CHARMAP(mapname, ...)                   \
+__asm__(                                        \
+".macro emit_char_" #mapname " c\n"             \
+"  .if 0\n"                                     \
+__VA_ARGS__                                     \
+"  .else\n"                                     \
+"    .byte \\c\n"                               \
+"  .endif\n"                                    \
+".endm\n"                                       \
+)
+
+#define MAPPED_STRING(mapname, name, chars)     \
+__asm__(                                        \
+_RODATA_SECTION                                 \
+".globl " _SYM(name) "\n"                       \
+_SYM(name) ":\n"                                \
+".irpc c, " #chars "\n"                         \
+"  emit_char_" #mapname " '\\c'\n"              \
+".endr\n"                                       \
+".byte 0x00\n"                                  \
+".previous\n"                                   \
+);                                              \
+extern const uint8_t name[sizeof(#chars)]
+
+#define EXTERN_STRING(name, chars)              \
+extern const uint8_t name[sizeof(#chars)]
+
+#endif

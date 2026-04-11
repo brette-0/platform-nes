@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+
+#ifndef TARGET_NES
+#include <SDL3/SDL_video.h>
+#endif
+
 /*
  * Section directives per target.
  *
@@ -35,6 +40,13 @@ _CHR_POP                                         \
 );                                               \
 extern const uint8_t name##_start[];             \
 extern const uint8_t name##_end[];
+
+#define CHARACTER_ROM_PAD(count, val)          \
+__asm__(                                       \
+_CHR_PUSH                                      \
+".fill " #count ", 1, " #val "\n"              \
+_CHR_POP                                       \
+)
 
 #ifdef TARGET_NES
   #define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
@@ -90,9 +102,57 @@ enum MASK {
 void WaitForPresent();
 void EnableRendering(uint8_t ppuMask);
 
+#ifdef TARGET_NES
+#define VIEWPORT_X  256
+#define VIEWPORT_Y  240
+#else
+extern const SDL_DisplayMode* mode;
+
+#define VIEWPORT_X  \
+  (mode->w >> 3)
+#define VIEWPORT_Y  \
+  (mode->h >> 3)
+#endif
+
+
+
 #ifndef TARGET_NES
 extern const uint8_t* VideoRAM;
 #endif
 
+/**
+ * Scrolls the screen in signed X and Y
+ * @param x x position to move the screen scroll by
+ * @param y y position to move the screen scroll by
+ */
+void DeltaScroll(int8_t x, int8_t y);
 
+/**
+ * Sets the current scroll of the screen
+ * @param x x position to set the scroll to
+ * @param y y position to set the scroll to
+ */
+void SetScroll(uint16_t x, uint16_t y);
+
+/**
+ * Writes from CPU to video RAM with an array of elements with specified polarity
+ * @param target    PPU Space Pointer
+ * @param source    Source of information to push into PPU video RAM
+ * @param sBuffer   size of source buffer
+ * @param polarity  writes horizontal or vertical
+ */
+void WriteBufferToVideoMemory(uint16_t target, const uint8_t* source, uint8_t sBuffer, uint8_t polarity);
+
+/**
+ * Uses mirror information to decide length of information required and polarity
+ * @param distance  How far from the viewport to write
+ * @param source    Source of information to write
+ */
+void WriteOutsideOfViewPort(int8_t distance, uint8_t* source);
+
+/**
+ * Clears Video Memory
+ * @param byte    the byte considered to be the 'empty'
+ */
+void FlushVideoRAM(uint8_t byte);
 #endif

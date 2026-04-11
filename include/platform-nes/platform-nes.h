@@ -27,6 +27,7 @@ extern int quit;
 #endif
 
 #include "types.h"
+#include "technology.h"
 #include "reset.h"
 #include "input.h"
 #include "video.h"

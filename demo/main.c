@@ -1,12 +1,18 @@
 ﻿#include <platform-nes/platform-nes.h>
 #include "main.h"
+#include "graphics.h"
 
 uint8_t port1;
 uint8_t port2;
 RESET() {
-    EnableRendering(0);
+    FlushVideoRAM(0);
+    SetScroll(0, 0);
+
+    WriteBufferToVideoMemory(0x2000, msg_hi, sizeof(msg_hi), 0);
+
     AudioInit();
     TrackPlay(0);
+    EnableRendering(0);
     while (!quit) {
         if (port1 & START) {
 #ifndef  TARGET_NES
