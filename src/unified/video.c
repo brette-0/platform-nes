@@ -3,6 +3,23 @@
 #include <stdint.h>
 #include <SDL3/SDL.h>
 
+/*
+ * PE/COFF: anchor _chr_rom at the very start of the chr_rom section.
+ * The library emits into chr_rom$a; CHARACTER_ROM() emits into chr_rom$m.
+ * The linker merges them alphabetically by suffix, so $a is always first.
+ *
+ * ELF / Mach-O don't need this — the linker provides the boundary
+ * symbol automatically (__start_chr_rom / section$start$...).
+ */
+#ifdef _WIN32
+__asm__(
+    ".pushsection chr_rom$a,\"dr\"\n"
+    ".global _chr_rom\n"
+    "_chr_rom:\n"
+    ".popsection\n"
+);
+#endif
+
 uint32_t vblank_tick(void *userdata, SDL_TimerID id, uint32_t interval) {
     atomic_store(&_vblank_flag, 1);
     return interval;  // repeat every 16ms

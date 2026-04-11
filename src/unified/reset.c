@@ -14,6 +14,8 @@ atomic_int _vblank_flag;
 void (*_nmi_callback)(void);
 int quit;
 
+const uint8_t *patternTable = CHR_ROM;
+
 const uint8_t* VideoRAM;
 
 void init() {
