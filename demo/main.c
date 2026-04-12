@@ -6,13 +6,14 @@ uint8_t port1;
 uint8_t port2;
 RESET() {
     FlushVideoRAM(0);
-    SetScroll(0, 0);
 
-    WriteBufferToVideoMemory(0x2000, msg_hi, sizeof(msg_hi), 0);
+    WriteBufferToVideoMemory(0, SIZED_OBJ(msg_hi), 0);
+    SetScroll(0, 0);
 
     AudioInit();
     TrackPlay(0);
-    EnableRendering(0);
+    EnableRendering(BG_L);
+    // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
         if (port1 & START) {
 #ifndef  TARGET_NES

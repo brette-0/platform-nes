@@ -7,8 +7,8 @@ CHARACTER_ROM(font, "../demo./chr/font");   // font
 CHARACTER_ROM_ALIGN(0x2000);                // gen full (SDL3 compat)
 
 CHARMAP(generic,                            // default char map
-    CM('h', 'h' + 1)
-    CM('i', 'i' + 1)
+    CM('h', 0x19)
+    CM('i', 0x1a)
 );
 
 MAPPED_STRING(generic, msg_hi, hi);

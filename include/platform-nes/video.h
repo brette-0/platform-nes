@@ -3,10 +3,15 @@
 
 #include <stdint.h>
 
-
 #ifndef TARGET_NES
 #include <SDL3/SDL_video.h>
 #endif
+
+extern const uint16_t PatternTables;
+extern const uint16_t NameTables;
+extern const uint16_t PaletteTables;
+extern const uint16_t nVideoRAM;
+
 
 /*
  * Section directives per target.
@@ -47,6 +52,9 @@ _CHR_PUSH                                      \
 ".fill " #count ", 1, " #val "\n"              \
 _CHR_POP                                       \
 )
+
+
+
 
 #ifdef TARGET_NES
   #define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
@@ -95,8 +103,10 @@ enum PPU {
 };
 
 enum MASK {
-    BG      = 0x08,
-    SPRITE  = 0x10,
+    BG        = 0x08,
+    SPRITE    = 0x10,
+    BG_L      = 0x0a,
+    SPRITE_L  = 0x14
 };
 
 void WaitForPresent();
@@ -136,12 +146,12 @@ void SetScroll(uint16_t x, uint16_t y);
 
 /**
  * Writes from CPU to video RAM with an array of elements with specified polarity
- * @param target    PPU Space Pointer
+ * @param offset    PPU Space Pointer
  * @param source    Source of information to push into PPU video RAM
  * @param sBuffer   size of source buffer
  * @param polarity  writes horizontal or vertical
  */
-void WriteBufferToVideoMemory(uint16_t target, const uint8_t* source, uint8_t sBuffer, uint8_t polarity);
+void WriteBufferToVideoMemory(const uint16_t offset, const uint8_t* source, uint8_t sBuffer, uint8_t polarity);
 
 /**
  * Uses mirror information to decide length of information required and polarity

@@ -3,6 +3,11 @@
 #include <platform-nes/shadow.h>
 #include <stdint.h>
 
+const uint16_t PatternTables    = 0;
+const uint16_t NameTables       = 0x2000;
+const uint16_t PaletteTables    = 0x3f00;
+const uint16_t nVideoRam        = 0x1000;
+
 void WaitForPresent() {
     while (1) {}
 }
@@ -14,11 +19,11 @@ void EnableRendering(uint8_t ppuMask) {
 
 void FlushVideoRAM(const uint8_t byte) {
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, 0);
-    POKE(PPUADDR, 0);
+    POKE(PPUADDR, NameTables >> 8);
+    POKE(PPUADDR, NameTables & 0xFF);
 
-    for (uint16_t i = 0; i < 0x2000; i++) {
-        POKE(PPUADDR, byte);
+    for (uint16_t i = 0; i < nVideoRam; i++) {
+        POKE(PPUDATA, byte);
     }
 }
 
@@ -42,10 +47,10 @@ void SetScroll(uint16_t x, uint16_t y) {
     POKE(PPUSCROLL, (uint8_t)(y & 0xFF));
 }
 
-void WriteBufferToVideoMemory(uint16_t target, const uint8_t* source, uint8_t sBuffer, uint8_t polarity) {
+void WriteBufferToVideoMemory(const uint16_t offset, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity) {
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, (uint8_t)(target & 0xFF));
-    POKE(PPUADDR, (uint8_t)(target & 0xFF));
+    POKE(PPUADDR, (uint8_t)((offset + NameTables) >> 8));
+    POKE(PPUADDR, (uint8_t)( offset + NameTables  &  0xFF));
 
     for (uint8_t i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);

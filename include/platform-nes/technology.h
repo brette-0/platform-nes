@@ -33,6 +33,18 @@ __VA_ARGS__                                     \
 ".endm\n"                                       \
 )
 
+#define NULL_TERMINATED_MAPPED_STRING(mapname, name, chars)     \
+__asm__(                                        \
+_RODATA_SECTION                                 \
+".globl " _SYM(name) "\n"                       \
+_SYM(name) ":\n"                                \
+".irpc c, " #chars "\n"                         \
+"  emit_char_" #mapname " '\\c'\n"              \
+".endr\n"                                       \
+".byte 0x00\n"                                  \
+".previous\n"                                   \
+);                                              \
+
 #define MAPPED_STRING(mapname, name, chars)     \
 __asm__(                                        \
 _RODATA_SECTION                                 \
@@ -44,9 +56,14 @@ _SYM(name) ":\n"                                \
 ".byte 0x00\n"                                  \
 ".previous\n"                                   \
 );                                              \
-extern const uint8_t name[sizeof(#chars)]
+extern const uint8_t name[sizeof(#chars) - 1]
 
 #define EXTERN_STRING(name, chars)              \
+extern const uint8_t name[sizeof(#chars) - 1]
+
+#define EXTERN_NULL_TERMINATED_STRING(name, chars)              \
 extern const uint8_t name[sizeof(#chars)]
+
+#define SIZED_OBJ(obj) obj, sizeof(obj)
 
 #endif
