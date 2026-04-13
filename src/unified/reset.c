@@ -14,9 +14,10 @@ atomic_int _vblank_flag;
 void (*_nmi_callback)(void);
 int quit;
 const SDL_DisplayMode *mode;
+uint8_t scale;
 
 const uint8_t *patternTable = CHR_ROM;
-const uint8_t* VideoRAM;
+uint8_t* VideoRAM;
 
 void init() {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
@@ -28,15 +29,16 @@ void init() {
     mode = SDL_GetCurrentDisplayMode(display);
 
 #ifdef LANDSCAPE
-    const int scale = mode->h / 240;
+    scale = mode->h / 240;
     VideoRAM = malloc(
-        mode->w / scale < 512 ? 0x2000 : mode->w / scale * 0x1000
+
+        mode->w / scale < 512 ? 0x800 : mode->w / scale * 0x400
     );
 #endif
 #if PORTRAIT
-    const int scale = mode->w / 256;
+    scale = mode->w / 256;
     VideoRAM = malloc(
-        mode->h / scale < 480 ? 0x2000 : mode->w / scale * 0x1000
+        mode->h / scale < 480 ? 0x800 : mode->w / scale * 0x400
     );
 #endif
 

@@ -8,10 +8,6 @@
 #endif
 
 extern const uint16_t PatternTables;
-extern const uint16_t NameTables;
-extern const uint16_t PaletteTables;
-extern const uint16_t nVideoRAM;
-
 
 /*
  * Section directives per target.
@@ -117,17 +113,20 @@ void EnableRendering(uint8_t ppuMask);
 #define VIEWPORT_Y  30
 #else
 extern const SDL_DisplayMode* mode;
+extern uint8_t scale;
 
 #define VIEWPORT_X  \
-  (mode->w >> 3)
+  ((mode->w / scale) >> 3)
 #define VIEWPORT_Y  \
-  (mode->h >> 3)
+  ((mode->h / scale) >> 3)
 #endif
 
 
 
 #ifndef TARGET_NES
-extern const uint8_t* VideoRAM;
+extern uint8_t* VideoRAM;
+extern uint16_t xScroll;
+extern uint16_t yScroll;
 #endif
 
 /**
@@ -146,7 +145,6 @@ void SetScroll(uint16_t x, uint16_t y);
 
 /**
  * Writes from CPU to video RAM with an array of elements with specified polarity
- * @param offset    PPU Space Pointer
  * @param source    Source of information to push into PPU video RAM
  * @param sBuffer   size of source buffer
  * @param polarity  writes horizontal or vertical
