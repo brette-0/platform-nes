@@ -7,6 +7,8 @@ uint8_t port2;
 RESET() {
     FlushVideoRAM(0);
 
+    WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
+
     WriteBufferToVideoMemory(
         (VIEWPORT_X - sizeof(msg_hi)) >> 1,
         VIEWPORT_Y >> 1,

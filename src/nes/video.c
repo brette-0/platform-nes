@@ -73,3 +73,13 @@ void WriteBufferToVideoMemory(
         POKE(PPUDATA, source[i]);
     }
 }
+
+void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
+    PEEK(PPUSTATUS);
+    POKE(PPUADDR, (uint8_t)((offset + PaletteTables) >> 8));
+    POKE(PPUADDR, (uint8_t)( offset + PaletteTables  &  0xFF));
+
+    for (uint8_t i = 0; i < sBuffer; i++) {
+        POKE(PPUDATA, source[i]);
+    }
+}

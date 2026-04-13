@@ -28,6 +28,8 @@ void init() {
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
     mode = SDL_GetCurrentDisplayMode(display);
 
+    paletteRAM = malloc(32);
+
 #ifdef LANDSCAPE
     scale = mode->h / 240;
     VideoRAM = malloc(

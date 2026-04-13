@@ -125,6 +125,7 @@ extern uint8_t scale;
 
 #ifndef TARGET_NES
 extern uint8_t* VideoRAM;
+extern uint8_t* paletteRAM;
 extern uint16_t xScroll;
 extern uint16_t yScroll;
 #endif
@@ -165,4 +166,7 @@ void WriteOutsideOfViewPort(int8_t distance, uint8_t* source);
  * @param byte    the byte considered to be the 'empty'
  */
 void FlushVideoRAM(uint8_t byte);
+
+void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uint8_t sBuffer);
+
 #endif

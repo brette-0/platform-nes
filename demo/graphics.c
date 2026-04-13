@@ -12,3 +12,5 @@ CHARMAP(generic,                            // default char map
 );
 
 MAPPED_STRING(generic, msg_hi, hi);
+
+const uint8_t BGColours[] = {0x31, 0x11, 0x21, 0x0e};
