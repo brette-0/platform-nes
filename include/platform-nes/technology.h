@@ -9,16 +9,16 @@
 "    .byte " #val "\n"
 
 #if defined(__NES__) || defined(TARGET_NES)
-  #define _RODATA_SECTION ".section .rodata\n"
+  #define _RODATA_SECTION ".pushsection .rodata\n"
   #define _SYM(name) #name
 #elif defined(__APPLE__)
-  #define _RODATA_SECTION ".section __TEXT,__const\n"
+  #define _RODATA_SECTION ".pushsection __TEXT,__const\n"
   #define _SYM(name) "_" #name
 #elif defined(_WIN32)
-  #define _RODATA_SECTION ".section .rdata,\"dr\"\n"
+  #define _RODATA_SECTION ".pushsection .rdata,\"dr\"\n"
   #define _SYM(name) #name
 #else
-  #define _RODATA_SECTION ".section .rodata\n"
+  #define _RODATA_SECTION ".pushsection .rodata\n"
   #define _SYM(name) #name
 #endif
 
@@ -42,7 +42,7 @@ _SYM(name) ":\n"                                \
 "  emit_char_" #mapname " '\\c'\n"              \
 ".endr\n"                                       \
 ".byte 0x00\n"                                  \
-".previous\n"                                   \
+".popsection\n"                                 \
 );                                              \
 
 #define MAPPED_STRING(mapname, name, chars)     \
@@ -54,7 +54,7 @@ _SYM(name) ":\n"                                \
 "  emit_char_" #mapname " '\\c'\n"              \
 ".endr\n"                                       \
 ".byte 0x00\n"                                  \
-".previous\n"                                   \
+".popsection\n"                                 \
 );                                              \
 extern const uint8_t name[sizeof(#chars) - 1]
 

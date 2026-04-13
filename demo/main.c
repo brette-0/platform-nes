@@ -5,10 +5,16 @@
 uint8_t port1;
 uint8_t port2;
 RESET() {
-    FlushVideoRAM(0);
-
-    WriteBufferToVideoMemory(0, SIZED_OBJ(msg_hi), 0);
-    SetScroll(0, 0);
+    // FlushVideoRAM(0);
+    //
+    // WriteBufferToVideoMemory(
+    //     (VIEWPORT_X - sizeof(msg_hi)) >> 1,
+    //     VIEWPORT_Y >> 1,
+    //     SIZED_OBJ(msg_hi),
+    //     0
+    // );
+    //
+    // SetScroll(0, 0);
 
     AudioInit();
     TrackPlay(0);

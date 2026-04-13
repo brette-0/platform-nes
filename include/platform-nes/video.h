@@ -113,8 +113,8 @@ void WaitForPresent();
 void EnableRendering(uint8_t ppuMask);
 
 #ifdef TARGET_NES
-#define VIEWPORT_X  256
-#define VIEWPORT_Y  240
+#define VIEWPORT_X  32
+#define VIEWPORT_Y  30
 #else
 extern const SDL_DisplayMode* mode;
 
@@ -151,7 +151,9 @@ void SetScroll(uint16_t x, uint16_t y);
  * @param sBuffer   size of source buffer
  * @param polarity  writes horizontal or vertical
  */
-void WriteBufferToVideoMemory(const uint16_t offset, const uint8_t* source, uint8_t sBuffer, uint8_t polarity);
+void WriteBufferToVideoMemory(
+  const uint16_t x, const uint16_t y, const uint8_t* source, uint8_t sBuffer, uint8_t polarity
+);
 
 /**
  * Uses mirror information to decide length of information required and polarity
