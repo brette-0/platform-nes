@@ -90,6 +90,7 @@ static void GenerateBackground() {
             SDL_TEXTUREACCESS_STREAMING, vpw, vph
         );
         if (!bgTexture) return;
+        SDL_SetTextureScaleMode(bgTexture, SDL_SCALEMODE_NEAREST);
     }
 
     void *raw;
@@ -156,10 +157,7 @@ static void GenerateBackground() {
 
     SDL_UnlockTexture(bgTexture);
 
-    const SDL_FRect dst = {
-        0, 0, (float)(vpw * scale), (float)(vph * scale)
-    };
-    SDL_RenderTexture(renderer, bgTexture, NULL, &dst);
+    SDL_RenderTexture(renderer, bgTexture, NULL, NULL);
 }
 
 #pragma endregion
