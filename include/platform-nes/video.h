@@ -157,4 +157,8 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uin
 
 void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), uint8_t amt, uint8_t polarity);
 
+void WriteBufferToAttributeMemory(
+  const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
+);
+
 #endif

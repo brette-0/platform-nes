@@ -22,6 +22,8 @@ RESET() {
             i + 1, 2,
             GetCurrentWrite, 28, 1
         );
+
+        WriteBufferToAttributeMemory(i & ~3, 2, AttributeBuffer, 8, 1);
     }
 
     SetScroll(0, 0);

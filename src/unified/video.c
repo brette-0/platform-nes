@@ -217,6 +217,16 @@ inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
     return (nt_h + nt_v * (VIEWPORT_X < 64 ? 2 : (VIEWPORT_X + 31) / 32)) * 0x400 + row * 32 + col;
 }
 
+inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
+    uint16_t nt_h = x / 32;
+    uint16_t nt_v = y / 30;
+    uint16_t col  = x % 32;
+    uint16_t row  = y % 30;
+
+    return (nt_h + nt_v * (VIEWPORT_X < 64 ? 2 : (VIEWPORT_X + 31) / 32)) * 0x400
+         + 0x3C0 + (row / 4) * 8 + (col / 4);
+}
+
 void WriteBufferToVideoMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 ) {
@@ -241,5 +251,14 @@ void WriteProviderToVideoMemory(
     const uint16_t offset = xy_to_nt_addr(x, y);
     for (uint8_t i = 0; i < amt; i++) {
         VideoRAM[offset + i * (ppuCtrl & POLARITY ? 32 : 1)] = fn(i);
+    }
+}
+
+void WriteBufferToAttributeMemory(
+    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
+) {
+    const uint16_t offset = xy_to_at_addr(x, y);
+    for (uint8_t i = 0; i < sBuffer; i++) {
+        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 8 : 1)] = source[i];
     }
 }

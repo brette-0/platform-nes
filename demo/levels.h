@@ -7,6 +7,8 @@ extern const uint8_t LevelDataLengths[];
 extern const uint8_t LevelDataAttributes[];
 extern uint8_t hunk_remaining;
 extern uint8_t level_data_index;
+extern uint8_t attr_column;
+extern uint8_t AttributeBuffer[8];
 uint8_t GetNextWrite(const uint8_t step);
 uint8_t GetCurrentWrite(const uint8_t step);
 #endif

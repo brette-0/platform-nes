@@ -12,12 +12,22 @@ uint8_t SPPUCTRL;
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
     uint16_t base = 0x2000;
-    uint16_t nt_h = ((x >> 8) & 1) << 10;   // +$0400 if NT1/NT3
-    uint16_t nt_v = (y / 30) << 11;          // +$0800 if NT2/NT3
-    uint16_t col  = x & 0x1F;                // 0-31 tile column
-    uint16_t row  = (y % 30);                // 0-29 tile row within NT
+    uint16_t nt_h = ((x >> 5) & 1) << 10;
+    uint16_t nt_v = (y / 30) << 11;
+    uint16_t col  = x & 0x1F;
+    uint16_t row  = (y % 30);
 
     return base + nt_h + nt_v + row * 32 + col;
+}
+
+inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
+    uint16_t base = 0x2000;
+    uint16_t nt_h = ((x >> 5) & 1) << 10;
+    uint16_t nt_v = (y / 30) << 11;
+    uint16_t col  = x & 0x1F;
+    uint16_t row  = (y % 30);
+
+    return base + nt_h + nt_v + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
 void WaitForPresent() {
@@ -113,5 +123,31 @@ void WriteProviderToVideoMemory(
 
     for (uint8_t i = 0; i < amt; i++) {
         POKE(PPUDATA, fn(i));
+    }
+}
+
+void WriteBufferToAttributeMemory(
+    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
+) {
+    const uint16_t offset = xy_to_at_addr(x, y);
+
+    SPPUCTRL &= ~POLARITY;
+    POKE(PPUCTRL, SPPUCTRL);
+
+    PEEK(PPUSTATUS);
+    POKE(PPUADDR, (uint8_t)(offset >> 8));
+    POKE(PPUADDR, (uint8_t)(offset & 0xFF));
+
+    for (uint8_t i = 0; i < sBuffer; i++) {
+        POKE(PPUDATA, source[i]);
+        if (SPPUCTRL & POLARITY) {
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+            PEEK(PPUDATA);
+        }
     }
 }
