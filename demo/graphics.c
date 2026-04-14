@@ -6,11 +6,45 @@ CHARACTER_ROM(crate, "../demo./chr/all");
 
 CHARACTER_ROM_ALIGN(0x2000);                // gen full (SDL3 compat)
 
-CHARMAP(generic,                            // default char map
-    CM('h', 0x11)
-    CM('i', 0x12)
+CHARMAP(generic,                            // default char mapCM('A', 0x0a)
+    CM('0', 0x00)
+    CM('1', 0x01)
+    CM('2', 0x02)
+    CM('3', 0x03)
+    CM('4', 0x04)
+    CM('5', 0x05)
+    CM('6', 0x06)
+    CM('7', 0x07)
+    CM('8', 0x08)
+    CM('9', 0x09)
+    CM('A', 0x0a)
+    CM('B', 0x0b)
+    CM('C', 0x0c)
+    CM('D', 0x0d)
+    CM('E', 0x0e)
+    CM('F', 0x0f)
+    CM('G', 0x10)
+    CM('H', 0x11)
+    CM('I', 0x12)
+    CM('J', 0x13)
+    CM('K', 0x14)
+    CM('L', 0x15)
+    CM('M', 0x16)
+    CM('N', 0x17)
+    CM('O', 0x18)
+    CM('P', 0x19)
+    CM('Q', 0x1a)
+    CM('R', 0x1b)
+    CM('S', 0x1c)
+    CM('T', 0x1d)
+    CM('U', 0x1e)
+    CM('W', 0x1f)
+    CM('V', 0x20)
+    CM('X', 0x21)
+    CM('Y', 0x22)
+    CM('Z', 0x23)
 );
 
-MAPPED_STRING(generic, msg_hi, hi);
+MAPPED_STRING(generic, msg_mario, MARIO);
 
 const uint8_t BGColours[] = {0x31, 0x11, 0x21, 0x0e};

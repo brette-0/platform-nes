@@ -10,8 +10,9 @@ RESET() {
     FlushVideoRAM(0x24, 0x00);
 
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
+    WriteBufferToVideoMemory(VIEWPORT_X - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
-    for (uint8_t i = 0; i < VIEWPORT_X; i += 2) {
+    for (uint8_t i = 0; i < 2 + VIEWPORT_X; i += 2) {
         WriteProviderToVideoMemory(
             i, 2,
             GetNextWrite, 28, 1

@@ -17,16 +17,16 @@ const uint8_t LevelDataLengths[] = {
 #include "tiled/include/1-1_s"
 };
 
-const uint8_t LevelDataAttributes[] = {};
-
 __attribute__((always_inline))
 uint8_t GetNextMetaTile() {
-    const uint8_t tile = LevelData[level_data_index];       \
-    if (!hunk_remaining) {                                  \
-        level_data_index++;                                 \
-        hunk_remaining = LevelDataLengths[level_data_index];\
-    } hunk_remaining--;
-
+    if (!hunk_remaining) {
+        hunk_remaining = LevelDataLengths[level_data_index];
+    }
+    const uint8_t tile = LevelData[level_data_index];
+    hunk_remaining--;
+    if (!hunk_remaining) {
+        level_data_index++;
+    }
     return tile;
 }
 
