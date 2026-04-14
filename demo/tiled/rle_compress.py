@@ -26,7 +26,8 @@ def __main__() -> None:
             tile_data.extend(raw_data[x::width])
 
         out_s_list : list[str] = []
-        out_c_list : list[str]= []
+        out_c_list : list[str] = []
+        out_a_list : list[str] = []
         
         ctx  : int = tile_data[0]
         size : int = 0
@@ -44,6 +45,7 @@ def __main__() -> None:
 
         out_c = ", ".join(out_c_list)
         out_s = ", ".join(out_s_list)
+        out_a = ", ".join(out_a_list)
 
         with open(output_path / f"{tsj.stem}_c", "w") as f:
             f.write(out_c)
@@ -51,5 +53,7 @@ def __main__() -> None:
         with open(output_path / f"{tsj.stem}_s", "w") as f:
             f.write(out_s)
 
+        with open(output_path / f"{tsj.stem}_a", "w") as f:
+            f.write(out_a)
 if __name__ == "__main__":
     __main__()

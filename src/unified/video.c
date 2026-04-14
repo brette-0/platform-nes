@@ -209,12 +209,12 @@ void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
 }
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
-    uint16_t nt_h = ((x >> 8) & 1) << 10;
-    uint16_t nt_v = (y / 30) << 11;
-    uint16_t col  = x & 0x1F;
-    uint16_t row  = (y % 30);
+    uint16_t nt_h = x / 32;
+    uint16_t nt_v = y / 30;
+    uint16_t col  = x % 32;
+    uint16_t row  = y % 30;
 
-    return nt_h + nt_v + row * 32 + col;
+    return (nt_h + nt_v * (VIEWPORT_X < 64 ? 2 : (VIEWPORT_X + 31) / 32)) * 0x400 + row * 32 + col;
 }
 
 void WriteBufferToVideoMemory(

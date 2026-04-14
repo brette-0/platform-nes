@@ -11,15 +11,17 @@ RESET() {
 
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
 
-    WriteProviderToVideoMemory(
-        0, 2,
-        GetNextWrite, 14, 1
-    );
+    for (uint8_t i = 0; i < VIEWPORT_X; i += 2) {
+        WriteProviderToVideoMemory(
+            i, 2,
+            GetNextWrite, 28, 1
+        );
 
-    WriteProviderToVideoMemory(
-    0, 3,
-        GenCurrentWrite, 14, 1
-    );
+        WriteProviderToVideoMemory(
+            i + 1, 2,
+            GetCurrentWrite, 28, 1
+        );
+    }
 
     SetScroll(0, 0);
 

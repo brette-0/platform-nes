@@ -37,6 +37,6 @@ uint8_t GetNextWrite(const uint8_t step) {
     return Metatiles[MetatileBuffer[step >> 1] << 2 | step & 1];
 }
 
-uint8_t GenCurrentWrite(const uint8_t step) {
+uint8_t GetCurrentWrite(const uint8_t step) {
     return Metatiles[MetatileBuffer[step >> 1] << 2 | 2 | step & 1];
 }
