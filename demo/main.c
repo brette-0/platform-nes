@@ -6,6 +6,8 @@
 uint8_t port1;
 uint8_t port2;
 
+struct sprite_t OAMBuffer[64];
+
 RESET() {
     FlushVideoRAM(0x24, 0x00);
 

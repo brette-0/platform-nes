@@ -262,3 +262,7 @@ void WriteBufferToAttributeMemory(
         VideoRAM[offset + i * (ppuCtrl & POLARITY ? 8 : 1)] = source[i];
     }
 }
+
+void RefreshSprites(struct sprite_t* pBuffer) {
+    // TODO: write something here
+}

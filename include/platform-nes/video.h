@@ -41,8 +41,18 @@ _CHR_PUSH                                      \
 _CHR_POP                                       \
 )
 
+#ifndef TARGET_NES
+typedef uint16_t oam_t;
+#else
+typedef uint8_t oam_t;
+#endif
 
-
+struct sprite_t {
+  oam_t x;
+  oam_t y;
+  uint8_t attributes;
+  uint8_t tile;
+} sprite_t;
 
 #ifdef TARGET_NES
   #define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
@@ -160,5 +170,7 @@ void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint
 void WriteBufferToAttributeMemory(
   const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 );
+
+void RefreshSprites(struct sprite_t* pBuffer);
 
 #endif

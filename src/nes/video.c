@@ -127,7 +127,7 @@ void WriteProviderToVideoMemory(
 }
 
 void WriteBufferToAttributeMemory(
-    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
+    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, const uint8_t polarity
 ) {
     const uint16_t offset = xy_to_at_addr(x, y);
 
@@ -140,7 +140,7 @@ void WriteBufferToAttributeMemory(
 
     for (uint8_t i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
-        if (SPPUCTRL & POLARITY) {
+        if (polarity) {
             PEEK(PPUDATA);
             PEEK(PPUDATA);
             PEEK(PPUDATA);
@@ -150,4 +150,8 @@ void WriteBufferToAttributeMemory(
             PEEK(PPUDATA);
         }
     }
+}
+
+void RefreshSprites(struct sprite_t* pBuffer) {
+    POKE(OAMDMA, (uint16_t)pBuffer >> 8);
 }
