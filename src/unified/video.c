@@ -233,10 +233,13 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, con
 }
 
 void WriteProviderToVideoMemory(
-    const uint16_t x, const uint16_t y, uint8_t (*fn)(void), const uint8_t amt, const uint8_t polarity
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), const uint8_t amt, const uint8_t polarity
 ) {
+    ppuCtrl &= ~POLARITY;
+    if (polarity) ppuCtrl |= POLARITY;
+
     const uint16_t offset = xy_to_nt_addr(x, y);
     for (uint8_t i = 0; i < amt; i++) {
-        VideoRAM[offset + i] = fn();
+        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 32 : 1)] = fn(i);
     }
 }

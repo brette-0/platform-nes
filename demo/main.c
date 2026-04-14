@@ -3,10 +3,9 @@
 #include "graphics.h"
 #include "levels.h"
 
-uint8_t MetatileBuffer[14];
-
 uint8_t port1;
 uint8_t port2;
+
 RESET() {
     FlushVideoRAM(0x24, 0x00);
 
@@ -14,7 +13,12 @@ RESET() {
 
     WriteProviderToVideoMemory(
         0, 2,
-        GetNextTile, 16, 1
+        GetNextWrite, 14, 1
+    );
+
+    WriteProviderToVideoMemory(
+    0, 3,
+        GenCurrentWrite, 14, 1
     );
 
     SetScroll(0, 0);

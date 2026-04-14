@@ -99,14 +99,19 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, con
 }
 
 void WriteProviderToVideoMemory(
-    const uint16_t x, const uint16_t y, uint8_t (*fn)(void), const uint8_t amt, const uint8_t polarity
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), const uint8_t amt, const uint8_t polarity
 ) {
     const uint16_t offset = xy_to_nt_addr(x, y);
+    SPPUCTRL &= ~POLARITY;
+    if (polarity) SPPUCTRL |= POLARITY;
+
+    POKE(PPUCTRL, SPPUCTRL);
+
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
 
-    for (uint8_t _ = 0; _ < amt; _++) {
-        POKE(PPUDATA, fn());
+    for (uint8_t i = 0; i < amt; i++) {
+        POKE(PPUDATA, fn(i));
     }
 }
