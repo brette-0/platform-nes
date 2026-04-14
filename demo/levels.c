@@ -31,7 +31,7 @@ uint8_t GetNextMetaTile() {
 }
 
 uint8_t GetNextWrite(const uint8_t step) {
-    if (step & 1) {
+    if (~step & 1) {
         MetatileBuffer[step >> 1] = GetNextMetaTile();
     }
     return Metatiles[MetatileBuffer[step >> 1] << 2 | step & 1];
