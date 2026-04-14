@@ -231,3 +231,12 @@ void SetScroll(uint16_t x, uint16_t y) {
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
     memcpy(paletteRAM + offset, source, sBuffer);
 }
+
+void WriteProviderToVideoMemory(
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(void), const uint8_t amt, const uint8_t polarity
+) {
+    const uint16_t offset = xy_to_nt_addr(x, y);
+    for (uint8_t i = 0; i < amt; i++) {
+        VideoRAM[offset + i] = fn();
+    }
+}

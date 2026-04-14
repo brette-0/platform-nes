@@ -154,4 +154,6 @@ void FlushVideoRAM(const uint8_t nt, const uint8_t at);
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uint8_t sBuffer);
 
+void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(void), uint8_t amt, uint8_t polarity);
+
 #endif

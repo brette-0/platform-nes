@@ -78,7 +78,7 @@ void SetScroll(uint16_t x, uint16_t y) {
 void WriteBufferToVideoMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 ) {
-    uint16_t offset = xy_to_nt_addr(x, y);
+    const uint16_t offset = xy_to_nt_addr(x, y);
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
@@ -95,5 +95,18 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, con
 
     for (uint8_t i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
+    }
+}
+
+void WriteProviderToVideoMemory(
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(void), const uint8_t amt, const uint8_t polarity
+) {
+    const uint16_t offset = xy_to_nt_addr(x, y);
+    PEEK(PPUSTATUS);
+    POKE(PPUADDR, (uint8_t)(offset >> 8));
+    POKE(PPUADDR, (uint8_t)(offset & 0xFF));
+
+    for (uint8_t _ = 0; _ < amt; _++) {
+        POKE(PPUDATA, fn());
     }
 }

@@ -1,6 +1,9 @@
 ﻿#include <platform-nes/platform-nes.h>
 #include "main.h"
 #include "graphics.h"
+#include "levels.h"
+
+uint8_t MetatileBuffer[14];
 
 uint8_t port1;
 uint8_t port2;
@@ -9,11 +12,9 @@ RESET() {
 
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
 
-    WriteBufferToVideoMemory(
-        (VIEWPORT_X - sizeof(msg_hi)) >> 1,
-        VIEWPORT_Y >> 1,
-        SIZED_OBJ(msg_hi),
-        0
+    WriteProviderToVideoMemory(
+        0, 2,
+        GetNextTile, 16, 1
     );
 
     SetScroll(0, 0);
