@@ -5,10 +5,13 @@
 
 uint16_t xScroll;
 uint16_t yScroll;
+uint8_t* paletteRAM;
+static uint8_t  ppuMask;
+static SDL_Texture *bgTexture;
+static uint8_t ppuCtrl;
 
 extern const uint8_t *patternTable;
 
-/* NES 2C02 NTSC master palette — 64 entries, ARGB8888 */
 static const uint32_t nes_rgb[64] = {
     0xFF626262, 0xFF012090, 0xFF1B0CA4, 0xFF3B009E,
     0xFF520080, 0xFF5A004E, 0xFF521610, 0xFF3F2E00,
@@ -28,25 +31,8 @@ static const uint32_t nes_rgb[64] = {
     0xFFB4E8F0, 0xFFB8B8B8, 0xFF000000, 0xFF000000,
 };
 
-/*
- * Palette RAM — 32 bytes, same layout as PPU $3F00-$3F1F.
- * Bytes  0-15: four background palettes (4 colours each).
- * Bytes 16-31: four sprite palettes.
- * Default is greyscale so something is visible out of the box.
- */
-uint8_t* paletteRAM;
 
-static uint8_t  renderMask;
-static SDL_Texture *bgTexture;
 
-/*
- * PE/COFF: anchor _chr_rom at the very start of the chr_rom section.
- * The library emits into chr_rom$a; CHARACTER_ROM() emits into chr_rom$m.
- * The linker merges them alphabetically by suffix, so $a is always first.
- *
- * ELF / Mach-O don't need this — the linker provides the boundary
- * symbol automatically (__start_chr_rom / section$start$...).
- */
 #ifdef _WIN32
 __asm__(
     ".pushsection chr_rom$a,\"dr\"\n"
@@ -63,8 +49,9 @@ uint32_t vblank_tick(void *userdata, SDL_TimerID id, uint32_t interval) {
 
 static uint64_t last_frame;
 
-void EnableRendering(uint8_t ppuMask) {
-    renderMask = ppuMask;
+void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_) {
+    ppuMask = ppuMask_;
+    ppuCtrl = ppuCtrl_;
 }
 
 static void toggle_fullscreen(void) {
@@ -83,7 +70,6 @@ static void GenerateBackground() {
     const int vpw = VIEWPORT_X * 8;
     const int vph = VIEWPORT_Y * 8;
 
-    /* lazy-create the streaming texture */
     if (!bgTexture) {
         bgTexture = SDL_CreateTexture(
             renderer, SDL_PIXELFORMAT_ARGB8888,
@@ -100,13 +86,8 @@ static void GenerateBackground() {
     uint32_t *pixels = raw;
     const int stride = pitch / 4;
 
-    /*
-     * Nametable geometry.
-     * Standard (viewport < 512 px): 2 NTs side-by-side  = 512 × 240.
-     * Extended: one NT per 256 px of viewport width.
-     */
     const int nt_cols = vpw < 512 ? 2 : (vpw + 255) / 256;
-    const int world_w = nt_cols * 256;   /* pixels */
+    const int world_w = nt_cols * 256;
 
     for (int py = 0; py < vph; py++) {
         const int world_h = 240;
@@ -123,14 +104,11 @@ static void GenerateBackground() {
             const int nt_col    = tile_col / 32;
             const int fine_x    = wx & 7;
 
-            /* VRAM offset for this nametable */
             const int nt_off = (nt_col + nt_row * nt_cols) * 0x400;
 
-            /* tile index from the nametable */
             const uint8_t tile_id =
                 VideoRAM[nt_off + local_row * 32 + local_col];
 
-            /* attribute table: each byte covers a 4×4-tile region */
             const uint8_t attr =
                 VideoRAM[nt_off + 0x3C0
                          + local_row / 4 * 8
@@ -139,15 +117,13 @@ static void GenerateBackground() {
                             + (local_row >> 1 & 1) * 4;
             const int pal = attr >> shift & 3;
 
-            /* decode the CHR tile (two-bitplane NES format) */
-            const int     chr_addr = tile_id * 16 + fine_y;
+            const int     chr_addr = (!!(ppuCtrl & BG_ADDR) * 0x1000) + tile_id * 16 + fine_y;
             const uint8_t lo = patternTable[chr_addr];
             const uint8_t hi = patternTable[chr_addr + 8];
             const int     bit  = 7 - fine_x;
             const int     cidx = lo >> bit & 1
                                | (hi >> bit & 1) << 1;
 
-            /* colour 0 is always the universal background */
             const uint8_t nes_col =
                 cidx ? paletteRAM[pal * 4 + cidx] : paletteRAM[0];
 
@@ -181,12 +157,10 @@ void WaitForPresent() {
 
                 SDL_Keymod mod = SDL_GetModState();
 
-                // Alt + Enter toggle fullscreen
                 if (key == SDLK_RETURN && (mod & SDL_KMOD_ALT)) {
-                    toggle_fullscreen(); // your function
+                    toggle_fullscreen();
                 }
 
-                // F11 toggle fullscreen (common convention)
                 if (key == SDLK_F11) {
                     toggle_fullscreen();
                 }
@@ -201,7 +175,6 @@ void WaitForPresent() {
         }
     }
 
-    // sleep the exact remaining time
     uint64_t elapsed = SDL_GetTicksNS() - last_frame;
     uint64_t target = 16666667;
     if (elapsed < target) {
@@ -210,7 +183,7 @@ void WaitForPresent() {
     last_frame = SDL_GetTicksNS();
 
     nmi();
-    if (renderMask & BG){
+    if (ppuMask & BG){
         GenerateBackground();
         SDL_RenderPresent(renderer);
     } else {
@@ -219,20 +192,27 @@ void WaitForPresent() {
 
 }
 
-void FlushVideoRAM(const uint8_t byte) {
-    for (uint16_t i = 0;
-        mode->w / scale < 512 ? i < 0x800 : i < mode->w / scale * 0x400;
-        i++
+void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
+
+    for (uint16_t page = 0;
+        mode->w / scale < 512 ? page < 2 : page < mode->w / scale;
+        page++
     ) {
-        VideoRAM[i] = byte;
+        for (uint16_t i = 0; i < 0x3c0; i++) {
+            VideoRAM[page * 0x400 + i] = nt;
+        }
+
+        for (uint16_t i = 0; i < 0x40; i++) {
+            VideoRAM[page * 0x400 + 0x3c0 + i] = at;
+        }
     }
 }
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
-    uint16_t nt_h = ((x >> 8) & 1) << 10;   // +$0400 if NT1/NT3
-    uint16_t nt_v = (y / 30) << 11;          // +$0800 if NT2/NT3
-    uint16_t col  = x & 0x1F;                // 0-31 tile column
-    uint16_t row  = (y % 30);                // 0-29 tile row within NT
+    uint16_t nt_h = ((x >> 8) & 1) << 10;
+    uint16_t nt_v = (y / 30) << 11;
+    uint16_t col  = x & 0x1F;
+    uint16_t row  = (y % 30);
 
     return nt_h + nt_v + row * 32 + col;
 }

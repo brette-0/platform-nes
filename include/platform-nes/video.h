@@ -9,14 +9,6 @@
 
 extern const uint16_t PatternTables;
 
-/*
- * Section directives per target.
- *
- * NES  : .chr_rom       — consumed by the mapper hardware
- * Win  : chr_rom$m      — PE/COFF, sorts after the library's $a anchor
- * macOS: __DATA,chr_rom — Mach-O segment,section pair
- * Linux: chr_rom        — ELF, C-identifier name so linker emits __start_
- */
 #ifdef TARGET_NES
   #define _CHR_PUSH  ".pushsection .chr_rom,\"a\"\n"
 #elif defined(_WIN32)
@@ -62,18 +54,9 @@ _CHR_POP                                       \
   #define CHARACTER_ROM_ALIGN(addr) __attribute__((section("chr_rom"), aligned(addr)))
 #endif
 
-/* Per-asset accessors */
 #define CHR(name)       ((const uint8_t *)(name##_start))
 #define CHR_SIZE(name)  ((size_t)(name##_end - name##_start))
 
-/*
- * CHR_ROM — pointer to byte 0 of the entire character ROM hunk.
- *
- * Win  : _chr_rom is emitted by the library into chr_rom$a (sorts first).
- * macOS: linker-provided section boundary symbol.
- * Linux: linker-provided __start_chr_rom for C-identifier sections.
- * NES  : not exposed (PPU addresses CHR ROM directly via hardware).
- */
 #ifndef TARGET_NES
   #if defined(_WIN32)
     extern const uint8_t _chr_rom[];
@@ -98,6 +81,12 @@ enum PPU {
     OAMDMA      = 0x4014
 };
 
+enum CTRL {
+    BG_ADDR     = 0x10,
+    SPRITE_ADDR = 0x08
+};
+
+
 enum MASK {
     BG        = 0x08,
     SPRITE    = 0x10,
@@ -106,7 +95,7 @@ enum MASK {
 };
 
 void WaitForPresent();
-void EnableRendering(uint8_t ppuMask);
+void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_);
 
 #ifdef TARGET_NES
 #define VIEWPORT_X  32
@@ -161,11 +150,7 @@ void WriteBufferToVideoMemory(
  */
 void WriteOutsideOfViewPort(int8_t distance, uint8_t* source);
 
-/**
- * Clears Video Memory
- * @param byte    the byte considered to be the 'empty'
- */
-void FlushVideoRAM(uint8_t byte);
+void FlushVideoRAM(const uint8_t nt, const uint8_t at);
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uint8_t sBuffer);
 

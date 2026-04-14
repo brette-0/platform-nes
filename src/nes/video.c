@@ -1,12 +1,14 @@
 ﻿#include <platform-nes/video.h>
 #include <platform-nes/technology.h>
-#include <platform-nes/shadow.h>
 #include <stdint.h>
 
 const uint16_t PatternTables    = 0;
 const uint16_t NameTables       = 0x2000;
 const uint16_t PaletteTables    = 0x3f00;
-const uint16_t nVideoRam        = 0x1000;
+const uint16_t nVideoRam        = 0x800;
+uint16_t xScroll = 0;
+uint16_t yScroll = 0;
+uint8_t SPPUCTRL;
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
     uint16_t base = 0x2000;
@@ -22,18 +24,30 @@ void WaitForPresent() {
     while (1) {}
 }
 
-void EnableRendering(uint8_t ppuMask) {
-    *(volatile uint8_t*)PPUCTRL = 0x80;
-    *(volatile uint8_t*)PPUMASK = ppuMask;
+void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_) {
+    *(volatile uint8_t*)PPUCTRL = 0x80 | ppuCtrl_;
+    *(volatile uint8_t*)PPUMASK = ppuMask_;
 }
 
-void FlushVideoRAM(const uint8_t byte) {
+void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
     PEEK(PPUSTATUS);
     POKE(PPUADDR, NameTables >> 8);
     POKE(PPUADDR, NameTables & 0xFF);
 
-    for (uint16_t i = 0; i < nVideoRam; i++) {
-        POKE(PPUDATA, byte);
+    for (uint8_t page = 0; page < nVideoRam / 0x400; page++) {
+        for (uint8_t nt_hunk = 0; nt_hunk < 0xf0; nt_hunk++) {
+            POKE(PPUDATA, nt);
+            POKE(PPUDATA, nt);
+            POKE(PPUDATA, nt);
+            POKE(PPUDATA, nt);
+        }
+        for (uint8_t at_hunk = 0; at_hunk < 0x10; at_hunk++) {
+            POKE(PPUDATA, at);
+            POKE(PPUDATA, at);
+            POKE(PPUDATA, at);
+            POKE(PPUDATA, at);
+
+        }
     }
 }
 
@@ -55,7 +69,7 @@ void SetScroll(uint16_t x, uint16_t y) {
     uint8_t nt = x >> 8 & 0x01
                | y >> 7 & 0x02;
 
-    POKE(PPUSCROLL, SPPUCRTL & 0xFC | nt);
+    POKE(PPUSCROLL, SPPUCTRL & 0xFC | nt);
 
     POKE(PPUSCROLL, (uint8_t)(x & 0xFF));
     POKE(PPUSCROLL, (uint8_t)(y & 0xFF));

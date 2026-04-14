@@ -5,7 +5,7 @@
 uint8_t port1;
 uint8_t port2;
 RESET() {
-    FlushVideoRAM(0);
+    FlushVideoRAM(0x24, 0x00);
 
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
 
@@ -20,7 +20,7 @@ RESET() {
 
     AudioInit();
     TrackPlay(0);
-    EnableRendering(BG_L);
+    EnableRendering(BG_ADDR, BG_L);
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
         if (port1 & START) {
