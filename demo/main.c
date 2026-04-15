@@ -4,6 +4,7 @@
 #include "graphics.h"
 #include "levels.h"
 #include "metasprites.h"
+#include "handlers.h"
 
 #define SPRITE_STRIDE  sizeof(struct sprite_t)
 #define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
@@ -87,6 +88,10 @@ NMI() {
     RefreshSprites();
     PollControllers(&port1, &port2);
     AudioUpdate();
+}
+
+IRQ(SPRITE_ZERO) {
+    SetScroll(1, 0);
 }
 
 static uint8_t Clear(uint16_t _) {

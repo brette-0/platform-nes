@@ -1,0 +1,5 @@
+IRQHandler(id, behavior) {}
+
+nes:
+
+IRQHandler(0, {}

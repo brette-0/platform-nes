@@ -8,6 +8,10 @@
 #include <platform-nes/video.h>
 #include "../unified/internal.h"
 
+#ifndef PROJECT_NAME
+#define PROJECT_NAME "Super Brette Bros"
+#endif
+
 SDL_Window *window;
 SDL_Renderer *renderer;
 SDL_TimerID timer_id;
@@ -61,7 +65,7 @@ void init() {
 #endif
 
 
-    if (!SDL_CreateWindowAndRenderer("My Game", mode->w >> 1, mode->h >> 1, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer(PROJECT_NAME, mode->w >> 1, mode->h >> 1, 0, &window, &renderer)) {
         SDL_Log("Window creation failed: %s", SDL_GetError());
         return;
     }

@@ -1,5 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.20)
+set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_NAME define")
 add_compile_definitions(LANDSCAPE)
+add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
 # ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------
@@ -111,7 +113,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = 1
     add_custom_command(
             OUTPUT ${PASS1_ELF}
             COMMAND ${CMAKE_C_COMPILER}
-            -Os -DTARGET_NES -DLANDSCAPE
+            -Os -DTARGET_NES -DLANDSCAPE "-DPROJECT_NAME=${GAME_NAME}"
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_BINARY_DIR}/famistudio_include
             ${DEMO_C_SOURCES}

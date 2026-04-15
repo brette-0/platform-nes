@@ -32,5 +32,6 @@ extern int quit;
 #include "input.h"
 #include "video.h"
 #include "audio.h"
+#include "interrupts.h"
 
 #endif // PLATFORM_NES_LIBRARY_H
