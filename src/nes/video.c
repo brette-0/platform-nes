@@ -152,6 +152,8 @@ void WriteBufferToAttributeMemory(
     }
 }
 
-void RefreshSprites(struct sprite_t* pBuffer) {
-    POKE(OAMDMA, (uint16_t)pBuffer >> 8);
+oamBuffer_t oamBuffer __attribute__((aligned(256)));
+
+void RefreshSprites(void) {
+    POKE(OAMDMA, (uint16_t)oamBuffer >> 8);
 }

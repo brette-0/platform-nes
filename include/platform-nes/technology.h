@@ -66,4 +66,22 @@ extern const uint8_t name[sizeof(#chars)]
 
 #define SIZED_OBJ(obj) obj, sizeof(obj)
 
+#include <stdint.h>
+
+/**
+ * General-purpose byte copy from buffer to (target + offset) with stride.
+ * Writes buffer[i] to target[offset + i * step] for i in [0, sBuffer).
+ * On unified builds, if `target` is &oamBuffer, routing switches to the
+ * OAM growth handler.
+ */
+void PopulateFromBuffer(uint8_t* target, uint16_t offset,
+                        const uint8_t* buffer, uint16_t sBuffer, uint16_t step);
+
+/**
+ * General-purpose fill from a provider function with stride.
+ * Writes fn(i) to target[offset + i * step] for i in [0, amt).
+ */
+void PopulateFromProvider(uint8_t* target, uint16_t offset,
+                          uint8_t (*fn)(uint16_t), uint16_t amt, uint16_t step);
+
 #endif

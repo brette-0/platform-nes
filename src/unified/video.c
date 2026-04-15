@@ -1,6 +1,8 @@
 ﻿#include "../../include/platform-nes/video.h"
 #include "../unified/internal.h"
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <SDL3/SDL.h>
 
 uint16_t xScroll;
@@ -66,6 +68,63 @@ static void toggle_fullscreen(void) {
 
 #pragma region PPU_EMU
 
+static uint8_t* bgOpaque;
+static int      bgOpaqueW, bgOpaqueH;
+
+static void ensure_bg_opaque(int w, int h) {
+    if (bgOpaque && bgOpaqueW == w && bgOpaqueH == h) return;
+    free(bgOpaque);
+    bgOpaque = malloc((size_t)w * h);
+    bgOpaqueW = w; bgOpaqueH = h;
+}
+
+static void GenerateSprites(uint32_t* pixels, int stride, int vpw, int vph) {
+    if (!(ppuMask & SPRITE)) return;
+    if (!oamBuffer.data || oamBuffer.count == 0) return;
+
+    const int show_left = ppuMask & 0x04;
+    const int spr_base  = (ppuCtrl & SPRITE_ADDR) ? 0x1000 : 0x0000;
+
+    /* Lower OAM index = higher priority on NES; iterate in reverse so
+     * low-index sprites overwrite high-index ones. */
+    for (int s = (int)oamBuffer.count - 1; s >= 0; s--) {
+        const struct sprite_t spr = oamBuffer.data[s];
+        const int     sx     = (int)spr.x;
+        const int     sy     = (int)spr.y;
+        const uint8_t tile   = spr.tile;
+        const uint8_t attr   = spr.attributes;
+        const int     pal    = attr & 0x03;
+        const int     behind = attr & 0x20;
+        const int     flip_h = attr & 0x40;
+        const int     flip_v = attr & 0x80;
+
+        if (sx >= vpw || sy >= vph) continue;
+        if (sx <= -8 || sy <= -8) continue;
+
+        for (int py = 0; py < 8; py++) {
+            const int dy = sy + py;
+            if (dy < 0 || dy >= vph) continue;
+            const int row = flip_v ? (7 - py) : py;
+            const int addr = spr_base + tile * 16 + row;
+            const uint8_t lo = patternTable[addr];
+            const uint8_t hi = patternTable[addr + 8];
+
+            for (int px = 0; px < 8; px++) {
+                const int dx = sx + px;
+                if (dx < 0 || dx >= vpw) continue;
+                if (!show_left && dx < 8) continue;
+                const int bit  = flip_h ? px : (7 - px);
+                const int cidx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                if (cidx == 0) continue;                           /* transparent */
+                if (behind && bgOpaque[dy * vpw + dx]) continue;   /* BG wins priority */
+
+                const uint8_t nes_col = paletteRAM[0x10 + pal * 4 + cidx];
+                pixels[dy * stride + dx] = nes_rgb[nes_col & 0x3F];
+            }
+        }
+    }
+}
+
 static void GenerateBackground() {
     const int vpw = VIEWPORT_X * 8;
     const int vph = VIEWPORT_Y * 8;
@@ -79,12 +138,28 @@ static void GenerateBackground() {
         SDL_SetTextureScaleMode(bgTexture, SDL_SCALEMODE_NEAREST);
     }
 
+    ensure_bg_opaque(vpw, vph);
+
     void *raw;
     int   pitch;
     if (!SDL_LockTexture(bgTexture, NULL, &raw, &pitch)) return;
 
     uint32_t *pixels = raw;
     const int stride = pitch / 4;
+
+    if (!(ppuMask & BG)) {
+        const uint32_t universal = nes_rgb[paletteRAM[0] & 0x3F];
+        for (int py = 0; py < vph; py++) {
+            for (int px = 0; px < vpw; px++) {
+                pixels[py * stride + px] = universal;
+                bgOpaque[py * vpw + px]  = 0;
+            }
+        }
+        GenerateSprites(pixels, stride, vpw, vph);
+        SDL_UnlockTexture(bgTexture);
+        SDL_RenderTexture(renderer, bgTexture, NULL, NULL);
+        return;
+    }
 
     const int nt_cols = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w = nt_cols * 256;
@@ -128,8 +203,11 @@ static void GenerateBackground() {
                 cidx ? paletteRAM[pal * 4 + cidx] : paletteRAM[0];
 
             pixels[py * stride + px] = nes_rgb[nes_col & 0x3F];
+            bgOpaque[py * vpw + px]  = (cidx != 0);
         }
     }
+
+    GenerateSprites(pixels, stride, vpw, vph);
 
     SDL_UnlockTexture(bgTexture);
 
@@ -183,11 +261,12 @@ void WaitForPresent() {
     last_frame = SDL_GetTicksNS();
 
     nmi();
-    if (ppuMask & BG){
+    if (ppuMask & (BG | SPRITE)) {
         GenerateBackground();
         SDL_RenderPresent(renderer);
     } else {
         SDL_RenderClear(renderer);
+        SDL_RenderPresent(renderer);
     }
 
 }
@@ -263,6 +342,41 @@ void WriteBufferToAttributeMemory(
     }
 }
 
-void RefreshSprites(struct sprite_t* pBuffer) {
-    // TODO: write something here
+oamBuffer_t oamBuffer = { NULL, 0, 0 };
+size_t      sOAM      = 0;
+
+static void oam_grow_to(size_t sprites) {
+    if (sprites <= oamBuffer.cap) return;
+    size_t n = oamBuffer.cap ? oamBuffer.cap * 2 : 64;
+    while (n < sprites) n *= 2;
+    oamBuffer.data = realloc(oamBuffer.data, n * sizeof(struct sprite_t));
+    oamBuffer.cap  = n;
+}
+
+/* Bytes needed to hold `count` strided writes with stride `step`. */
+static size_t strided_bytes(uint16_t count, uint16_t step) {
+    if (count == 0) return 0;
+    return (size_t)(count - 1) * step + 1;
+}
+
+void OAMPopulateFromBuffer(uint16_t offset, const uint8_t* buffer, uint16_t sBuffer, uint16_t step) {
+    size_t last_byte = (size_t)offset + strided_bytes(sBuffer, step);
+    size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
+    oam_grow_to(sprites);
+    uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
+    for (uint16_t i = 0; i < sBuffer; i++) dst[i * step] = buffer[i];
+    if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
+}
+
+void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t amt, uint16_t step) {
+    size_t last_byte = (size_t)offset + strided_bytes(amt, step);
+    size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
+    oam_grow_to(sprites);
+    uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
+    for (uint16_t i = 0; i < amt; i++) dst[i * step] = fn(i);
+    if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
+}
+
+void RefreshSprites(void) {
+    // TODO: upload oamBuffer.data[0..count) to renderer
 }

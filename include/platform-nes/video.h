@@ -2,6 +2,7 @@
 #define VIDEO_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifndef TARGET_NES
 #include <SDL3/SDL_video.h>
@@ -52,7 +53,21 @@ struct sprite_t {
   oam_t y;
   uint8_t attributes;
   uint8_t tile;
-} sprite_t;
+};
+
+#ifdef TARGET_NES
+  typedef struct sprite_t oamBuffer_t[64];
+  #define sOAM 64
+#else
+  typedef struct {
+      struct sprite_t* data;
+      size_t           count;
+      size_t           cap;
+  } oamBuffer_t;
+  extern size_t sOAM;
+#endif
+
+extern oamBuffer_t oamBuffer;
 
 #ifdef TARGET_NES
   #define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
@@ -171,6 +186,6 @@ void WriteBufferToAttributeMemory(
   const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 );
 
-void RefreshSprites(struct sprite_t* pBuffer);
+void RefreshSprites(void);
 
 #endif

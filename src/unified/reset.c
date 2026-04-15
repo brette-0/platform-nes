@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <stdatomic.h>
 #include <stdlib.h>
+#include <assert.h>
 #include <platform-nes/reset.h>
 #include <platform-nes/video.h>
 #include "../unified/internal.h"
@@ -29,6 +30,21 @@ void init() {
     mode = SDL_GetCurrentDisplayMode(display);
 
     paletteRAM = malloc(32);
+
+    oamBuffer.data  = calloc(64, sizeof(struct sprite_t));
+    oamBuffer.cap   = oamBuffer.data ? 64 : 0;
+    oamBuffer.count = 0;
+    sOAM            = 0;
+
+    if (!oamBuffer.data) {
+#ifndef NDEBUG
+        assert(0 && "oamBuffer initial allocation failed");
+#else
+        oamBuffer.data = calloc(64, sizeof(struct sprite_t));
+        oamBuffer.cap  = oamBuffer.data ? 64 : 0;
+        SDL_Log("oamBuffer re-init %s", oamBuffer.data ? "recovered" : "FAILED");
+#endif
+    }
 
 #ifdef LANDSCAPE
     scale = mode->h / 240;
