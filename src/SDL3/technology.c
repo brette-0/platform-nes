@@ -2,7 +2,7 @@
 #include <platform-nes/technology.h>
 #include <platform-nes/video.h>
 
-/* Defined in src/unified/video.c — not part of the public video API. */
+/* Defined in src/SDL3/video.c — not part of the public video API. */
 void OAMPopulateFromBuffer(uint16_t offset, const uint8_t* buffer, uint16_t sBuffer, uint16_t step);
 void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t amt, uint16_t step);
 

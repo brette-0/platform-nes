@@ -1,5 +1,5 @@
 ﻿#include "../../include/platform-nes/video.h"
-#include "../unified/internal.h"
+#include "../SDL3/internal.h"
 #include <platform-nes/interrupts.h>
 #include <stdint.h>
 #include <stdlib.h>

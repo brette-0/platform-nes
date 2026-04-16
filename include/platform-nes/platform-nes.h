@@ -22,7 +22,7 @@
 #include "nes_macro.h"
 #define quit 0
 #else
-#include "unified_macro.h"
+#include "SDL3_macro.h"
 extern int quit;
 #endif
 

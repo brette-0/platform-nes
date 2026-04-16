@@ -71,7 +71,7 @@ extern const uint8_t name[sizeof(#chars)]
 /**
  * General-purpose byte copy from buffer to (target + offset) with stride.
  * Writes buffer[i] to target[offset + i * step] for i in [0, sBuffer).
- * On unified builds, if `target` is &oamBuffer, routing switches to the
+ * On SDL3 builds, if `target` is &oamBuffer, routing switches to the
  * OAM growth handler.
  */
 void PopulateFromBuffer(uint8_t* target, uint16_t offset,

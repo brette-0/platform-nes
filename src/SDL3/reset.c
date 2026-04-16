@@ -6,7 +6,7 @@
 #include <assert.h>
 #include <platform-nes/reset.h>
 #include <platform-nes/video.h>
-#include "../unified/internal.h"
+#include "../SDL3/internal.h"
 
 #ifndef PROJECT_NAME
 #define PROJECT_NAME "Super Brette Bros"

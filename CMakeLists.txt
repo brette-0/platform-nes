@@ -211,10 +211,10 @@ else()
         message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux")
     endif()
 
-    file(GLOB UNIFIED_SOURCES src/unified/*.c)
+    file(GLOB SDL3_SOURCES src/SDL3/*.c)
     file(GLOB PLATFORM_SOURCES src/${PLATFORM_DIR}/*.c)
 
-    add_library(platform-nes STATIC ${UNIFIED_SOURCES} ${PLATFORM_SOURCES})
+    add_library(platform-nes STATIC ${SDL3_SOURCES} ${PLATFORM_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
     )
