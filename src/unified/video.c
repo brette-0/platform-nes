@@ -1,5 +1,6 @@
 ﻿#include "../../include/platform-nes/video.h"
 #include "../unified/internal.h"
+#include <platform-nes/interrupts.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,64 +69,17 @@ static void toggle_fullscreen(void) {
 
 #pragma region PPU_EMU
 
-static uint8_t* bgOpaque;
-static int      bgOpaqueW, bgOpaqueH;
-
-static void ensure_bg_opaque(int w, int h) {
-    if (bgOpaque && bgOpaqueW == w && bgOpaqueH == h) return;
-    free(bgOpaque);
-    bgOpaque = malloc((size_t)w * h);
-    bgOpaqueW = w; bgOpaqueH = h;
-}
-
-static void GenerateSprites(uint32_t* pixels, int stride, int vpw, int vph) {
-    if (!(ppuMask & SPRITE)) return;
-    if (!oamBuffer.data || oamBuffer.count == 0) return;
-
-    const int show_left = ppuMask & 0x04;
-    const int spr_base  = (ppuCtrl & SPRITE_ADDR) ? 0x1000 : 0x0000;
-
-    /* Lower OAM index = higher priority on NES; iterate in reverse so
-     * low-index sprites overwrite high-index ones. */
-    for (int s = (int)oamBuffer.count - 1; s >= 0; s--) {
-        const struct sprite_t spr = oamBuffer.data[s];
-        const int     sx     = (int)spr.x;
-        const int     sy     = (int)spr.y;
-        const uint8_t tile   = spr.tile;
-        const uint8_t attr   = spr.attributes;
-        const int     pal    = attr & 0x03;
-        const int     behind = attr & 0x20;
-        const int     flip_h = attr & 0x40;
-        const int     flip_v = attr & 0x80;
-
-        if (sx >= vpw || sy >= vph) continue;
-        if (sx <= -8 || sy <= -8) continue;
-
-        for (int py = 0; py < 8; py++) {
-            const int dy = sy + py;
-            if (dy < 0 || dy >= vph) continue;
-            const int row = flip_v ? (7 - py) : py;
-            const int addr = spr_base + tile * 16 + row;
-            const uint8_t lo = patternTable[addr];
-            const uint8_t hi = patternTable[addr + 8];
-
-            for (int px = 0; px < 8; px++) {
-                const int dx = sx + px;
-                if (dx < 0 || dx >= vpw) continue;
-                if (!show_left && dx < 8) continue;
-                const int bit  = flip_h ? px : (7 - px);
-                const int cidx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
-                if (cidx == 0) continue;                           /* transparent */
-                if (behind && bgOpaque[dy * vpw + dx]) continue;   /* BG wins priority */
-
-                const uint8_t nes_col = paletteRAM[0x10 + pal * 4 + cidx];
-                pixels[dy * stride + dx] = nes_rgb[nes_col & 0x3F];
-            }
-        }
-    }
-}
-
-static void GenerateBackground() {
+/* Merged per-pixel renderer. Walks (px, py) in raster order, compositing
+ * background + sprites at each pixel and applying PPUMASK flags (left-8
+ * clips, greyscale, colour emphasis) uniformly to the final sample.
+ *
+ * IRQ dispatch is segmented: each scanline is split at the px of the next
+ * queued IRQ. Within a segment we render straight through (no per-pixel
+ * dispatch overhead, since no handler can fire); when the segment is
+ * exhausted we invoke the handler and resume. A handler fires *before*
+ * the pixel at its (px, py) renders, so it can mutate scroll / palette /
+ * ppuCtrl and have that pixel onward see the new state. */
+static void GenerateFrame() {
     const int vpw = VIEWPORT_X * 8;
     const int vph = VIEWPORT_Y * 8;
 
@@ -138,8 +92,6 @@ static void GenerateBackground() {
         SDL_SetTextureScaleMode(bgTexture, SDL_SCALEMODE_NEAREST);
     }
 
-    ensure_bg_opaque(vpw, vph);
-
     void *raw;
     int   pitch;
     if (!SDL_LockTexture(bgTexture, NULL, &raw, &pitch)) return;
@@ -147,70 +99,160 @@ static void GenerateBackground() {
     uint32_t *pixels = raw;
     const int stride = pitch / 4;
 
-    if (!(ppuMask & BG)) {
-        const uint32_t universal = nes_rgb[paletteRAM[0] & 0x3F];
-        for (int py = 0; py < vph; py++) {
-            for (int px = 0; px < vpw; px++) {
-                pixels[py * stride + px] = universal;
-                bgOpaque[py * vpw + px]  = 0;
-            }
-        }
-        GenerateSprites(pixels, stride, vpw, vph);
-        SDL_UnlockTexture(bgTexture);
-        SDL_RenderTexture(renderer, bgTexture, NULL, NULL);
-        return;
-    }
+    size_t irq_idx = 0;
 
-    const int nt_cols = vpw < 512 ? 2 : (vpw + 255) / 256;
-    const int world_w = nt_cols * 256;
+    const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
+    const int world_w  = nt_cols * 256;
+    const int spr_base = (ppuCtrl & SPRITE_ADDR) ? 0x1000 : 0x0000;
 
     for (int py = 0; py < vph; py++) {
-        const int world_h = 240;
-        const int wy        = ((int)yScroll + py) % world_h;
-        const int tile_row  = wy / 8;
-        const int local_row = tile_row % 30;
-        const int nt_row    = tile_row / 30;
-        const int fine_y    = wy & 7;
+        /* Pre-filter sprites that overlap this scanline. Keeps the inner
+         * pixel loop from scanning all of OAM 256 times per row. */
+        int line_spr[64];
+        int n_line = 0;
+        if ((ppuMask & SPRITE) && oamBuffer.data) {
+            for (size_t s = 0; s < oamBuffer.count && n_line < 64; s++) {
+                const int sy = (int)oamBuffer.data[s].y;
+                if (py >= sy && py < sy + 8) line_spr[n_line++] = (int)s;
+            }
+        }
 
-        for (int px = 0; px < vpw; px++) {
-            const int wx        = ((int)xScroll + px) % world_w;
-            const int tile_col  = wx / 8;
-            const int local_col = tile_col % 32;
-            const int nt_col    = tile_col / 32;
-            const int fine_x    = wx & 7;
+        /* Walk this scanline in segments bounded by IRQ positions. */
+        int seg_start = 0;
+        while (seg_start < vpw) {
+            /* Discard any IRQs already behind the cursor, then peek the
+             * head to find the next stop on this scanline (if any). */
+            int seg_end = vpw;
+            int fire    = 0;
+            while (irq_idx < irqCount) {
+                const irq_t ev = irqBuffer[irq_idx];
+                if ((int)ev.py < py
+                    || ((int)ev.py == py && (int)ev.px < seg_start)) {
+                    irq_idx++;
+                    continue;
+                }
+                if ((int)ev.py == py) {
+                    seg_end = (int)ev.px;
+                    fire    = 1;
+                }
+                break;
+            }
 
-            const int nt_off = (nt_col + nt_row * nt_cols) * 0x400;
+            for (int px = seg_start; px < seg_end; px++) {
+                /* --- Background sample -------------------------------- */
+                int     bg_cidx = 0;
+                uint8_t bg_pal  = 0;
+                const int bg_left_ok = (ppuMask & 0x02) || px >= 8;
+                if ((ppuMask & BG) && bg_left_ok) {
+                    const int wy        = ((int)yScroll + py) % 240;
+                    const int tile_row  = wy / 8;
+                    const int local_row = tile_row % 30;
+                    const int nt_row    = tile_row / 30;
+                    const int fine_y    = wy & 7;
 
-            const uint8_t tile_id =
-                VideoRAM[nt_off + local_row * 32 + local_col];
+                    const int wx        = ((int)xScroll + px) % world_w;
+                    const int tile_col  = wx / 8;
+                    const int local_col = tile_col % 32;
+                    const int nt_col    = tile_col / 32;
+                    const int fine_x    = wx & 7;
 
-            const uint8_t attr =
-                VideoRAM[nt_off + 0x3C0
-                         + local_row / 4 * 8
-                         + local_col / 4];
-            const int shift = (local_col >> 1 & 1) * 2
-                            + (local_row >> 1 & 1) * 4;
-            const int pal = attr >> shift & 3;
+                    const int nt_off = (nt_col + nt_row * nt_cols) * 0x400;
 
-            const int     chr_addr = (!!(ppuCtrl & BG_ADDR) * 0x1000) + tile_id * 16 + fine_y;
-            const uint8_t lo = patternTable[chr_addr];
-            const uint8_t hi = patternTable[chr_addr + 8];
-            const int     bit  = 7 - fine_x;
-            const int     cidx = lo >> bit & 1
-                               | (hi >> bit & 1) << 1;
+                    const uint8_t tile_id =
+                        VideoRAM[nt_off + local_row * 32 + local_col];
+                    const uint8_t attr =
+                        VideoRAM[nt_off + 0x3C0
+                                 + (local_row / 4) * 8
+                                 + (local_col / 4)];
+                    const int shift = ((local_col >> 1) & 1) * 2
+                                    + ((local_row >> 1) & 1) * 4;
+                    bg_pal = (attr >> shift) & 3;
 
-            const uint8_t nes_col =
-                cidx ? paletteRAM[pal * 4 + cidx] : paletteRAM[0];
+                    const int chr_addr = ((ppuCtrl & BG_ADDR) ? 0x1000 : 0)
+                                       + tile_id * 16 + fine_y;
+                    const uint8_t lo = patternTable[chr_addr];
+                    const uint8_t hi = patternTable[chr_addr + 8];
+                    const int bit  = 7 - fine_x;
+                    bg_cidx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                }
+                const int bg_opaque = bg_cidx != 0;
 
-            pixels[py * stride + px] = nes_rgb[nes_col & 0x3F];
-            bgOpaque[py * vpw + px]  = (cidx != 0);
+                /* --- Sprite sample ------------------------------------ */
+                /* Low OAM index = higher priority, so walk forward and
+                 * stop at the first opaque hit. */
+                int     spr_hit    = 0;
+                int     spr_behind = 0;
+                uint8_t spr_nes    = 0;
+                const int spr_left_ok = (ppuMask & 0x04) || px >= 8;
+                if ((ppuMask & SPRITE) && spr_left_ok) {
+                    for (int k = 0; k < n_line; k++) {
+                        const struct sprite_t spr = oamBuffer.data[line_spr[k]];
+                        const int sx = (int)spr.x;
+                        if (px < sx || px >= sx + 8) continue;
+                        const int sy = (int)spr.y;
+                        const uint8_t attr = spr.attributes;
+                        const int flip_h = attr & 0x40;
+                        const int flip_v = attr & 0x80;
+                        const int row     = flip_v ? (7 - (py - sy)) : (py - sy);
+                        const int col_bit = flip_h ? (px - sx) : (7 - (px - sx));
+                        const int addr = spr_base + spr.tile * 16 + row;
+                        const uint8_t lo = patternTable[addr];
+                        const uint8_t hi = patternTable[addr + 8];
+                        const int cidx = ((lo >> col_bit) & 1)
+                                       | (((hi >> col_bit) & 1) << 1);
+                        if (cidx == 0) continue;
+                        spr_nes    = paletteRAM[0x10 + (attr & 0x03) * 4 + cidx];
+                        spr_behind = attr & 0x20;
+                        spr_hit    = 1;
+                        break;
+                    }
+                }
+
+                /* --- Compose ------------------------------------------ */
+                uint8_t final_nes;
+                if (spr_hit && (!spr_behind || !bg_opaque)) {
+                    final_nes = spr_nes;
+                } else if (bg_opaque) {
+                    final_nes = paletteRAM[bg_pal * 4 + bg_cidx];
+                } else {
+                    final_nes = paletteRAM[0]; /* universal */
+                }
+
+                /* Greyscale forces colour to the column-0 shades. */
+                if (ppuMask & 0x01) final_nes &= 0x30;
+
+                uint32_t col = nes_rgb[final_nes & 0x3F];
+
+                /* Colour emphasis: set bit = that channel stays full,
+                 * the others attenuate. Approximate with a 3/4 scale. */
+                if (ppuMask & 0xE0) {
+                    uint32_t r = (col >> 16) & 0xFF;
+                    uint32_t g = (col >>  8) & 0xFF;
+                    uint32_t b =  col        & 0xFF;
+                    if (ppuMask & 0x20) { g = g * 3 / 4; b = b * 3 / 4; }
+                    if (ppuMask & 0x40) { r = r * 3 / 4; b = b * 3 / 4; }
+                    if (ppuMask & 0x80) { r = r * 3 / 4; g = g * 3 / 4; }
+                    col = 0xFF000000u | (r << 16) | (g << 8) | b;
+                }
+
+                pixels[py * stride + px] = col;
+            }
+
+            /* Segment exhausted — fire handler before the next segment
+             * begins, so the pixel at seg_end sees the new state. */
+            if (fire) {
+                const irq_t ev = irqBuffer[irq_idx];
+                if (ev.id < irqTableCount && irqTable[ev.id]) {
+                    irqTable[ev.id]();
+                }
+                irq_idx++;
+            }
+
+            seg_start = seg_end;
         }
     }
 
-    GenerateSprites(pixels, stride, vpw, vph);
-
     SDL_UnlockTexture(bgTexture);
-
     SDL_RenderTexture(renderer, bgTexture, NULL, NULL);
 }
 
@@ -262,13 +304,15 @@ void WaitForPresent() {
 
     nmi();
     if (ppuMask & (BG | SPRITE)) {
-        GenerateBackground();
+        GenerateFrame();
         SDL_RenderPresent(renderer);
     } else {
         SDL_RenderClear(renderer);
         SDL_RenderPresent(renderer);
     }
 
+    /* No IRQs permitted post-frame; discard anything still queued. */
+    irqCount = 0;
 }
 
 void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
