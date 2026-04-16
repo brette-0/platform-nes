@@ -7,8 +7,4 @@
 __attribute__((used, interrupt_norecurse))    \
 void nmi
 
-#define IRQ                             \
-__attribute__((used, interrupt_norecurse))    \
-void irq
-
 #endif

@@ -88,6 +88,7 @@ NMI() {
     RefreshSprites();
     PollControllers(&port1, &port2);
     AudioUpdate();
+    SetNextIRQHandler(IRQ_SPRITE_ZERO);
 }
 
 IRQ(SPRITE_ZERO) {
