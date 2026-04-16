@@ -103,12 +103,11 @@ NMI {
             :  xWorldSpace + deltaScroll > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
-
-        SetScroll(xWorldSpace, 0);
     }
 
     AudioUpdate();
     SetNextIRQHandler(IRQ_SPRITE_ZERO);
+    SetScroll(0, 0);
 }
 
 IRQ(SPRITE_ZERO) {

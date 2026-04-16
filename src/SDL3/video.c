@@ -309,9 +309,10 @@ void WaitForPresent() {
         SDL_RenderClear(renderer);
         SDL_RenderPresent(renderer);
     }
-    nmi();
-    /* No IRQs permitted post-frame; discard anything still queued. */
+    /* No IRQs permitted post-frame; discard anything still queued
+     * from this frame's render before NMI enqueues for the next one. */
     irqCount = 0;
+    nmi();
 }
 
 void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
