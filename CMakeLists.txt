@@ -78,7 +78,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = 1
             -o ${FAMISTUDIO_PASS1_OBJ}
             ${CMAKE_BINARY_DIR}/famistudio_config_pass1.s
             DEPENDS ${CMAKE_BINARY_DIR}/famistudio_config_pass1.s
-            COMMENT "Assembling FamiStudio (pass 1, no padding)"
+            COMMENT "Assembling FamiStudio (pass 1)"
     )
 
     file(GLOB_RECURSE DEMO_ASM_SOURCES ${CMAKE_SOURCE_DIR}/demo/*.s)

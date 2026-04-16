@@ -49,10 +49,10 @@ typedef uint8_t oam_t;
 #endif
 
 struct sprite_t {
-  oam_t x;
   oam_t y;
-  uint8_t attributes;
   uint8_t tile;
+  uint8_t attributes;
+  oam_t x;
 };
 
 #ifdef TARGET_NES

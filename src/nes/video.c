@@ -162,5 +162,6 @@ void WriteBufferToAttributeMemory(
 oamBuffer_t oamBuffer __attribute__((aligned(256)));
 
 void RefreshSprites(void) {
+    POKE(OAMADDR, 0);
     POKE(OAMDMA, (uint16_t)oamBuffer >> 8);
 }

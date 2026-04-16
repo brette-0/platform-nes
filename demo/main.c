@@ -32,7 +32,7 @@ RESET {
     PopulateFromProvider(
         (uint8_t*)&oamBuffer,
         SPRITE_SLOT(0) + offsetof(struct sprite_t, y),
-        Clear, 8, SPRITE_STRIDE
+        Clear, 64, SPRITE_STRIDE
     );
 
 

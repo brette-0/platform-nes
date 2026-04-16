@@ -8,9 +8,7 @@ void PollControllers(uint8_t* port1, uint8_t* port2) {
 
 #pragma unroll
     for (int i = 0; i < 8; i++) {
-        *port1 |= IO_PORT1;
-        *port2 |= IO_PORT2;
-        *port1 <<= 1;
-        *port2 <<= 1;
+        *port1 |= (IO_PORT1 & 1) << i;
+        *port2 |= (IO_PORT2 & 1) << i;
     }
 }
