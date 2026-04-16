@@ -114,10 +114,13 @@ enum CTRL {
 
 
 enum MASK {
-    BG        = 0x08,
-    SPRITE    = 0x10,
-    BG_L      = 0x0a,
-    SPRITE_L  = 0x14
+    BG             = 0x08,
+    SPRITE         = 0x10,
+    BG_L           = 0x0a,
+    SPRITE_L       = 0x14,
+    RED            = 0x20,
+    GREEN          = 0x40,
+    BLUE           = 0x80,
 };
 
 void WaitForPresent();
@@ -145,6 +148,33 @@ extern uint16_t xScroll;
 extern uint16_t yScroll;
 #endif
 
+#ifdef TARGET_NES
+typedef struct { uint8_t data[3]; } scroll_t;
+/* data[0] = PPUCTRL byte (nametable select merged in)
+ * data[1] = fine X scroll  (px & 0xFF)
+ * data[2] = fine Y scroll  (py % 240 after nt-wrap) */
+#else
+typedef struct { uint16_t x; uint16_t y; } vec2u16;
+typedef vec2u16 scroll_t;
+#endif
+
+/**
+ * Converts a pixel position into the platform scroll_t representation.
+ * NES:  encodes nametable select + fine X/Y into the 3-byte PPU format.
+ * SDL3: stores px/py directly.
+ */
+scroll_t CartesianToScroll(uint16_t px, uint16_t py);
+
+#ifdef TARGET_NES
+  #define WRITE_SCROLL(s) do { \
+      (*(volatile uint8_t*)PPUCTRL)   = (s).data[0]; \
+      (*(volatile uint8_t*)PPUSCROLL) = (s).data[1]; \
+      (*(volatile uint8_t*)PPUSCROLL) = (s).data[2]; \
+  } while(0)
+#else
+  #define WRITE_SCROLL(s) do { xScroll = (s).x; yScroll = (s).y; } while(0)
+#endif
+
 /**
  * Scrolls the screen in signed X and Y
  * @param x x position to move the screen scroll by
@@ -169,16 +199,31 @@ void WriteBufferToVideoMemory(
   const uint16_t x, const uint16_t y, const uint8_t* source, uint8_t sBuffer, uint8_t polarity
 );
 
+void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value);
+
 void FlushVideoRAM(const uint8_t nt, const uint8_t at);
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uint8_t sBuffer);
 
+void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value);
+
 void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), uint8_t amt, uint8_t polarity);
+
+uint16_t CartesianToAddress(uint16_t x, uint16_t y);
 
 void WriteBufferToAttributeMemory(
   const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 );
 
+void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, uint8_t value);
+
 void RefreshSprites(void);
+
+/**
+ * Sets the color emphasis bits in PPUMASK (bits 5-7).
+ * @param priority  OR of COLOR_EMPHASIS-field bits (0x20 = red, 0x40 = green, 0x80 = blue)
+ */
+void SetColorPriority(uint8_t priority);
+void WaitThenReactToSpriteZero(void (*fn)(void));
 
 #endif

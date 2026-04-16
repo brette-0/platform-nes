@@ -18,12 +18,15 @@ uint8_t yPlayer;
 uint16_t levelSize;
 uint16_t xWorldSpace;
 
+volatile uint8_t spriteZeroHandled;
+
 struct sprite_t OAMBuffer[64];
 
 static uint8_t Clear(uint16_t _);
 static uint8_t AdjustSpriteY(uint16_t i);
 static uint8_t AdjustSpriteX(uint16_t i);
 static void    BuildLevelSize();
+static void    SpriteZeroHandler(void);
 
 RESET {
     BuildLevelSize();
@@ -57,6 +60,14 @@ RESET {
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
     WriteBufferToVideoMemory(VIEWPORT_X - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
+    WriteSingleToVideoMemory(0, 1, 0x2e);
+    oamBuffer[0] = (struct sprite_t){
+        .y = 8,
+        .tile = 0xff,
+        .attributes = 0,
+        .x = 0
+    };
+
     for (uint8_t i = 0; i < 2 + VIEWPORT_X; i += 2) {
         WriteProviderToVideoMemory(
             i, 2,
@@ -85,11 +96,16 @@ RESET {
 
         }
 
+        if (!spriteZeroHandled) {
+            WaitThenReactToSpriteZero(SpriteZeroHandler);
+        }
+
         WaitForPresent();
     }
 }
 
 NMI {
+    SetColorPriority(RED);
     RefreshSprites();
     PollControllers(&port1, &port2);
 
@@ -104,10 +120,10 @@ NMI {
                 ? 0
                 : xWorldSpace + deltaScroll;
     }
-
-    AudioUpdate();
-    SetNextIRQHandler(IRQ_SPRITE_ZERO);
+    spriteZeroHandled = 0;
     SetScroll(0, 0);
+    AudioUpdate();
+    SetColorPriority(0);
 }
 
 IRQ(SPRITE_ZERO) {
@@ -144,4 +160,9 @@ static void BuildLevelSize() {
     }
 
     // TODO: implement universal 'Error' out
+}
+
+static void SpriteZeroHandler(void) {
+    spriteZeroHandled = 1;
+    SetScroll(xWorldSpace, 2);
 }

@@ -1,5 +1,6 @@
-﻿#include "../../include/platform-nes/video.h"
-#include "../SDL3/internal.h"
+﻿#include "../SDL3/internal.h"
+
+#include <platform-nes/video.h>
 #include <platform-nes/interrupts.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,6 +13,16 @@ uint8_t* paletteRAM;
 static uint8_t  ppuMask;
 static SDL_Texture *bgTexture;
 static uint8_t ppuCtrl;
+
+/* Sprite 0 hit callback — invoked mid-frame on the first overlap of an
+ * opaque sprite-0 pixel with an opaque background pixel. Latched per
+ * frame so exactly one dispatch occurs even across multiple overlaps. */
+static void (*sprite0_handler)(void);
+static int   sprite0_latched;
+
+void SetSpriteZeroHandler(void (*fn)(void)) {
+    sprite0_handler = fn;
+}
 
 extern const uint8_t *patternTable;
 
@@ -82,6 +93,10 @@ static void toggle_fullscreen(void) {
 static void GenerateFrame() {
     const int vpw = VIEWPORT_X * 8;
     const int vph = VIEWPORT_Y * 8;
+
+    /* Sprite 0 hit latch resets at the top of every frame, matching the
+     * hardware rule that PPUSTATUS bit 6 is cleared during VBlank. */
+    sprite0_latched = 0;
 
     if (!bgTexture) {
         bgTexture = SDL_CreateTexture(
@@ -186,7 +201,8 @@ static void GenerateFrame() {
                 const int spr_left_ok = (ppuMask & 0x04) || px >= 8;
                 if ((ppuMask & SPRITE) && spr_left_ok) {
                     for (int k = 0; k < n_line; k++) {
-                        const struct sprite_t spr = oamBuffer.data[line_spr[k]];
+                        const int si = line_spr[k];
+                        const struct sprite_t spr = oamBuffer.data[si];
                         const int sx = (int)spr.x;
                         if (px < sx || px >= sx + 8) continue;
                         const int sy = (int)spr.y;
@@ -201,6 +217,19 @@ static void GenerateFrame() {
                         const int cidx = ((lo >> col_bit) & 1)
                                        | (((hi >> col_bit) & 1) << 1);
                         if (cidx == 0) continue;
+                        /* Sprite 0 hit: first opaque sprite-0 pixel
+                         * coinciding with an opaque bg pixel fires the
+                         * registered handler exactly once per frame.
+                         * line_spr is OAM-ordered so si==0 means this is
+                         * sprite 0 — the pattern fetch above already
+                         * proved it opaque at (px, py). Dispatched before
+                         * compositing so handler side-effects (scroll,
+                         * palette) take hold from the next pixel onward. */
+                        if (si == 0 && bg_opaque && !sprite0_latched
+                            && sprite0_handler) {
+                            sprite0_latched = 1;
+                            sprite0_handler();
+                        }
                         spr_nes    = paletteRAM[0x10 + (attr & 0x03) * 4 + cidx];
                         spr_behind = attr & 0x20;
                         spr_hit    = 1;
@@ -357,6 +386,11 @@ void WriteBufferToVideoMemory(
     memcpy(VideoRAM + offset, source, sBuffer);
 }
 
+void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value) {
+    const uint16_t offset = xy_to_nt_addr(x, y);
+    VideoRAM[offset] = value;
+}
+
 void SetScroll(uint16_t x, uint16_t y) {
     xScroll = x; yScroll = y;
 }
@@ -368,6 +402,10 @@ void DeltaScroll(int8_t x, int8_t y) {
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
     memcpy(paletteRAM + offset, source, sBuffer);
+}
+
+void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value) {
+    paletteRAM[offset] = value;
 }
 
 void WriteProviderToVideoMemory(
@@ -389,6 +427,11 @@ void WriteBufferToAttributeMemory(
     for (uint8_t i = 0; i < sBuffer; i++) {
         VideoRAM[offset + i * (ppuCtrl & POLARITY ? 8 : 1)] = source[i];
     }
+}
+
+void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, uint8_t value) {
+    const uint16_t offset = xy_to_at_addr(x, y);
+    VideoRAM[offset] = value;
 }
 
 oamBuffer_t oamBuffer = { NULL, 0, 0 };
@@ -428,3 +471,11 @@ void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t 
 
 // link happy stub
 void RefreshSprites(void) { }
+
+uint16_t CartesianToAddress(uint16_t x, uint16_t y) {
+    return xy_to_nt_addr(x, y);
+}
+
+scroll_t CartesianToScroll(uint16_t px, uint16_t py) {
+    return (scroll_t){ .x = px, .y = py };
+}
