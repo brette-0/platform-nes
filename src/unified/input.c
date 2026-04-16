@@ -1,6 +1,6 @@
 ﻿#include <stdint.h>
 #include <SDL3/SDL.h>
-#include "../../include/platform-nes/input.h"
+#include <platform-nes/input.h>
 #include "internal.h"
 
 static SDL_Gamepad *gamepads[2] = {0};

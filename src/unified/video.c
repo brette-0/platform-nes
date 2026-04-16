@@ -302,7 +302,6 @@ void WaitForPresent() {
     }
     last_frame = SDL_GetTicksNS();
 
-    nmi();
     if (ppuMask & (BG | SPRITE)) {
         GenerateFrame();
         SDL_RenderPresent(renderer);
@@ -310,7 +309,7 @@ void WaitForPresent() {
         SDL_RenderClear(renderer);
         SDL_RenderPresent(renderer);
     }
-
+    nmi();
     /* No IRQs permitted post-frame; discard anything still queued. */
     irqCount = 0;
 }
