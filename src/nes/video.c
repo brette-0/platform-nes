@@ -85,6 +85,10 @@ void SetScroll(uint16_t x, uint16_t y) {
     POKE(PPUSCROLL, (uint8_t)(y & 0xFF));
 }
 
+void DeltaScroll(int8_t x, int8_t y) {
+    SetScroll((uint16_t)(xScroll + x), (uint16_t)(yScroll + y));
+}
+
 void WriteBufferToVideoMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 ) {

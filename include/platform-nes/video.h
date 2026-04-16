@@ -169,13 +169,6 @@ void WriteBufferToVideoMemory(
   const uint16_t x, const uint16_t y, const uint8_t* source, uint8_t sBuffer, uint8_t polarity
 );
 
-/**
- * Uses mirror information to decide length of information required and polarity
- * @param distance  How far from the viewport to write
- * @param source    Source of information to write
- */
-void WriteOutsideOfViewPort(int8_t distance, uint8_t* source);
-
 void FlushVideoRAM(const uint8_t nt, const uint8_t at);
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uint8_t sBuffer);

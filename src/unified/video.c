@@ -361,6 +361,11 @@ void SetScroll(uint16_t x, uint16_t y) {
     xScroll = x; yScroll = y;
 }
 
+void DeltaScroll(int8_t x, int8_t y) {
+    xScroll = (uint16_t)(xScroll + x);
+    yScroll = (uint16_t)(yScroll + y);
+}
+
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
     memcpy(paletteRAM + offset, source, sBuffer);
 }
