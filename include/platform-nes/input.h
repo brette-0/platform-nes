@@ -17,7 +17,7 @@ enum Buttons {
     UP      = 0x10,
     DOWN    = 0x20,
     LEFT    = 0x40,
-    RUP     = 0x80,
+    RIGHT   = 0x80,
 };
 
 void PollControllers(uint8_t* port1, uint8_t* port2);

@@ -14,6 +14,7 @@ void input_handle_event(SDL_Event *e) {
         for (int i = 0; i < 2; i++) {
             if (!gamepads[i]) {
                 gamepads[i] = SDL_OpenGamepad(e->gdevice.which);
+                SDL_Log("Controller Connected: %d", e->gdevice.which);
                 break;
             }
         }

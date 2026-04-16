@@ -30,8 +30,11 @@ inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
     return base + nt_h + nt_v + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
+// TODO: This is a bad name, it does not actually wait on NES and shouldn't for NES multithreading
+//       a true 'wait for present' on NES would infinite loop, but won't return to main thread
+//       without special return tech which we don't have yet
 void WaitForPresent() {
-    while (1) {}
+
 }
 
 void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_) {

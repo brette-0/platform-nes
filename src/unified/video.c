@@ -426,6 +426,5 @@ void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t 
     if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
 }
 
-void RefreshSprites(void) {
-    // TODO: upload oamBuffer.data[0..count) to renderer
-}
+// link happy stub
+void RefreshSprites(void) { }

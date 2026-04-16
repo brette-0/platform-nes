@@ -2,6 +2,8 @@
 #define LEVELS_H
 #include <stdint.h>
 
+#define LEVEL_HEIGHT 14
+
 extern const uint8_t LevelData[];
 extern const uint8_t LevelDataLengths[];
 extern const uint8_t LevelDataAttributes[];

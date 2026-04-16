@@ -15,13 +15,18 @@ uint8_t port2;
 uint8_t xPlayer;    // relative to top left of player
 uint8_t yPlayer;
 
+uint16_t levelSize;
+uint16_t xWorldSpace;
+
 struct sprite_t OAMBuffer[64];
 
 static uint8_t Clear(uint16_t _);
 static uint8_t AdjustSpriteY(uint16_t i);
 static uint8_t AdjustSpriteX(uint16_t i);
+static void    BuildLevelSize();
 
-RESET() {
+RESET {
+    BuildLevelSize();
     FlushVideoRAM(0x24, 0x00);
 
     PopulateFromProvider(
@@ -84,15 +89,30 @@ RESET() {
     }
 }
 
-NMI() {
+NMI {
     RefreshSprites();
     PollControllers(&port1, &port2);
+
+    const int8_t deltaScroll = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
+
+    if (deltaScroll) {
+        xWorldSpace = deltaScroll > 0
+            ? xWorldSpace + VIEWPORT_X + deltaScroll < levelSize
+                ? levelSize - VIEWPORT_X
+                : xWorldSpace + deltaScroll
+            :  xWorldSpace + deltaScroll > xWorldSpace
+                ? 0
+                : xWorldSpace + deltaScroll;
+
+        SetScroll(xWorldSpace, 0);
+    }
+
     AudioUpdate();
     SetNextIRQHandler(IRQ_SPRITE_ZERO);
 }
 
 IRQ(SPRITE_ZERO) {
-    SetScroll(1, 0);
+    SetScroll(xWorldSpace, 0);
 }
 
 static uint8_t Clear(uint16_t _) {
@@ -105,4 +125,24 @@ static uint8_t AdjustSpriteY(uint16_t i) {
 
 static uint8_t AdjustSpriteX(uint16_t i) {
     return xPlayer + (i & 1) * 8;
+}
+
+__attribute__((minsize))
+static void BuildLevelSize() {
+    uint8_t temp = 0;
+    levelSize    = 0;
+
+    for (uint8_t i = 0; i < 255; i++) {
+        if (LevelDataLengths[i] == 0)
+            return;
+
+        temp += LevelDataLengths[i];
+
+        while (temp > LEVEL_HEIGHT) {
+            levelSize++;
+            temp -= LEVEL_HEIGHT;
+        }
+    }
+
+    // TODO: implement universal 'Error' out
 }

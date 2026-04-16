@@ -16,6 +16,7 @@ const uint8_t LevelData[] = {
 
 const uint8_t LevelDataLengths[] = {
 #include "tiled/include/1-1_s"
+    , 0x00
 };
 
 __attribute__((always_inline))
