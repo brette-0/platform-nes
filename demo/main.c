@@ -110,10 +110,10 @@ NMI {
 
     if (deltaScroll) {
         xWorldSpace = deltaScroll > 0
-            ? xWorldSpace + VIEWPORT_PX + deltaScroll < xWorldSpace
-                ? (levelSize - VIEWPORT_TX) << 3
+            ? xWorldSpace + deltaScroll > (uint16_t)((levelSize - VIEWPORT_MX) << 4)
+                ? (uint16_t)((levelSize - VIEWPORT_MX) << 4)
                 : xWorldSpace + deltaScroll
-            :  xWorldSpace + deltaScroll > xWorldSpace
+            : xWorldSpace + deltaScroll > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
     }
@@ -124,17 +124,15 @@ NMI {
         case 0:
             break;
 
-        case 1:  goto requestStream;
-        case -1: goto requestStream;
+        case 1:
+            if ((xWorldSpace & 0x0f) == 0x00) {
+                levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_RIGHT;
+            }
+            break;
 
-        requestStream:
-            if ((xWorldSpace & 0X0f) == 0x00) {
-                levelStreamCommand = STREAM_LEVEL_LATCH | (
-                    // ReSharper disable once CppDFAConstantConditions
-                    deltaScroll > 0
-                        ? STREAM_LEVEL_RIGHT
-                        : STREAM_LEVEL_LEFT
-                );
+        case -1:
+            if ((xWorldSpace & 0x0f) == 0x00) {
+                levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_LEFT;
             }
 
         default:
@@ -178,7 +176,7 @@ static void BuildLevelSize() {
 
         temp += LevelDataLengths[i];
 
-        while (temp > LEVEL_HEIGHT) {
+        while (temp >= LEVEL_HEIGHT) {
             levelSize++;
             temp -= LEVEL_HEIGHT;
         }
