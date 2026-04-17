@@ -1,7 +1,8 @@
 ﻿#include "handlers.h"
 #include <platform-nes/video.h>
-
+#include <stdint.h>
 #include "levels.h"
+#include "main.h"
 #include "platform-nes/audio.h"
 
 extern volatile uint8_t spriteZeroHandled;
@@ -17,11 +18,23 @@ void SpriteZeroHandler(void) {
     AudioUpdate();
     if (levelStreamCommand & STREAM_LEVEL_LATCH) {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
+            if (levelStreamCommand & STREAM_LEVEL_SWAP) {
+                for (uint16_t i = 0; i < VIEWPORT_MX * VIEWPORT_MY; i++) {
+                    GetNextMetaTile();
+                }
+            }
             PopulateFromProvider(TileBuffer, 0,  GetNextWrite, 28, 1);
             PopulateFromProvider(TileBuffer, 28, GetCurrentWrite, 28, 1);
         } else {
-            // left
+            if (levelStreamCommand & STREAM_LEVEL_SWAP) {
+                for (uint16_t i = 0; i < VIEWPORT_MX * VIEWPORT_MY; i++) {
+                    GetPrevMetaTile();
+                }
+            }
+            PopulateFromProvider(TileBuffer, 28,  GetPrevWrite, 28, 1);
+            PopulateFromProvider(TileBuffer, 0, GetCurrentWrite, 28, 1);
         }
-        levelStreamCommand = STREAM_LEVEL_DONE;
+        levelStreamCommand &= ~STREAM_LEVEL_LATCH;
+        levelStreamCommand |=  STREAM_LEVEL_DONE;
     }
 }

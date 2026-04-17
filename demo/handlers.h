@@ -13,6 +13,7 @@ enum eLevelStreamCommands {
     STREAM_LEVEL_RIGHT = 0x01,
     STREAM_LEVEL_LATCH = 0x02,
     STREAM_LEVEL_DONE  = 0x04,
+    STREAM_LEVEL_SWAP  = 0x08,
 };
 
 #endif

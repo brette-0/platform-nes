@@ -14,6 +14,7 @@ uint8_t port2;
 
 uint8_t xPlayer;    // relative to top left of player
 uint8_t yPlayer;
+uint8_t lastDeltaScroll;
 
 uint16_t levelSize;
 atomic uint16_t xWorldSpace;
@@ -107,6 +108,7 @@ NMI {
     RefreshSprites();
 
     const int8_t deltaScroll = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
+    const uint16_t lastXWorldSpace = xWorldSpace;
 
     if (deltaScroll) {
         xWorldSpace = deltaScroll > 0
@@ -128,11 +130,20 @@ NMI {
             if ((xWorldSpace & 0x0f) == 0x00) {
                 levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_RIGHT;
             }
+
+            if (lastDeltaScroll < 0) {
+                levelStreamCommand |= STREAM_LEVEL_SWAP;
+            }
             break;
 
         case -1:
+            if (xWorldSpace < 0x10) break;
             if ((xWorldSpace & 0x0f) == 0x00) {
                 levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_LEFT;
+            }
+
+            if (lastDeltaScroll > 0) {
+                levelStreamCommand |= STREAM_LEVEL_SWAP;
             }
 
         default:
@@ -141,15 +152,21 @@ NMI {
     }
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
-        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+        if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
+            WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+        } else {
+            WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory((xWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+        }
     }
 
     SetScroll(0, 0);
-    if (levelStreamCommand == STREAM_LEVEL_DONE) {
+    if (levelStreamCommand & STREAM_LEVEL_DONE) {
         levelStreamCommand = 0;
     }
 
+    lastDeltaScroll = deltaScroll;
     SetColorPriority(0);
 }
 
