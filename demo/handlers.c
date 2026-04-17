@@ -7,11 +7,25 @@
 extern volatile uint8_t spriteZeroHandled;
 extern uint16_t xWorldSpace;
 
-uint8_t TileBuffer[28];
+
+atomic uint8_t levelStreamCommand;
+uint8_t TileBuffer[56];
 
 void SpriteZeroHandler(void) {
     spriteZeroHandled = 1;
     SetScroll(xWorldSpace, 16);
     AudioUpdate();
-    //PopulateFromProvider(TileBuffer, 0, GetNextWrite, 28, 1);
+    if (levelStreamCommand & STREAM_LEVEL_LATCH) {
+        if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
+            if (xWorldSpace & 0x10) {
+                PopulateFromProvider(TileBuffer, 0,  GetNextWrite, 28, 1);
+            } else {
+                PopulateFromProvider(TileBuffer, 28, GetCurrentWrite, 28, 1);
+            }
+
+        } else {
+            // left
+        }
+        levelStreamCommand = STREAM_LEVEL_DONE;
+    }
 }

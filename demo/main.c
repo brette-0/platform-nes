@@ -119,30 +119,39 @@ NMI {
     }
 
     spriteZeroHandled = 0;
+
     switch (SPACESHIP(deltaScroll, 0)) {
         case 0:
             break;
 
-        case 1:
-            VRAM {
-                WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX, 2, SIZED_OBJ(TileBuffer), 1);
-                WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, SIZED_OBJ(TileBuffer), 1);
-            }
-            break;
+        case 1:  goto requestStream;
+        case -1: goto requestStream;
 
-        case -1:
-            VRAM {
-                WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, SIZED_OBJ(TileBuffer), 1);
-                WriteBufferToVideoMemory((xWorldSpace >> 3) - 2, 2, SIZED_OBJ(TileBuffer), 1);
+        requestStream:
+            if ((xWorldSpace & 0X0f) == 0x00) {
+                levelStreamCommand = STREAM_LEVEL_LATCH | (
+                    // ReSharper disable once CppDFAConstantConditions
+                    deltaScroll > 0
+                        ? STREAM_LEVEL_RIGHT
+                        : STREAM_LEVEL_LEFT
+                );
             }
-            break;
 
         default:
             // generic exit
             break;
     }
 
+    if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
+        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
+        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, *(&TileBuffer + 28), 28, 1);
+    }
+
     SetScroll(0, 0);
+    if (levelStreamCommand == STREAM_LEVEL_DONE) {
+        levelStreamCommand = 0;
+    }
+
     SetColorPriority(0);
 }
 
