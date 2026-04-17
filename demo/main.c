@@ -18,7 +18,7 @@ uint8_t yPlayer;
 uint16_t levelSize;
 uint16_t xWorldSpace;
 
-volatile uint8_t spriteZeroHandled;
+atomic uint8_t spriteZeroHandled;
 
 struct sprite_t OAMBuffer[64];
 
@@ -26,7 +26,6 @@ static uint8_t Clear(uint16_t _);
 static uint8_t AdjustSpriteY(uint16_t i);
 static uint8_t AdjustSpriteX(uint16_t i);
 static void    BuildLevelSize();
-static void    SpriteZeroHandler(void);
 
 RESET {
     BuildLevelSize();
@@ -61,7 +60,7 @@ RESET {
     WriteBufferToVideoMemory(VIEWPORT_X - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
     WriteSingleToVideoMemory(0, 1, 0x2e);
-    oamBuffer[0] = (struct sprite_t){
+    OAM_BUFFER[0] = (struct sprite_t){
         .y = 8,
         .tile = 0xff,
         .attributes = 0,
@@ -96,16 +95,14 @@ RESET {
 
         }
 
-        if (!spriteZeroHandled) {
-            WaitThenReactToSpriteZero(SpriteZeroHandler);
-        }
+        WaitThenReactToSpriteZero(0, 16, SpriteZeroHandler, &spriteZeroHandled);
 
         WaitForPresent();
     }
 }
 
 NMI {
-    SetColorPriority(RED);
+    SetScroll(0, 0);
     RefreshSprites();
     PollControllers(&port1, &port2);
 
@@ -113,7 +110,7 @@ NMI {
 
     if (deltaScroll) {
         xWorldSpace = deltaScroll > 0
-            ? xWorldSpace + VIEWPORT_X + deltaScroll < levelSize
+            ? xWorldSpace + VIEWPORT_X + deltaScroll < xWorldSpace
                 ? levelSize - VIEWPORT_X
                 : xWorldSpace + deltaScroll
             :  xWorldSpace + deltaScroll > xWorldSpace
@@ -121,13 +118,9 @@ NMI {
                 : xWorldSpace + deltaScroll;
     }
     spriteZeroHandled = 0;
-    SetScroll(0, 0);
+#ifndef TARGET_NES
     AudioUpdate();
-    SetColorPriority(0);
-}
-
-IRQ(SPRITE_ZERO) {
-    SetScroll(xWorldSpace, 0);
+#endif
 }
 
 static uint8_t Clear(uint16_t _) {
@@ -160,9 +153,4 @@ static void BuildLevelSize() {
     }
 
     // TODO: implement universal 'Error' out
-}
-
-static void SpriteZeroHandler(void) {
-    spriteZeroHandled = 1;
-    SetScroll(xWorldSpace, 2);
 }

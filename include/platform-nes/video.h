@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "technology.h"
+
 #ifndef TARGET_NES
 #include <SDL3/SDL_video.h>
 #endif
@@ -58,6 +60,7 @@ struct sprite_t {
 #ifdef TARGET_NES
   typedef struct sprite_t oamBuffer_t[64];
   #define sOAM 64
+  #define OAM_BUFFER oamBuffer
 #else
   typedef struct {
       struct sprite_t* data;
@@ -65,6 +68,7 @@ struct sprite_t {
       size_t           cap;
   } oamBuffer_t;
   extern size_t sOAM;
+#define OAM_BUFFER oamBuffer.data
 #endif
 
 extern oamBuffer_t oamBuffer;
@@ -224,6 +228,20 @@ void RefreshSprites(void);
  * @param priority  OR of COLOR_EMPHASIS-field bits (0x20 = red, 0x40 = green, 0x80 = blue)
  */
 void SetColorPriority(uint8_t priority);
-void WaitThenReactToSpriteZero(void (*fn)(void));
+
+#ifdef TARGET_NES
+typedef void (*spriteZeroHandler_t)(void);
+#else
+typedef struct {
+  void (*method)(void);
+  uint16_t px;
+  uint16_t py;
+} spriteZeroHandler_t;
+
+void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void));
+#define SET_SPRITE_ZERO_HANDLER(px, py, fn) SetSpriteZeroHandler(px, py, fn)
+#endif
+
+void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomic uint8_t* latch);
 
 #endif

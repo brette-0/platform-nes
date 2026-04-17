@@ -1,17 +1,7 @@
-﻿#ifndef HANDLERS_h
-#define HANDLERS_h
+﻿#ifndef HANDLER_H
+#define HANDLER_H
+void SpriteZeroHandler(void);
 
-#include <platform-nes/interrupts.h>
 
-enum {
-    SPRITE_ZERO
-};
-
-#ifdef TARGET_NES
-#define IRQ_SPRITE_ZERO 0
-#else
-#define IRQ_SPRITE_ZERO \
-    (irq_t){.id = 0, .px = 0, .py = 16}
-#endif
 
 #endif

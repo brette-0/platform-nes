@@ -7,21 +7,23 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 
+#include "platform-nes/technology.h"
+
 uint16_t xScroll;
 uint16_t yScroll;
 uint8_t* paletteRAM;
 static uint8_t  ppuMask;
 static SDL_Texture *bgTexture;
 static uint8_t ppuCtrl;
+static int yScroll_written;
 
-/* Sprite 0 hit callback — invoked mid-frame on the first overlap of an
- * opaque sprite-0 pixel with an opaque background pixel. Latched per
- * frame so exactly one dispatch occurs even across multiple overlaps. */
-static void (*sprite0_handler)(void);
-static int   sprite0_latched;
+#define SPRITE_ZERO_IRQ_ID 0xFF
 
-void SetSpriteZeroHandler(void (*fn)(void)) {
-    sprite0_handler = fn;
+static spriteZeroHandler_t sprite0_zero;
+
+void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void)) {
+    sprite0_zero = (spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
+    RegisterIRQHandler(SPRITE_ZERO_IRQ_ID, fn);
 }
 
 extern const uint8_t *patternTable;
@@ -80,63 +82,66 @@ static void toggle_fullscreen(void) {
 
 #pragma region PPU_EMU
 
-/* Merged per-pixel renderer. Walks (px, py) in raster order, compositing
- * background + sprites at each pixel and applying PPUMASK flags (left-8
- * clips, greyscale, colour emphasis) uniformly to the final sample.
+/* Per-pixel NES PPU emulator.
  *
- * IRQ dispatch is segmented: each scanline is split at the px of the next
- * queued IRQ. Within a segment we render straight through (no per-pixel
- * dispatch overhead, since no handler can fire); when the segment is
- * exhausted we invoke the handler and resume. A handler fires *before*
- * the pixel at its (px, py) renders, so it can mutate scroll / palette /
- * ppuCtrl and have that pixel onward see the new state. */
-static void GenerateFrame() {
+ * Scroll model (matches real PPU V-register behaviour):
+ *   yScroll is an ABSOLUTE source address into VRAM — not an offset added
+ *   to the screen row. The PPU maintains an internal Y counter (ppu_y here)
+ *   that starts at yScroll and auto-increments once per scanline. When code
+ *   writes yScroll (SetScroll / DeltaScroll), ppu_y is reset to that value
+ *   at the next IRQ boundary, so the remaining pixels on that scanline read
+ *   from the new address. xScroll works the same way in X: it defines the
+ *   absolute VRAM column of screen pixel 0, and px is added as the scan
+ *   offset within the line.
+ *
+ * IRQ dispatch: each scanline is split at the px of the next queued IRQ.
+ * The handler fires before the pixel at its (px, py) renders, so it can
+ * mutate xScroll, yScroll, ppuCtrl, palette — anything — and the very
+ * next pixel sees the new state in both axes. */
+static void GenerateFrame(void) {
     const int vpw = VIEWPORT_X * 8;
     const int vph = VIEWPORT_Y * 8;
 
-    /* Sprite 0 hit latch resets at the top of every frame, matching the
-     * hardware rule that PPUSTATUS bit 6 is cleared during VBlank. */
-    sprite0_latched = 0;
-
     if (!bgTexture) {
-        bgTexture = SDL_CreateTexture(
-            renderer, SDL_PIXELFORMAT_ARGB8888,
-            SDL_TEXTUREACCESS_STREAMING, vpw, vph
-        );
+        bgTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
+                                      SDL_TEXTUREACCESS_STREAMING, vpw, vph);
         if (!bgTexture) return;
         SDL_SetTextureScaleMode(bgTexture, SDL_SCALEMODE_NEAREST);
     }
 
-    void *raw;
-    int   pitch;
+    void *raw; int pitch;
     if (!SDL_LockTexture(bgTexture, NULL, &raw, &pitch)) return;
-
     uint32_t *pixels = raw;
     const int stride = pitch / 4;
-
-    size_t irq_idx = 0;
 
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
     const int spr_base = (ppuCtrl & SPRITE_ADDR) ? 0x1000 : 0x0000;
 
+    /* PPU Y counter: the absolute VRAM row currently being sourced.
+     * Initialised from yScroll, then auto-incremented after each scanline.
+     * Any write to yScroll (via SetScroll/DeltaScroll) sets yScroll_written;
+     * we pick that up after the IRQ fires and reset ppu_y to the new value,
+     * so the next segment renders from the new absolute row. */
+    int ppu_y = (int)yScroll;
+    yScroll_written = 0;
+
+    size_t irq_idx = 0;
+
     for (int py = 0; py < vph; py++) {
-        /* Pre-filter sprites that overlap this scanline. Keeps the inner
-         * pixel loop from scanning all of OAM 256 times per row. */
+        /* Sprites use screen-space Y — they don't scroll with the background. */
         int line_spr[64];
         int n_line = 0;
         if ((ppuMask & SPRITE) && oamBuffer.data) {
             for (size_t s = 0; s < oamBuffer.count && n_line < 64; s++) {
-                const int sy = (int)oamBuffer.data[s].y;
+                const int sy = (int)oamBuffer.data[s].y + 1;
                 if (py >= sy && py < sy + 8) line_spr[n_line++] = (int)s;
             }
         }
 
-        /* Walk this scanline in segments bounded by IRQ positions. */
         int seg_start = 0;
         while (seg_start < vpw) {
-            /* Discard any IRQs already behind the cursor, then peek the
-             * head to find the next stop on this scanline (if any). */
+            /* Find the next IRQ on this scanline at or after seg_start. */
             int seg_end = vpw;
             int fire    = 0;
             while (irq_idx < irqCount) {
@@ -153,107 +158,79 @@ static void GenerateFrame() {
                 break;
             }
 
+            /* Derive Y source from ppu_y (the PPU's current absolute row).
+             * This is computed once per segment: ppu_y only changes at IRQ
+             * boundaries, so it is constant within a segment. xScroll is
+             * added to px inside the loop for the horizontal scan offset. */
+            const int wy        = ppu_y % 240;
+            const int tile_row  = wy / 8;
+            const int local_row = tile_row % 30;
+            const int nt_row    = tile_row / 30;
+            const int fine_y    = wy & 7;
+
             for (int px = seg_start; px < seg_end; px++) {
-                /* --- Background sample -------------------------------- */
+
+                /* --- Background ---------------------------------------- */
                 int     bg_cidx = 0;
                 uint8_t bg_pal  = 0;
-                const int bg_left_ok = (ppuMask & 0x02) || px >= 8;
-                if ((ppuMask & BG) && bg_left_ok) {
-                    const int wy        = ((int)yScroll + py) % 240;
-                    const int tile_row  = wy / 8;
-                    const int local_row = tile_row % 30;
-                    const int nt_row    = tile_row / 30;
-                    const int fine_y    = wy & 7;
-
+                if ((ppuMask & BG) && ((ppuMask & 0x02) || px >= 8)) {
                     const int wx        = ((int)xScroll + px) % world_w;
                     const int tile_col  = wx / 8;
                     const int local_col = tile_col % 32;
                     const int nt_col    = tile_col / 32;
                     const int fine_x    = wx & 7;
+                    const int nt_off    = (nt_col + nt_row * nt_cols) * 0x400;
 
-                    const int nt_off = (nt_col + nt_row * nt_cols) * 0x400;
-
-                    const uint8_t tile_id =
-                        VideoRAM[nt_off + local_row * 32 + local_col];
-                    const uint8_t attr =
-                        VideoRAM[nt_off + 0x3C0
-                                 + (local_row / 4) * 8
-                                 + (local_col / 4)];
+                    const uint8_t tile_id = VideoRAM[nt_off + local_row * 32 + local_col];
+                    const uint8_t attr    = VideoRAM[nt_off + 0x3C0
+                                                   + (local_row / 4) * 8
+                                                   + (local_col / 4)];
                     const int shift = ((local_col >> 1) & 1) * 2
                                     + ((local_row >> 1) & 1) * 4;
                     bg_pal = (attr >> shift) & 3;
 
-                    const int chr_addr = ((ppuCtrl & BG_ADDR) ? 0x1000 : 0)
+                    const int chr_base = ((ppuCtrl & BG_ADDR) ? 0x1000 : 0)
                                        + tile_id * 16 + fine_y;
-                    const uint8_t lo = patternTable[chr_addr];
-                    const uint8_t hi = patternTable[chr_addr + 8];
-                    const int bit  = 7 - fine_x;
-                    bg_cidx = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
+                    const int bit = 7 - fine_x;
+                    bg_cidx = ((patternTable[chr_base]     >> bit) & 1)
+                            | (((patternTable[chr_base + 8] >> bit) & 1) << 1);
                 }
                 const int bg_opaque = bg_cidx != 0;
 
-                /* --- Sprite sample ------------------------------------ */
-                /* Low OAM index = higher priority, so walk forward and
-                 * stop at the first opaque hit. */
+                /* --- Sprites ------------------------------------------- */
                 int     spr_hit    = 0;
                 int     spr_behind = 0;
                 uint8_t spr_nes    = 0;
-                const int spr_left_ok = (ppuMask & 0x04) || px >= 8;
-                if ((ppuMask & SPRITE) && spr_left_ok) {
+                if ((ppuMask & SPRITE) && ((ppuMask & 0x04) || px >= 8)) {
                     for (int k = 0; k < n_line; k++) {
-                        const int si = line_spr[k];
-                        const struct sprite_t spr = oamBuffer.data[si];
-                        const int sx = (int)spr.x;
+                        const struct sprite_t spr = oamBuffer.data[line_spr[k]];
+                        const int sx  = (int)spr.x;
                         if (px < sx || px >= sx + 8) continue;
-                        const int sy = (int)spr.y;
-                        const uint8_t attr = spr.attributes;
-                        const int flip_h = attr & 0x40;
-                        const int flip_v = attr & 0x80;
-                        const int row     = flip_v ? (7 - (py - sy)) : (py - sy);
-                        const int col_bit = flip_h ? (px - sx) : (7 - (px - sx));
-                        const int addr = spr_base + spr.tile * 16 + row;
-                        const uint8_t lo = patternTable[addr];
-                        const uint8_t hi = patternTable[addr + 8];
-                        const int cidx = ((lo >> col_bit) & 1)
-                                       | (((hi >> col_bit) & 1) << 1);
+                        const int sy      = (int)spr.y + 1;
+                        const uint8_t att = spr.attributes;
+                        const int row     = (att & 0x80) ? (7 - (py - sy)) : (py - sy);
+                        const int col_bit = (att & 0x40) ? (px - sx) : (7 - (px - sx));
+                        const int addr    = spr_base + spr.tile * 16 + row;
+                        const int cidx    = ((patternTable[addr]      >> col_bit) & 1)
+                                          | (((patternTable[addr + 8]  >> col_bit) & 1) << 1);
                         if (cidx == 0) continue;
-                        /* Sprite 0 hit: first opaque sprite-0 pixel
-                         * coinciding with an opaque bg pixel fires the
-                         * registered handler exactly once per frame.
-                         * line_spr is OAM-ordered so si==0 means this is
-                         * sprite 0 — the pattern fetch above already
-                         * proved it opaque at (px, py). Dispatched before
-                         * compositing so handler side-effects (scroll,
-                         * palette) take hold from the next pixel onward. */
-                        if (si == 0 && bg_opaque && !sprite0_latched
-                            && sprite0_handler) {
-                            sprite0_latched = 1;
-                            sprite0_handler();
-                        }
-                        spr_nes    = paletteRAM[0x10 + (attr & 0x03) * 4 + cidx];
-                        spr_behind = attr & 0x20;
+                        spr_nes    = paletteRAM[0x10 + (att & 0x03) * 4 + cidx];
+                        spr_behind = att & 0x20;
                         spr_hit    = 1;
                         break;
                     }
                 }
 
-                /* --- Compose ------------------------------------------ */
+                /* --- Compose ------------------------------------------- */
                 uint8_t final_nes;
-                if (spr_hit && (!spr_behind || !bg_opaque)) {
-                    final_nes = spr_nes;
-                } else if (bg_opaque) {
-                    final_nes = paletteRAM[bg_pal * 4 + bg_cidx];
-                } else {
-                    final_nes = paletteRAM[0]; /* universal */
-                }
+                if      (spr_hit && (!spr_behind || !bg_opaque)) final_nes = spr_nes;
+                else if (bg_opaque)                               final_nes = paletteRAM[bg_pal * 4 + bg_cidx];
+                else                                              final_nes = paletteRAM[0];
 
-                /* Greyscale forces colour to the column-0 shades. */
                 if (ppuMask & 0x01) final_nes &= 0x30;
 
                 uint32_t col = nes_rgb[final_nes & 0x3F];
 
-                /* Colour emphasis: set bit = that channel stays full,
-                 * the others attenuate. Approximate with a 3/4 scale. */
                 if (ppuMask & 0xE0) {
                     uint32_t r = (col >> 16) & 0xFF;
                     uint32_t g = (col >>  8) & 0xFF;
@@ -267,18 +244,25 @@ static void GenerateFrame() {
                 pixels[py * stride + px] = col;
             }
 
-            /* Segment exhausted — fire handler before the next segment
-             * begins, so the pixel at seg_end sees the new state. */
+            /* Fire the IRQ, then check if yScroll was written by the handler.
+             * If so, reset ppu_y to the new value — the next segment (which
+             * starts at seg_end) will derive wy from the updated counter. */
             if (fire) {
-                const irq_t ev = irqBuffer[irq_idx];
-                if (ev.id < irqTableCount && irqTable[ev.id]) {
+                const irq_t ev = irqBuffer[irq_idx++];
+                if (ev.id < irqTableCount && irqTable[ev.id])
                     irqTable[ev.id]();
+                if (yScroll_written) {
+                    ppu_y = (int)yScroll;
+                    yScroll_written = 0;
                 }
-                irq_idx++;
             }
 
             seg_start = seg_end;
         }
+
+        /* Advance the PPU Y counter by one scanline, exactly as the real
+         * PPU increments its V register at the end of each active line. */
+        ppu_y++;
     }
 
     SDL_UnlockTexture(bgTexture);
@@ -393,11 +377,13 @@ void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value)
 
 void SetScroll(uint16_t x, uint16_t y) {
     xScroll = x; yScroll = y;
+    yScroll_written = 1;
 }
 
 void DeltaScroll(int8_t x, int8_t y) {
     xScroll = (uint16_t)(xScroll + x);
     yScroll = (uint16_t)(yScroll + y);
+    yScroll_written = 1;
 }
 
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
@@ -478,4 +464,14 @@ uint16_t CartesianToAddress(uint16_t x, uint16_t y) {
 
 scroll_t CartesianToScroll(uint16_t px, uint16_t py) {
     return (scroll_t){ .x = px, .y = py };
+}
+
+void SetColorPriority(const uint8_t priority) {
+    ppuMask = (ppuMask & ~(RED | GREEN | BLUE)) | (priority & (RED | GREEN | BLUE));
+}
+
+void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomic uint8_t* latch) {
+    *latch = true;
+    SetSpriteZeroHandler(px, py, fn);
+    SetNextIRQHandler((irq_t){ .id = SPRITE_ZERO_IRQ_ID, .px = px, .py = py });
 }

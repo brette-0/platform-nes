@@ -2,6 +2,8 @@
 #include <platform-nes/technology.h>
 #include <stdint.h>
 
+#include <stdbool.h>
+
 const uint16_t PatternTables    = 0;
 const uint16_t NameTables       = 0x2000;
 const uint16_t PaletteTables    = 0x3f00;
@@ -40,7 +42,8 @@ void WaitForPresent() {
 
 void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_) {
     SPPUMASK = ppuMask_;
-    *(volatile uint8_t*)PPUCTRL = 0x80 | ppuCtrl_;
+    SPPUCTRL = 0x80 | ppuCtrl_;
+    POKE(PPUCTRL, SPPUCTRL);
     POKE(PPUMASK, SPPUMASK);
 }
 
@@ -84,7 +87,8 @@ void SetScroll(uint16_t x, uint16_t y) {
     uint8_t nt = x >> 8 & 0x01
                | y >> 7 & 0x02;
 
-    POKE(PPUSCROLL, SPPUCTRL & 0xFC | nt);
+    SPPUCTRL = (SPPUCTRL & 0xFC) | nt;
+    POKE(PPUCTRL, SPPUCTRL);
 
     POKE(PPUSCROLL, (uint8_t)(x & 0xFF));
     POKE(PPUSCROLL, (uint8_t)(y & 0xFF));
@@ -210,7 +214,11 @@ void SetColorPriority(const uint8_t priority) {
     POKE(PPUMASK, SPPUMASK);
 }
 
-void WaitThenReactToSpriteZero(void (*fn)(void)) {
-    while (PEEK(PPUSTATUS) & 0x40) { }
-    fn();
+void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomic uint8_t* latch) {
+    while (!*latch) {
+        while (  PEEK(PPUSTATUS) & 0x40)  { }  // wait for pre-render to clear stale hit
+        while (!(PEEK(PPUSTATUS) & 0x40)) { }  // wait for actual sprite 0 hit
+        fn();
+        *latch = true;
+    }
 }

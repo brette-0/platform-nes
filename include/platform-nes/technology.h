@@ -4,6 +4,12 @@
 #define PEEK(addr) (*(volatile const unsigned char *)(addr))
 #define POKE(addr, data) (*(volatile unsigned char *)(addr)) = data
 
+#ifdef TARGET_NES
+#define atomic volatile
+#else
+#define atomic _Atomic
+#endif
+
 #define CM(ch, val) \
 "  .elseif \\c == " #ch "\n" \
 "    .byte " #val "\n"
