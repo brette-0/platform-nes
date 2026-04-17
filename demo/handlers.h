@@ -5,10 +5,4 @@ void SpriteZeroHandler(void);
 
 extern uint8_t TileBuffer[28];
 
-enum LevelFetchAction {
-    prev    = 0,
-    next    = 1,
-    latched = 2,
-};
-
 #endif

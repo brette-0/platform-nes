@@ -20,7 +20,7 @@ const uint8_t LevelDataLengths[] = {
 };
 
 __attribute__((always_inline))
-static uint8_t GetNextMetaTile() {
+uint8_t GetNextMetaTile() {
     if (!hunk_remaining) {
         hunk_remaining = LevelDataLengths[level_data_index];
     }
@@ -32,21 +32,7 @@ static uint8_t GetNextMetaTile() {
     return tile;
 }
 
-__attribute__((always_inline))
-static uint8_t GetPrevMetaTile() {
-    if (!hunk_remaining) {
-        hunk_remaining = LevelDataLengths[level_data_index];
-    }
-    const uint8_t tile = LevelData[level_data_index];
-    hunk_remaining--;
-    if (!hunk_remaining) {
-        level_data_index--;
-    }
-    return tile;
-}
-
-__attribute__((hot))
-static uint8_t GetLevelWrite(const uint16_t step, const uint8_t next) {
+uint8_t GetNextWrite(const uint16_t step) {
     if (~step & 1) {
         if (step == 0) {
             attr_column++;
@@ -55,7 +41,7 @@ static uint8_t GetLevelWrite(const uint16_t step, const uint8_t next) {
                 AttributeBuffer[j] &= mask;
         }
 
-        MetatileBuffer[step >> 1] = (next ? GetPrevMetaTile : GetNextMetaTile)();
+        MetatileBuffer[step >> 1] = GetNextMetaTile();
 
         const uint8_t tile_row  = 2 + step;
         const uint8_t attr_idx  = tile_row >> 2;
@@ -66,25 +52,7 @@ static uint8_t GetLevelWrite(const uint16_t step, const uint8_t next) {
                                 : (is_bottom ? 4 : 0);
         AttributeBuffer[attr_idx] |= (pal << shift);
     }
-    return MetatileBuffer[step >> 1] << 2;
-}
-
-__attribute__((always_inline, hot))
-uint8_t GetNextWrite(const uint16_t step) {
-    return Metatiles [
-        GetLevelWrite(step, 1)
-        | (step & 1)
-    ];
-}
-
-uint8_t GetPreviousWrite(const uint16_t step) {
-    MetatileBuffer[step >> 1] = GetLevelWrite(step, 0);
-    MetatileBuffer[step >> 1] ^= 0xff;
-
-    return Metatiles [
-        GetLevelWrite(MetatileBuffer[step >> 1], 0)
-        | 2 | step & 1
-    ];
+    return Metatiles[MetatileBuffer[step >> 1] << 2 | (step & 1)];
 }
 
 uint8_t GetCurrentWrite(const uint16_t step) {

@@ -13,5 +13,4 @@ extern uint8_t attr_column;
 extern uint8_t AttributeBuffer[8];
 uint8_t GetNextWrite(const uint16_t step);
 uint8_t GetCurrentWrite(const uint16_t step);
-uint8_t GetPreviousWrite(const uint16_t step);
 #endif
