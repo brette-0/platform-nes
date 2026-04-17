@@ -144,7 +144,7 @@ NMI {
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, *(&TileBuffer + 28), 28, 1);
+        WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
     }
 
     SetScroll(0, 0);

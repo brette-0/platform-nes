@@ -17,12 +17,8 @@ void SpriteZeroHandler(void) {
     AudioUpdate();
     if (levelStreamCommand & STREAM_LEVEL_LATCH) {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
-            if (xWorldSpace & 0x10) {
-                PopulateFromProvider(TileBuffer, 0,  GetNextWrite, 28, 1);
-            } else {
-                PopulateFromProvider(TileBuffer, 28, GetCurrentWrite, 28, 1);
-            }
-
+            PopulateFromProvider(TileBuffer, 0,  GetNextWrite, 28, 1);
+            PopulateFromProvider(TileBuffer, 28, GetCurrentWrite, 28, 1);
         } else {
             // left
         }
