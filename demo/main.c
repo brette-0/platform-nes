@@ -9,6 +9,8 @@
 #define SPRITE_STRIDE  sizeof(struct sprite_t)
 #define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
 
+extern atomic uint8_t levelFetchCommand;
+
 uint8_t port1;
 uint8_t port2;
 
@@ -17,7 +19,6 @@ uint8_t yPlayer;
 
 uint16_t levelSize;
 atomic uint16_t xWorldSpace;
-
 atomic uint8_t spriteZeroHandled;
 
 struct sprite_t OAMBuffer[64];
@@ -116,6 +117,16 @@ NMI {
             :  xWorldSpace + deltaScroll > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
+    }
+
+    if (deltaScroll > 0) {
+        if ((xWorldSpace & 0x0f) > 0x08) {
+            levelFetchCommand = latched | next;
+        }
+    } else {
+        if ((xWorldSpace & 0x0f) < 0x80) {
+            levelFetchCommand = latched | prev;
+        }
     }
 
     spriteZeroHandled = 0;
