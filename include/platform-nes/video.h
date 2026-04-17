@@ -134,18 +134,18 @@ void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_);
 #ifdef TARGET_NES
 #define VIEWPORT_TX  32
 #define VIEWPORT_TY  30
-#define VIEWPORT_PX  (VIEWPORT_TX << 3)
-#define VIEWPORT_PY  (VIEWPORT_TY << 3)
 #else
 extern const SDL_DisplayMode* mode;
 extern uint8_t scale;
 
-#define VIEWPORT_X  \
+#define VIEWPORT_TX  \
   ((mode->w / scale) >> 3)
-#define VIEWPORT_Y  \
+#define VIEWPORT_TY  \
   ((mode->h / scale) >> 3)
 #endif
 
+#define VIEWPORT_PX  (VIEWPORT_TX << 3)
+#define VIEWPORT_PY  (VIEWPORT_TY << 3)
 
 
 #ifndef TARGET_NES

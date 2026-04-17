@@ -99,8 +99,8 @@ static void toggle_fullscreen(void) {
  * mutate xScroll, yScroll, ppuCtrl, palette — anything — and the very
  * next pixel sees the new state in both axes. */
 static void GenerateFrame(void) {
-    const int vpw = VIEWPORT_X * 8;
-    const int vph = VIEWPORT_Y * 8;
+    const int vpw = VIEWPORT_PX;
+    const int vph = VIEWPORT_PY;
 
     if (!bgTexture) {
         bgTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
@@ -350,7 +350,7 @@ inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
     uint16_t col  = x % 32;
     uint16_t row  = y % 30;
 
-    return (nt_h + nt_v * (VIEWPORT_X < 64 ? 2 : (VIEWPORT_X + 31) / 32)) * 0x400 + row * 32 + col;
+    return (nt_h + nt_v * (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32)) * 0x400 + row * 32 + col;
 }
 
 inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
@@ -359,15 +359,19 @@ inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
     uint16_t col  = x % 32;
     uint16_t row  = y % 30;
 
-    return (nt_h + nt_v * (VIEWPORT_X < 64 ? 2 : (VIEWPORT_X + 31) / 32)) * 0x400
+    return (nt_h + nt_v * (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32)) * 0x400
          + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
 void WriteBufferToVideoMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
 ) {
+    ppuCtrl &= ~POLARITY;
+    if (polarity) ppuCtrl |= POLARITY;
     const uint16_t offset = xy_to_nt_addr(x, y);
-    memcpy(VideoRAM + offset, source, sBuffer);
+    for (uint8_t i = 0; i < sBuffer; i++) {
+        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 32 : 1)] = source[i];
+    }
 }
 
 void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value) {
