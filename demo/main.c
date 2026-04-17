@@ -170,7 +170,7 @@ static void BuildLevelSize() {
     uint8_t temp = 0;
     levelSize    = 0;
 
-    for (uint8_t i = 0; i < 255; i++) {
+    for (uint16_t i = 0; i < 0xffff; i++) {
         if (LevelDataLengths[i] == 0)
             return;
 

@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 uint8_t hunk_remaining;
-uint8_t level_data_index;
+uint16_t level_data_index;
 
 uint8_t MetatileBuffer[14];
 uint8_t AttributeBuffer[8];
