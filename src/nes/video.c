@@ -8,10 +8,10 @@ const uint16_t PatternTables    = 0;
 const uint16_t NameTables       = 0x2000;
 const uint16_t PaletteTables    = 0x3f00;
 const uint16_t nVideoRam        = 0x800;
-uint16_t xScroll = 0;
-uint16_t yScroll = 0;
-uint8_t SPPUCTRL;
-uint8_t SPPUMASK;
+atomic uint16_t xScroll = 0;
+atomic uint16_t yScroll = 0;
+atomic uint8_t SPPUCTRL;
+atomic uint8_t SPPUMASK;
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
     uint16_t base = 0x2000;
@@ -69,6 +69,7 @@ void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
     }
 }
 
+__attribute__((hot))
 void SetScroll(uint16_t x, uint16_t y) {
     xScroll = x; yScroll = y;
 
@@ -98,10 +99,15 @@ void DeltaScroll(int8_t x, int8_t y) {
     SetScroll((uint16_t)(xScroll + x), (uint16_t)(yScroll + y));
 }
 
+__attribute__((hot))
 void WriteBufferToVideoMemory(
-    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, uint8_t polarity
+    const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, const uint8_t polarity
 ) {
     const uint16_t offset = xy_to_nt_addr(x, y);
+    SPPUCTRL &= ~POLARITY;
+    if (polarity) SPPUCTRL |= POLARITY;
+    POKE(PPUCTRL, SPPUCTRL);
+
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
@@ -111,6 +117,7 @@ void WriteBufferToVideoMemory(
     }
 }
 
+__attribute__((hot))
 void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value) {
     const uint16_t offset = xy_to_nt_addr(x, y);
     PEEK(PPUSTATUS);
@@ -119,6 +126,7 @@ void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value)
     POKE(PPUDATA, value);
 }
 
+__attribute__((hot))
 void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, const uint8_t sBuffer) {
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)((offset + PaletteTables) >> 8));
@@ -129,6 +137,7 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, con
     }
 }
 
+__attribute__((always_inline))
 void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value) {
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)((offset + PaletteTables) >> 8));
@@ -136,8 +145,9 @@ void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value) {
     POKE(PPUDATA, value);
 }
 
+__attribute__((hot))
 void WriteProviderToVideoMemory(
-    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), const uint8_t amt, const uint8_t polarity
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), const uint8_t amt, const uint8_t polarity
 ) {
     const uint16_t offset = xy_to_nt_addr(x, y);
     SPPUCTRL &= ~POLARITY;
@@ -154,6 +164,7 @@ void WriteProviderToVideoMemory(
     }
 }
 
+__attribute__((hot))
 void WriteBufferToAttributeMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, const uint8_t polarity
 ) {
@@ -180,6 +191,7 @@ void WriteBufferToAttributeMemory(
     }
 }
 
+__attribute__((always_inline))
 void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, const uint8_t value) {
     const uint16_t offset = xy_to_at_addr(x, y);
 
@@ -191,8 +203,8 @@ void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, const uint
 
 oamBuffer_t oamBuffer __attribute__((aligned(256)));
 
+__attribute__((always_inline))
 void RefreshSprites(void) {
-    POKE(OAMADDR, 0);
     POKE(OAMDMA, (uint16_t)oamBuffer >> 8);
 }
 
@@ -208,12 +220,14 @@ scroll_t CartesianToScroll(uint16_t px, uint16_t py) {
     return (scroll_t){{ (uint8_t)(SPPUCTRL & 0xFC | nt), (uint8_t)(px & 0xFF), (uint8_t)(y & 0xFF) }};
 }
 
+__attribute__((hot))
 void SetColorPriority(const uint8_t priority) {
     SPPUMASK &= ~(RED | GREEN | BLUE);
     SPPUMASK |= priority & (RED | GREEN | BLUE);
     POKE(PPUMASK, SPPUMASK);
 }
 
+__attribute__((hot))
 void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomic uint8_t* latch) {
     while (!*latch) {
         while (  PEEK(PPUSTATUS) & 0x40)  { }  // wait for pre-render to clear stale hit

@@ -16,7 +16,7 @@ uint8_t xPlayer;    // relative to top left of player
 uint8_t yPlayer;
 
 uint16_t levelSize;
-uint16_t xWorldSpace;
+atomic uint16_t xWorldSpace;
 
 atomic uint8_t spriteZeroHandled;
 
@@ -57,7 +57,7 @@ RESET {
     );
 
     WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
-    WriteBufferToVideoMemory(VIEWPORT_X - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
+    WriteBufferToVideoMemory(VIEWPORT_TX - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
     WriteSingleToVideoMemory(0, 1, 0x2e);
     OAM_BUFFER[0] = (struct sprite_t){
@@ -67,7 +67,7 @@ RESET {
         .x = 0
     };
 
-    for (uint8_t i = 0; i < 2 + VIEWPORT_X; i += 2) {
+    for (uint8_t i = 0; i < 2 + VIEWPORT_TX; i += 2) {
         WriteProviderToVideoMemory(
             i, 2,
             GetNextWrite, 28, 1
@@ -102,25 +102,48 @@ RESET {
 }
 
 NMI {
-    SetScroll(0, 0);
-    RefreshSprites();
+    SetColorPriority(BLUE);
     PollControllers(&port1, &port2);
+    RefreshSprites();
 
     const int8_t deltaScroll = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
 
     if (deltaScroll) {
         xWorldSpace = deltaScroll > 0
-            ? xWorldSpace + VIEWPORT_X + deltaScroll < xWorldSpace
-                ? levelSize - VIEWPORT_X
+            ? xWorldSpace + VIEWPORT_PX + deltaScroll < xWorldSpace
+                ? (levelSize - VIEWPORT_TX) << 3
                 : xWorldSpace + deltaScroll
             :  xWorldSpace + deltaScroll > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
     }
+
     spriteZeroHandled = 0;
-#ifndef TARGET_NES
-    AudioUpdate();
-#endif
+    switch (SPACESHIP(deltaScroll, 0)) {
+        case 0:
+            break;
+
+        case 1:
+            VRAM {
+                WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX, 2, SIZED_OBJ(TileBuffer), 1);
+                WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, SIZED_OBJ(TileBuffer), 1);
+            }
+            break;
+
+        case -1:
+            VRAM {
+                WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, SIZED_OBJ(TileBuffer), 1);
+                WriteBufferToVideoMemory((xWorldSpace >> 3) - 2, 2, SIZED_OBJ(TileBuffer), 1);
+            }
+            break;
+
+        default:
+            // generic exit
+            break;
+    }
+
+    SetScroll(0, 0);
+    SetColorPriority(0);
 }
 
 static uint8_t Clear(uint16_t _) {

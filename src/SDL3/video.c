@@ -395,7 +395,7 @@ void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value) {
 }
 
 void WriteProviderToVideoMemory(
-    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), const uint8_t amt, const uint8_t polarity
+    const uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), const uint8_t amt, const uint8_t polarity
 ) {
     ppuCtrl &= ~POLARITY;
     if (polarity) ppuCtrl |= POLARITY;

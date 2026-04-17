@@ -111,6 +111,7 @@ enum PPU {
 };
 
 enum CTRL {
+    GEN_NMI     = 0x80,
     POLARITY    = 0x04,
     BG_ADDR     = 0x10,
     SPRITE_ADDR = 0x08
@@ -131,8 +132,10 @@ void WaitForPresent();
 void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_);
 
 #ifdef TARGET_NES
-#define VIEWPORT_X  32
-#define VIEWPORT_Y  30
+#define VIEWPORT_TX  32
+#define VIEWPORT_TY  30
+#define VIEWPORT_PX  (VIEWPORT_TX << 3)
+#define VIEWPORT_PY  (VIEWPORT_TY << 3)
 #else
 extern const SDL_DisplayMode* mode;
 extern uint8_t scale;
@@ -211,7 +214,7 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, uin
 
 void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value);
 
-void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint8_t), uint8_t amt, uint8_t polarity);
+void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), uint8_t amt, uint8_t polarity);
 
 uint16_t CartesianToAddress(uint16_t x, uint16_t y);
 
@@ -243,5 +246,21 @@ void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void));
 #endif
 
 void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomic uint8_t* latch);
+
+#ifdef TARGET_NES
+extern atomic uint8_t SPPUCTRL;
+extern atomic uint8_t SPPUMASK;
+
+#define VRAM                                \
+for (                                       \
+uint8_t i = (POKE(PPUMASK, 0), 0);\
+__builtin_expect(i < 1, 1);                 \
+i++, POKE(PPUMASK, SPPUMASK))
+
+#else
+#define VRAM \
+if (1)
+
+#endif
 
 #endif

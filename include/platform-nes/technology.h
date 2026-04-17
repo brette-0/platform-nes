@@ -4,6 +4,13 @@
 #define PEEK(addr) (*(volatile const unsigned char *)(addr))
 #define POKE(addr, data) (*(volatile unsigned char *)(addr)) = data
 
+#define SPACESHIP(l, r) \
+    (l == r             \
+        ? 0             \
+        : l > r         \
+            ? 1         \
+            : -1)
+
 #ifdef TARGET_NES
 #define atomic volatile
 #else
