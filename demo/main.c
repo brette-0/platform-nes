@@ -133,7 +133,7 @@ NMI {
                     lastXWorldSpace = xWorldSpace;
 
                 }
-            } else if (xWorldSpace < lastXWorldSpace) {
+            } else if (lastXWorldSpace && xWorldSpace <= lastXWorldSpace) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_LEFT  | (
                                             lastDeltaScroll > 0
@@ -141,7 +141,7 @@ NMI {
                                                 : 0
                                             );
                 lastDeltaScroll = deltaScroll;
-                lastXWorldSpace = xWorldSpace;
+                lastXWorldSpace = xWorldSpace - 0x10;
             }
         }
     }
@@ -153,8 +153,8 @@ NMI {
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + 0, 2, TileBuffer + 28, 28, 1);
         }
     }
 
