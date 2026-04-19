@@ -25,9 +25,9 @@ uint8_t GetNextMetaTile() {
         level_data_index++;
         hunk_remaining = LevelDataLengths[level_data_index];
     }
-    const uint8_t tile = LevelData[level_data_index];
+
     hunk_remaining--;
-    return tile;
+    return LevelData[level_data_index];
 }
 
 __attribute__((always_inline))
@@ -36,9 +36,9 @@ uint8_t GetPrevMetaTile() {
         level_data_index--;
         hunk_remaining = LevelDataLengths[level_data_index];
     }
-    const uint8_t tile = LevelData[level_data_index];
+
     hunk_remaining--;
-    return tile;
+    return LevelData[level_data_index];
 }
 
 uint8_t GetNextWrite(const uint16_t step) {
