@@ -119,40 +119,33 @@ NMI {
             : xWorldSpace + deltaScroll > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
-    }
 
-    spriteZeroHandled = 0;
-
-    // todo: sort out buffering a swap
-    switch (SPACESHIP(deltaScroll, 0)) {
-        case 0:
-            break;
-
-        case 1:
-            if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
-                levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_RIGHT;
+        if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
+            if (xWorldSpace > lastXWorldSpace) {
+                levelStreamCommand =    STREAM_LEVEL_LATCH |
+                                        STREAM_LEVEL_RIGHT | (
+                                            lastDeltaScroll < 0
+                                                ? STREAM_LEVEL_SWAP
+                                                : 0
+                                            );
 
                 if (lastDeltaScroll < 0) {
                     levelStreamCommand |= STREAM_LEVEL_SWAP;
                 }
+            } else if (xWorldSpace > 0x10) {
+                levelStreamCommand =    STREAM_LEVEL_LATCH |
+                                        STREAM_LEVEL_LEFT  | (
+                                            lastDeltaScroll > 0
+                                                ? STREAM_LEVEL_SWAP
+                                                : 0
+                                            );
             }
+        }
 
-            break;
-
-        case -1:
-            if (xWorldSpace < 0x10) break;
-            if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
-                levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_LEFT;
-
-                if (lastDeltaScroll > 0) {
-                    levelStreamCommand |= STREAM_LEVEL_SWAP;
-                }
-            }
-
-        default:
-            // generic exit
-            break;
+        lastDeltaScroll = deltaScroll;
     }
+
+    spriteZeroHandled = 0;
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
@@ -169,7 +162,6 @@ NMI {
         levelStreamCommand = 0;
     }
 
-    if (deltaScroll) lastDeltaScroll = deltaScroll;
     SetColorPriority(0);
 }
 
