@@ -128,10 +128,6 @@ NMI {
                                                 ? STREAM_LEVEL_SWAP
                                                 : 0
                                             );
-
-                if (lastDeltaScroll < 0) {
-                    levelStreamCommand |= STREAM_LEVEL_SWAP;
-                }
             } else if (xWorldSpace > 0x10) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_LEFT  | (
@@ -140,9 +136,9 @@ NMI {
                                                 : 0
                                             );
             }
-        }
 
-        lastDeltaScroll = deltaScroll;
+            lastDeltaScroll = deltaScroll;
+        }
     }
 
     spriteZeroHandled = 0;
