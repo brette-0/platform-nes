@@ -133,7 +133,7 @@ NMI {
                     lastXWorldSpace = xWorldSpace;
 
                 }
-            } else if (xWorldSpace >= 0x10) {
+            } else if (xWorldSpace < lastXWorldSpace) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_LEFT  | (
                                             lastDeltaScroll > 0
