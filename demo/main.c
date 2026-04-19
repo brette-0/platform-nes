@@ -145,11 +145,11 @@ NMI {
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
-            WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory((xWorldSpace >> 3) - 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 1, 2, TileBuffer + 28, 28, 1);
         }
     }
 
