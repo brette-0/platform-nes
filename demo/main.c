@@ -120,7 +120,7 @@ NMI {
                 ? 0
                 : xWorldSpace + deltaScroll;
 
-        if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
+        if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand && lastXWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
             if (xWorldSpace > lastXWorldSpace) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_RIGHT | (
@@ -128,7 +128,7 @@ NMI {
                                                 ? STREAM_LEVEL_SWAP
                                                 : 0
                                             );
-            } else if (xWorldSpace > 0x10) {
+            } else if (xWorldSpace >= 0x10) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_LEFT  | (
                                             lastDeltaScroll > 0
