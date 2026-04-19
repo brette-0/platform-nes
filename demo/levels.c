@@ -21,23 +21,23 @@ const uint8_t LevelDataLengths[] = {
 
 __attribute__((always_inline))
 uint8_t GetNextMetaTile() {
-    const uint8_t tile = LevelData[level_data_index];
-    hunk_remaining--;
     if (!hunk_remaining) {
         level_data_index++;
         hunk_remaining = LevelDataLengths[level_data_index];
     }
+    const uint8_t tile = LevelData[level_data_index];
+    hunk_remaining--;
     return tile;
 }
 
 __attribute__((always_inline))
 uint8_t GetPrevMetaTile() {
-    const uint8_t tile = LevelData[level_data_index];
-    hunk_remaining--;
     if (!hunk_remaining) {
         level_data_index--;
         hunk_remaining = LevelDataLengths[level_data_index];
     }
+    const uint8_t tile = LevelData[level_data_index];
+    hunk_remaining--;
     return tile;
 }
 
