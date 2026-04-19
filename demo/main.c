@@ -122,7 +122,7 @@ NMI {
 
         if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
             if (deltaScroll > 0) {
-                if (xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
+                if (xWorldSpace > lastXWorldSpace && xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
                     levelStreamCommand =    STREAM_LEVEL_LATCH |
                                             STREAM_LEVEL_RIGHT | (
                                                 lastDeltaScroll < 0
@@ -150,11 +150,11 @@ NMI {
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
         }
     }
 
