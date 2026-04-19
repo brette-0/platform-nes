@@ -121,14 +121,16 @@ NMI {
                 : xWorldSpace + deltaScroll;
 
         if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
-            if (xWorldSpace > lastXWorldSpace && lastXWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
-                levelStreamCommand =    STREAM_LEVEL_LATCH |
-                                        STREAM_LEVEL_RIGHT | (
-                                            lastDeltaScroll < 0
-                                                ? STREAM_LEVEL_SWAP
-                                                : 0
-                                            );
-                lastDeltaScroll = deltaScroll;
+            if (deltaScroll > 0) {
+                if (lastXWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
+                    levelStreamCommand =    STREAM_LEVEL_LATCH |
+                                            STREAM_LEVEL_RIGHT | (
+                                                lastDeltaScroll < 0
+                                                    ? STREAM_LEVEL_SWAP
+                                                    : 0
+                                                );
+                    lastDeltaScroll = deltaScroll;
+                }
             } else if (xWorldSpace >= 0x10) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
                                         STREAM_LEVEL_LEFT  | (
@@ -148,8 +150,8 @@ NMI {
             WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 1, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace + 1 & ~0x0f) >> 3) - 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace + 1 & ~0x0f) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
         }
     }
 
