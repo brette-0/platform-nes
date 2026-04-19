@@ -18,6 +18,7 @@ int8_t lastDeltaScroll;
 
 uint16_t levelSize;
 atomic uint16_t xWorldSpace;
+atomic uint16_t lastXWorldSpace;
 
 atomic uint8_t spriteZeroHandled;
 
@@ -109,7 +110,6 @@ NMI {
     RefreshSprites();
 
     const int8_t deltaScroll = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
-    const uint16_t lastXWorldSpace = xWorldSpace;
 
     if (deltaScroll) {
         xWorldSpace = deltaScroll > 0
@@ -122,7 +122,7 @@ NMI {
 
         if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
             if (deltaScroll > 0) {
-                if (lastXWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
+                if (xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
                     levelStreamCommand =    STREAM_LEVEL_LATCH |
                                             STREAM_LEVEL_RIGHT | (
                                                 lastDeltaScroll < 0
@@ -130,6 +130,8 @@ NMI {
                                                     : 0
                                                 );
                     lastDeltaScroll = deltaScroll;
+                    lastXWorldSpace = xWorldSpace;
+
                 }
             } else if (xWorldSpace >= 0x10) {
                 levelStreamCommand =    STREAM_LEVEL_LATCH |
@@ -139,6 +141,7 @@ NMI {
                                                 : 0
                                             );
                 lastDeltaScroll = deltaScroll;
+                lastXWorldSpace = xWorldSpace;
             }
         }
     }
@@ -150,8 +153,8 @@ NMI {
             WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory(((xWorldSpace + 1 & ~0x0f) >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory(((xWorldSpace + 1 & ~0x0f) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((xWorldSpace & ~0x0f) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
         }
     }
 
