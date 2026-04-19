@@ -64,6 +64,7 @@ uint8_t GetNextWrite(const uint16_t step) {
     return Metatiles[MetatileBuffer[step >> 1] << 2 | (step & 1)];
 }
 
+// TODO: check if the level stream bug is here
 uint8_t GetPrevWrite(const uint16_t step) {
     if (~step & 1) {
         if (step == 0) {
@@ -73,7 +74,7 @@ uint8_t GetPrevWrite(const uint16_t step) {
                 AttributeBuffer[j] &= mask;
         }
 
-        MetatileBuffer[step >> 1] = GetPrevMetaTile();
+        MetatileBuffer[(28 - step) >> 1] = GetPrevMetaTile();
 
         const uint8_t tile_row  = 2 + step;
         const uint8_t attr_idx  = tile_row >> 2;
