@@ -20,7 +20,7 @@ void SpriteZeroHandler(void) {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
             if (levelStreamCommand & STREAM_LEVEL_SWAP) {
                 hunk_remaining = LevelDataLengths[level_data_index] - hunk_remaining;
-                for (uint16_t i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT; i++) {
+                for (uint16_t i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT + LEVEL_HEIGHT; i++) {
                     GetNextMetaTile();
                 }
             }
@@ -29,7 +29,7 @@ void SpriteZeroHandler(void) {
         } else {
             if (levelStreamCommand & STREAM_LEVEL_SWAP) {
                 hunk_remaining = LevelDataLengths[level_data_index] - hunk_remaining;
-                for (uint16_t i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT; i++) {
+                for (uint16_t i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT + LEVEL_HEIGHT; i++) {
                     GetPrevMetaTile();
                 }
             }

@@ -68,6 +68,7 @@ RESET {
         .x = 0
     };
 
+    hunk_remaining = LevelDataLengths[0];
     for (uint8_t i = 0; i < 2 + VIEWPORT_TX; i += 2) {
         WriteProviderToVideoMemory(
             i, 2,
@@ -122,28 +123,30 @@ NMI {
 
     spriteZeroHandled = 0;
 
+    // todo: sort out buffering a swap
     switch (SPACESHIP(deltaScroll, 0)) {
         case 0:
             break;
 
         case 1:
-            if ((xWorldSpace & 0x0f) == 0x00) {
+            if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
                 levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_RIGHT;
+
+                if (lastDeltaScroll < 0) {
+                    levelStreamCommand |= STREAM_LEVEL_SWAP;
+                }
             }
 
-            if (lastDeltaScroll < 0) {
-                levelStreamCommand |= STREAM_LEVEL_SWAP;
-            }
             break;
 
         case -1:
             if (xWorldSpace < 0x10) break;
-            if ((xWorldSpace & 0x0f) == 0x00) {
+            if ((xWorldSpace & 0x0f) == 0x00 && !levelStreamCommand) {
                 levelStreamCommand = STREAM_LEVEL_LATCH | STREAM_LEVEL_LEFT;
-            }
 
-            if (lastDeltaScroll > 0) {
-                levelStreamCommand |= STREAM_LEVEL_SWAP;
+                if (lastDeltaScroll > 0) {
+                    levelStreamCommand |= STREAM_LEVEL_SWAP;
+                }
             }
 
         default:
