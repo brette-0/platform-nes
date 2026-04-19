@@ -14,7 +14,7 @@ uint8_t port2;
 
 uint8_t xPlayer;    // relative to top left of player
 uint8_t yPlayer;
-uint8_t lastDeltaScroll;
+int8_t lastDeltaScroll;
 
 uint16_t levelSize;
 atomic uint16_t xWorldSpace;
@@ -77,7 +77,7 @@ RESET {
 
         WriteProviderToVideoMemory(
             i + 1, 2,
-            GetCurrentWrite, 28, 1
+            GetCurrentNext, 28, 1
         );
 
         WriteBufferToAttributeMemory(i & ~3, 2, AttributeBuffer, 8, 1);
@@ -159,8 +159,8 @@ NMI {
             WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory((xWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
         } else {
-            WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((xWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory((xWorldSpace >> 3) - 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory((xWorldSpace >> 3) - 1, 2, TileBuffer + 28, 28, 1);
         }
     }
 
@@ -169,7 +169,7 @@ NMI {
         levelStreamCommand = 0;
     }
 
-    lastDeltaScroll = deltaScroll;
+    if (deltaScroll) lastDeltaScroll = deltaScroll;
     SetColorPriority(0);
 }
 
