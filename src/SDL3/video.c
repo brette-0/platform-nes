@@ -435,27 +435,29 @@ static void oam_grow_to(size_t sprites) {
     oamBuffer.cap  = n;
 }
 
-/* Bytes needed to hold `count` strided writes with stride `step`. */
-static size_t strided_bytes(uint16_t count, uint16_t step) {
+/* Smallest buffer size in bytes that holds `count` strided writes from index 0 with
+   signed stride `step`. With non-positive step, the highest index written is 0. */
+static size_t strided_bytes(uint16_t count, int16_t step) {
     if (count == 0) return 0;
-    return (size_t)(count - 1) * step + 1;
+    if (step <= 0) return 1;
+    return (size_t)(count - 1) * (size_t)step + 1;
 }
 
-void OAMPopulateFromBuffer(uint16_t offset, const uint8_t* buffer, uint16_t sBuffer, uint16_t step) {
+void OAMPopulateFromBuffer(uint16_t offset, const uint8_t* buffer, uint16_t sBuffer, int16_t step) {
     size_t last_byte = (size_t)offset + strided_bytes(sBuffer, step);
     size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
     oam_grow_to(sprites);
     uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
-    for (uint16_t i = 0; i < sBuffer; i++) dst[i * step] = buffer[i];
+    for (uint16_t i = 0; i < sBuffer; i++) dst[(int)i * step] = buffer[i];
     if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
 }
 
-void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t amt, uint16_t step) {
+void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t amt, int16_t step) {
     size_t last_byte = (size_t)offset + strided_bytes(amt, step);
     size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
     oam_grow_to(sprites);
     uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
-    for (uint16_t i = 0; i < amt; i++) dst[i * step] = fn(i);
+    for (uint16_t i = 0; i < amt; i++) dst[(int)i * step] = fn(i);
     if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
 }
 

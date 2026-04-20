@@ -84,17 +84,20 @@ extern const uint8_t name[sizeof(#chars)]
 /**
  * General-purpose byte copy from buffer to (target + offset) with stride.
  * Writes buffer[i] to target[offset + i * step] for i in [0, sBuffer).
+ * `step` is signed; a negative value walks backward from `offset`. The caller
+ * must ensure all written indices stay within the target buffer.
  * On SDL3 builds, if `target` is &oamBuffer, routing switches to the
  * OAM growth handler.
  */
 void PopulateFromBuffer(uint8_t* target, uint16_t offset,
-                        const uint8_t* buffer, uint16_t sBuffer, uint16_t step);
+                        const uint8_t* buffer, uint16_t sBuffer, int16_t step);
 
 /**
  * General-purpose fill from a provider function with stride.
  * Writes fn(i) to target[offset + i * step] for i in [0, amt).
+ * `step` is signed; a negative value walks backward from `offset`.
  */
 void PopulateFromProvider(uint8_t* target, uint16_t offset,
-                          uint8_t (*fn)(uint16_t), uint16_t amt, uint16_t step);
+                          uint8_t (*fn)(uint16_t), uint16_t amt, int16_t step);
 
 #endif

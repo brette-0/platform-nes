@@ -33,8 +33,8 @@ void SpriteZeroHandler(void) {
                      GetPrevMetaTile();
                  }
             }
-            PopulateFromProvider(TileBuffer, 28,  GetPrevWrite, 28, 1);
-            PopulateFromProvider(TileBuffer, 0, GetCurrentPrev, 28, 1);
+            PopulateFromProvider(TileBuffer, 55,  GetPrevWrite, 28, -1);
+            PopulateFromProvider(TileBuffer, 27, GetCurrentPrev, 28, -1);
         }
         levelStreamCommand &= ~STREAM_LEVEL_LATCH;
         levelStreamCommand |=  STREAM_LEVEL_DONE;

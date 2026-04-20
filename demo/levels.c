@@ -74,18 +74,18 @@ uint8_t GetPrevWrite(const uint16_t step) {
                 AttributeBuffer[j] &= mask;
         }
 
-        MetatileBuffer[LEVEL_HEIGHT - (step >> 1) - 1] = GetPrevMetaTile();
+        MetatileBuffer[step >> 1] = GetPrevMetaTile();
 
         const uint8_t tile_row  = 2 + step;
         const uint8_t attr_idx  = tile_row >> 2;
-        const uint8_t pal       = METATILE_ATTR(MetatileBuffer[LEVEL_HEIGHT - (step >> 1) - 1]);
+        const uint8_t pal       = METATILE_ATTR(MetatileBuffer[(LEVEL_HEIGHT) - (step >> 1) - 1]);
         const uint8_t is_bottom = (tile_row >> 1) & 1;
         const uint8_t shift     = (attr_column & 1)
                                 ? (is_bottom ? 6 : 2)
                                 : (is_bottom ? 4 : 0);
         AttributeBuffer[attr_idx] |= (pal << shift);
     }
-    return Metatiles[MetatileBuffer[LEVEL_HEIGHT - (step >> 1) - 1] << 2 | (step & 1)];
+    return Metatiles[MetatileBuffer[step >> 1] << 2 | (~step & 1)];
 }
 
 uint8_t GetCurrentNext(const uint16_t step) {
@@ -93,5 +93,5 @@ uint8_t GetCurrentNext(const uint16_t step) {
 }
 
 uint8_t GetCurrentPrev(const uint16_t step) {
-    return Metatiles[MetatileBuffer[LEVEL_HEIGHT - (step >> 1) - 1] << 2 | 2 | step & 1];
+    return Metatiles[MetatileBuffer[step >> 1] << 2 | 2 | (~step & 1)];
 }
