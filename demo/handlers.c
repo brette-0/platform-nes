@@ -1,7 +1,6 @@
 ﻿#include "handlers.h"
 #include <platform-nes/video.h>
 #include <stdint.h>
-#include <SDL3/SDL_log.h>
 
 #include "levels.h"
 #include "main.h"

@@ -139,7 +139,7 @@ extern const SDL_DisplayMode* mode;
 extern uint8_t scale;
 
 #define VIEWPORT_TX  \
-  ((mode->w / scale) >> 3)
+  (((mode->w / scale) >> 3) & ~3u)
 #define VIEWPORT_TY  \
   ((mode->h / scale) >> 3)
 #endif

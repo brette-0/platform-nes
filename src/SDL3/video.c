@@ -345,21 +345,23 @@ void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
 }
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
-    uint16_t nt_h = x / 32;
+    const uint16_t nt_cols = (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32);
+    uint16_t nt_h = (x / 32) % nt_cols;
     uint16_t nt_v = y / 30;
     uint16_t col  = x % 32;
     uint16_t row  = y % 30;
 
-    return (nt_h + nt_v * (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32)) * 0x400 + row * 32 + col;
+    return (nt_h + nt_v * nt_cols) * 0x400 + row * 32 + col;
 }
 
 inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
-    uint16_t nt_h = x / 32;
+    const uint16_t nt_cols = (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32);
+    uint16_t nt_h = (x / 32) % nt_cols;
     uint16_t nt_v = y / 30;
     uint16_t col  = x % 32;
     uint16_t row  = y % 30;
 
-    return (nt_h + nt_v * (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32)) * 0x400
+    return (nt_h + nt_v * nt_cols) * 0x400
          + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
@@ -415,7 +417,7 @@ void WriteBufferToAttributeMemory(
 ) {
     const uint16_t offset = xy_to_at_addr(x, y);
     for (uint8_t i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 8 : 1)] = source[i];
+        VideoRAM[offset + i * (polarity ? 8 : 1)] = source[i];
     }
 }
 
