@@ -5,6 +5,7 @@
 #include "levels.h"
 #include "metasprites.h"
 #include "handlers.h"
+#include "colors.h"
 
 #define SPRITE_STRIDE  sizeof(struct sprite_t)
 #define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
@@ -58,7 +59,8 @@ RESET {
         AdjustSpriteX, 8, SPRITE_STRIDE
     );
 
-    WriteBufferToPaletteMemory(0, SIZED_OBJ(BGColours));
+    WriteBufferToPaletteMemory(BG_0,         SIZED_OBJ(BGColours));
+    WriteBufferToPaletteMemory(SPRITE_0 + 1, SIZED_OBJ(marioColors));
     WriteBufferToVideoMemory(VIEWPORT_TX - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
     WriteSingleToVideoMemory(0, 1, 0x2e);

@@ -128,6 +128,17 @@ enum MASK {
     BLUE           = 0x80,
 };
 
+enum PALETTE {
+    BG_0          = 0 << 4,
+    BG_1          = 2 << 4,
+    BG_2          = 3 << 4,
+    BG_3          = 4 << 4,
+    SPRITE_0      = 5 << 4,
+    SPRITE_1      = 6 << 4,
+    SPRITE_2      = 7 << 4,
+    SPRITE_3      = 8 << 4,
+};
+
 void WaitForPresent();
 void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_);
 
