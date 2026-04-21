@@ -196,7 +196,6 @@ ${FAMISTUDIO_CFG}")
     # ----------------------------------------------------------------------
 else()
     project(platform-nes C)
-    find_package(SDL3 REQUIRED)
 
     if(TARGET_PLATFORM STREQUAL "mac")
         set(PLATFORM_DIR "macos")
@@ -211,6 +210,27 @@ else()
         message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux")
     endif()
 
+    # ------------------------------------------------------------------
+    # Fetch SDL3 source and build it statically alongside the project.
+    # ------------------------------------------------------------------
+    set(SDL3_GIT_TAG "release-3.2.16" CACHE STRING "SDL3 git tag to fetch")
+
+    include(FetchContent)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON  CACHE BOOL "" FORCE)
+    set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS  OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+            SDL3
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG        ${SDL3_GIT_TAG}
+            GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(SDL3)
+
     file(GLOB SDL3_SOURCES src/SDL3/*.c)
     file(GLOB PLATFORM_SOURCES src/${PLATFORM_DIR}/*.c)
 
@@ -219,7 +239,7 @@ else()
             ${CMAKE_SOURCE_DIR}/include
     )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
-    target_link_libraries(platform-nes PRIVATE SDL3::SDL3)
+    target_link_libraries(platform-nes PUBLIC SDL3::SDL3-static)
 
     file(GLOB DEMO_SOURCES demo/*.c)
     add_executable(demo ${DEMO_SOURCES})
@@ -237,11 +257,15 @@ else()
             $<TARGET_FILE_DIR:demo>/sfx
     )
 
-    if(TARGET_PLATFORM STREQUAL "win")
+    # ------------------------------------------------------------------
+    # Strip the final executable in non-Debug builds. MSVC has no strip
+    # (symbols live in a separate .pdb), so only run when CMAKE_STRIP is
+    # available (GCC/Clang/MinGW toolchains).
+    # ------------------------------------------------------------------
+    if(CMAKE_STRIP AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_custom_command(TARGET demo POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                $<TARGET_FILE:SDL3::SDL3>
-                $<TARGET_FILE_DIR:demo>
+                COMMAND ${CMAKE_STRIP} $<TARGET_FILE:demo>
+                COMMENT "Stripping demo executable"
         )
     endif()
 endif()
