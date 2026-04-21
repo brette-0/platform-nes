@@ -152,11 +152,13 @@ NMI {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
-            WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) + VIEWPORT_TX) & ~3, 2, AttributeBuffer, 8, 1);
+            if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
+                WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) + VIEWPORT_TX) & ~3, 2, AttributeBuffer, 8, 1);
         } else {
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 1, 2, TileBuffer, 28, 1);
             WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
-            WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) - 2) & ~3, 2, AttributeBuffer, 8, 1);
+            if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
+                WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) - 2) & ~3, 2, AttributeBuffer, 8, 1);
         }
     }
 
