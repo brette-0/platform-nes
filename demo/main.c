@@ -116,7 +116,7 @@ NMI {
             ? xWorldSpace + deltaScroll > (uint16_t)((levelSize - VIEWPORT_MX) << 4)
                 ? (uint16_t)((levelSize - VIEWPORT_MX) << 4)
                 : xWorldSpace + deltaScroll
-            : xWorldSpace + deltaScroll > xWorldSpace
+            : (uint16_t)(xWorldSpace + deltaScroll) > xWorldSpace
                 ? 0
                 : xWorldSpace + deltaScroll;
 

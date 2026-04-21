@@ -1,6 +1,8 @@
 ﻿#include "handlers.h"
 #include <platform-nes/video.h>
 #include <stdint.h>
+#include <SDL3/SDL_log.h>
+
 #include "levels.h"
 #include "main.h"
 #include "platform-nes/audio.h"
@@ -12,10 +14,13 @@ extern uint16_t xWorldSpace;
 atomic uint8_t levelStreamCommand;
 uint8_t TileBuffer[56];
 
+extern uint16_t lastXWorldSpace;
+
 void SpriteZeroHandler(void) {
     spriteZeroHandled = 1;
     SetScroll(xWorldSpace, 16);
-    AudioUpdate();
+
+    //AudioUpdate();    TODO: for any actual test, uncomment this, its just painful to listen to 24/7
     if (levelStreamCommand & STREAM_LEVEL_LATCH) {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
             if (levelStreamCommand & STREAM_LEVEL_SWAP) {
