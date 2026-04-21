@@ -1,0 +1,5 @@
+C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos/CMakeFiles/platform-nes.dir
+C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos/CMakeFiles/demo.dir
+C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos/CMakeFiles/demo_pass2_asm.dir
+C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos/CMakeFiles/edit_cache.dir
+C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos/CMakeFiles/rebuild_cache.dir

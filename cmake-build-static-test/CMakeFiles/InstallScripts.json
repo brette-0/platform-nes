@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-static-test/cmake_install.cmake",
-		"C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-static-test/_deps/sdl3-build/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
