@@ -2,5 +2,13 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-clang64-debug/_deps/libusb-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-clang64-debug/_deps/sdl3-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-win-debug/_deps/sdl3-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-win-release/_deps/sdl3-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-linux-debug/_deps/libusb_cmake-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-linux-debug/_deps/sdl3-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/libusb_cmake-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/sdl3-src" vcs="Git" />
   </component>
 </project>

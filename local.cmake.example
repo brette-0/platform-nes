@@ -1,0 +1,10 @@
+# Per-developer CMake overrides.
+#
+# Copy this file to local.cmake and edit the values for your machine.
+# local.cmake is gitignored, so these settings stay on your machine.
+#
+# CMakeLists.txt includes local.cmake automatically if it exists.
+
+# Path to your llvm-mos-sdk install, used by the NES build.
+# Only required if you build the NES target.
+set(CMAKE_PREFIX_PATH "C:/llvm-mos" CACHE PATH "" FORCE)

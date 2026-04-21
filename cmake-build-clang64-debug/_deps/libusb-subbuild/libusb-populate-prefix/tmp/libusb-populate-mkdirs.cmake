@@ -1,0 +1,27 @@
+# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
+# file LICENSE.rst or https://cmake.org/licensing for details.
+
+cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
+
+# If CMAKE_DISABLE_SOURCE_CHANGES is set to true and the source directory is an
+# existing directory in our source tree, calling file(MAKE_DIRECTORY) on it
+# would cause a fatal error, even though it would be a no-op.
+if(NOT EXISTS "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-src")
+  file(MAKE_DIRECTORY "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-src")
+endif()
+file(MAKE_DIRECTORY
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-build"
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix"
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/tmp"
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/src/libusb-populate-stamp"
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/src"
+  "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/src/libusb-populate-stamp"
+)
+
+set(configSubDirs )
+foreach(subDir IN LISTS configSubDirs)
+    file(MAKE_DIRECTORY "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/src/libusb-populate-stamp/${subDir}")
+endforeach()
+if(cfgdir)
+  file(MAKE_DIRECTORY "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/libusb-subbuild/libusb-populate-prefix/src/libusb-populate-stamp${cfgdir}") # cfgdir has leading slash
+endif()

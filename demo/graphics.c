@@ -2,7 +2,7 @@
 #include <platform-nes/technology.h>
 #include "graphics.h"
 
-CHARACTER_ROM(crate, "../demo./chr/all");
+CHARACTER_ROM(crate, "../demo/chr/all");
 
 CHARACTER_ROM_ALIGN(0x2000);                // gen full (SDL3 compat)
 

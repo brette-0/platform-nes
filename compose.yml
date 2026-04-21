@@ -1,0 +1,32 @@
+# Cross-platform build entry point for platform-nes.
+#
+# Run from the repository root, in any shell (PowerShell, bash, zsh, cmd):
+#
+#   docker compose run --rm build-linux
+#
+# Override the preset by setting PRESET in the environment:
+#
+#   PRESET=linux-debug docker compose run --rm build-linux          # bash
+#   $env:PRESET="linux-debug"; docker compose run --rm build-linux  # PowerShell
+#
+# Output is written to ./cmake-build-<preset-name> in the repository root.
+
+services:
+  build-linux:
+    build:
+      context: docker
+      dockerfile: Dockerfile.linux
+    image: platform-nes-linux:bullseye
+    working_dir: /src
+    volumes:
+      - .:/src
+    environment:
+      PRESET: ${PRESET:-linux-release}
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET"
+        cmake --build "cmake-build-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-$$PRESET/demo"

@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/cmake_install.cmake",
+		"C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

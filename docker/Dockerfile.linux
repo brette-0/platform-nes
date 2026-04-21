@@ -1,0 +1,51 @@
+# Cross-platform Linux build image for platform-nes.
+#
+# Debian Bullseye gives glibc 2.31, which runs on essentially every
+# currently supported desktop Linux distribution. SDL3 is linked
+# statically, so the resulting binary only needs the system X11/
+# Wayland/ALSA/PulseAudio libraries at runtime, not their -dev
+# packages.
+FROM debian:bullseye
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        gdb \
+        ninja-build \
+        git \
+        wget \
+        ca-certificates \
+        pkg-config \
+        libudev-dev \
+        libasound2-dev \
+        libpulse-dev \
+        libx11-dev \
+        libxext-dev \
+        libxrandr-dev \
+        libxcursor-dev \
+        libxi-dev \
+        libxfixes-dev \
+        libxss-dev \
+        libxkbcommon-dev \
+        libwayland-dev \
+        libdrm-dev \
+        libgbm-dev \
+        libgl1-mesa-dev \
+        libegl1-mesa-dev \
+        libdbus-1-dev \
+        libibus-1.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debian Bullseye ships CMake 3.18, but CMakePresets.json uses features
+# that require 3.21+. Install a current CMake from Kitware's official
+# Linux binary release.
+ARG CMAKE_VERSION=3.28.3
+RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
+        | tar -xz -C /opt \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/bin/cmake
+
+WORKDIR /src

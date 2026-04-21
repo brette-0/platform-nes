@@ -1,0 +1,134 @@
+{
+	"inputs" : 
+	[
+		{
+			"path" : "CMakeLists.txt"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/llvm-mos/lib/cmake/llvm-mos-sdk/llvm-mos-sdk-config.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "cmake-build-clang64-llvm-mos/CMakeFiles/4.0.2/CMakeSystem.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/llvm-mos/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake"
+		},
+		{
+			"isExternal" : true,
+			"path" : "C:/llvm-mos/lib/cmake/llvm-mos-sdk/find-mos-compiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeSystemSpecificInitialize.cmake"
+		},
+		{
+			"isGenerated" : true,
+			"path" : "cmake-build-clang64-llvm-mos/CMakeFiles/4.0.2/CMakeCCompiler.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeSystemSpecificInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeGenericSystem.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeInitializeConfigs.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Platform/Generic.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeCInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeLanguageInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Compiler/Clang-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Compiler/Clang.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Compiler/GNU.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Compiler/CMakeCommonCompilerMacros.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Platform/Generic.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/CMakeCommonLanguageInclude.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Internal/CMakeCLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Internal/CMakeCommonLinkerInformation.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Linker/LLD-C.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Linker/LLD.cmake"
+		},
+		{
+			"isCMake" : true,
+			"isExternal" : true,
+			"path" : "C:/Program Files/JetBrains/CLion 2025.2.4/bin/cmake/win/x64/share/cmake-4.0/Modules/Linker/GNU.cmake"
+		}
+	],
+	"kind" : "cmakeFiles",
+	"paths" : 
+	{
+		"build" : "C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-llvm-mos",
+		"source" : "C:/Users/benis/Documents/GitHub/platform-nes"
+	},
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 1
+	}
+}

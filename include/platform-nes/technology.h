@@ -17,6 +17,15 @@
 #define atomic _Atomic
 #endif
 
+// Clang/LLVM-only function attribute that biases the optimizer toward
+// small code. Used for NES builds where ROM space is tight; GCC
+// ignores it (with a warning) on desktop builds, so we strip it there.
+#if defined(__clang__)
+#define MINSIZE __attribute__((minsize))
+#else
+#define MINSIZE
+#endif
+
 #define CM(ch, val) \
 "  .elseif \\c == " #ch "\n" \
 "    .byte " #val "\n"

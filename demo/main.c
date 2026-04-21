@@ -184,7 +184,7 @@ static uint8_t AdjustSpriteX(uint16_t i) {
     return xPlayer + (i & 1) * 8;
 }
 
-__attribute__((minsize))
+MINSIZE
 static void BuildLevelSize() {
     uint8_t temp = 0;
     levelSize    = 0;

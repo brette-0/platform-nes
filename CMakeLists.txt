@@ -1,4 +1,10 @@
-﻿cmake_minimum_required(VERSION 3.20)
+﻿cmake_minimum_required(VERSION 3.21)
+
+# Per-developer overrides (paths to SDKs, custom cache vars, etc.).
+# Copy local.cmake.example to local.cmake and edit for your machine.
+# local.cmake is gitignored.
+include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
+
 set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_NAME define")
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
@@ -216,12 +222,99 @@ else()
     set(SDL3_GIT_TAG "release-3.2.16" CACHE STRING "SDL3 git tag to fetch")
 
     include(FetchContent)
+
+    # ------------------------------------------------------------------
+    # On Linux, also build libusb from source from the official
+    # libusb-cmake wrapper repository. libusb-cmake embeds the real
+    # libusb source as a git subtree; its 'main' branch tracks the
+    # latest stable libusb release (currently 1.0.29). Override
+    # LIBUSB_CMAKE_GIT_TAG to pin to a specific tag or SHA for
+    # reproducible builds.
+    #
+    # NOTE: libusb's Linux backend requires libudev headers to be
+    # installed on the host system (libudev-dev on Debian/Ubuntu,
+    # systemd-devel on Fedora/RHEL).
+    # ------------------------------------------------------------------
+    if(TARGET_PLATFORM STREQUAL "linux")
+        set(LIBUSB_CMAKE_GIT_TAG "main" CACHE STRING
+                "libusb-cmake git ref; 'main' tracks latest stable libusb")
+
+        set(LIBUSB_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        set(LIBUSB_BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
+        set(LIBUSB_BUILD_TESTING     OFF CACHE BOOL "" FORCE)
+        set(LIBUSB_INSTALL_TARGETS   OFF CACHE BOOL "" FORCE)
+        set(LIBUSB_ENABLE_LOGGING    ON  CACHE BOOL "" FORCE)
+
+        FetchContent_Declare(
+                libusb_cmake
+                GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
+                GIT_TAG        ${LIBUSB_CMAKE_GIT_TAG}
+                GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(libusb_cmake)
+
+        # --------------------------------------------------------------
+        # Redirect SDL3's libusb detection at our in-tree build.
+        #
+        # SDL3 calls find_package(LibUSB), which invokes its bundled
+        # cmake/FindLibUSB.cmake and scans the filesystem for libusb.
+        # To make it adopt the libusb we just built, we:
+        #
+        #   1. Pre-create the LibUSB::LibUSB imported target the find
+        #      module would otherwise define, as an alias of usb-1.0.
+        #      The module's `if(LibUSB_FOUND AND NOT TARGET
+        #      LibUSB::LibUSB)` guard then skips its own add_library.
+        #
+        #   2. Seed LibUSB_INCLUDE_PATH and LibUSB_LIBRARY in the
+        #      cache, so find_path / find_library are no-ops and
+        #      find_package_handle_standard_args sets LibUSB_FOUND.
+        #
+        #   3. Point LibUSB_INCLUDE_PATH at libusb-cmake's vendored
+        #      libusb sources so the find module's file(READ) of
+        #      libusb.h returns a real LIBUSB_API_VERSION that passes
+        #      its >= 0x01000102 check.
+        #
+        #   4. Force SDL_HIDAPI_LIBUSB_SHARED=OFF. Our libusb is a
+        #      static archive with no SONAME; SDL3's dlopen path can't
+        #      extract USB_1.0_LIB_SONAME from it, and we want the
+        #      direct-link branch in sdlchecks.cmake instead.
+        # --------------------------------------------------------------
+        if(NOT TARGET LibUSB::LibUSB)
+            add_library(LibUSB::LibUSB ALIAS usb-1.0)
+        endif()
+
+        set(LibUSB_INCLUDE_PATH "${libusb_cmake_SOURCE_DIR}/libusb/libusb"
+                CACHE PATH "Path to libusb headers (points at libusb-cmake's vendored sources)" FORCE)
+
+        # LibUSB_LIBRARY only needs a non-empty, non-NOTFOUND value to
+        # satisfy find_package_handle_standard_args; the actual link
+        # edge goes through the LibUSB::LibUSB alias above, not this
+        # path. Pointing it at the header file is a harmless placeholder.
+        set(LibUSB_LIBRARY "${LibUSB_INCLUDE_PATH}/libusb.h"
+                CACHE FILEPATH "Placeholder; real linkage flows through the LibUSB::LibUSB alias target" FORCE)
+
+        set(SDL_HIDAPI_LIBUSB_SHARED OFF CACHE BOOL "" FORCE)
+
+        # Disable SDL3's libusb-based HIDAPI backend. Its configure-time
+        # check_c_source_compiles test requires LibUSB::LibUSB to resolve
+        # inside an isolated try_compile scratch project, which ALIAS
+        # targets (our hook above) don't survive. The project links
+        # usb-1.0 directly for its own NES-over-USB needs, and SDL3
+        # still supports gamepads via the native hidraw backend.
+        set(SDL_HIDAPI_LIBUSB OFF CACHE BOOL "" FORCE)
+    endif()
+
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
     set(SDL_STATIC ON  CACHE BOOL "" FORCE)
     set(SDL_TEST   OFF CACHE BOOL "" FORCE)
     set(SDL_TESTS  OFF CACHE BOOL "" FORCE)
     set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
     set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+    set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+    set(SDL_POWER OFF CACHE BOOL "" FORCE)
+    set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+    set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
             SDL3
@@ -241,9 +334,28 @@ else()
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
     target_link_libraries(platform-nes PUBLIC SDL3::SDL3-static)
 
+    if(TARGET_PLATFORM STREQUAL "linux")
+        target_link_libraries(platform-nes PUBLIC usb-1.0)
+    endif()
+
     file(GLOB DEMO_SOURCES demo/*.c)
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
+
+    # Enable LTO for release-type configs on desktop targets. CMake routes
+    # archive/link through gcc-ar/gcc-ranlib (GCC) or lld (Clang) automatically
+    # once INTERPROCEDURAL_OPTIMIZATION is set on the target.
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+    if(_ipo_ok)
+        foreach(_cfg Release MinSizeRel RelWithDebInfo)
+            string(TOUPPER ${_cfg} _CFG)
+            set_property(TARGET demo platform-nes
+                    PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+        endforeach()
+    else()
+        message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+    endif()
 
     add_custom_command(TARGET demo POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory

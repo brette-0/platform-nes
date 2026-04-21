@@ -73,15 +73,17 @@ struct sprite_t {
 
 extern oamBuffer_t oamBuffer;
 
-#ifdef TARGET_NES
-  #define CHARACTER_ROM_ALIGN(addr) __attribute__((section(".chr_rom"), aligned(addr)))
-#elif defined(_WIN32)
-  #define CHARACTER_ROM_ALIGN(addr) __attribute__((section("chr_rom$m"), aligned(addr)))
-#elif defined(__APPLE__)
-  #define CHARACTER_ROM_ALIGN(addr) __attribute__((section("__DATA,chr_rom"), aligned(addr)))
-#else
-  #define CHARACTER_ROM_ALIGN(addr) __attribute__((section("chr_rom"), aligned(addr)))
-#endif
+// Force alignment of the current insertion point inside the chr_rom
+// section. Emits a .balign directive inside _CHR_PUSH/_CHR_POP so the
+// next bytes added to the section (via CHARACTER_ROM, etc.) start at
+// an `addr`-byte boundary. Required by the PPU / emulated PPU, which
+// maps CHR pages on fixed 8 KB boundaries.
+#define CHARACTER_ROM_ALIGN(addr)                \
+__asm__(                                         \
+_CHR_PUSH                                        \
+".balign " #addr "\n"                            \
+_CHR_POP                                         \
+)
 
 #define CHR(name)       ((const uint8_t *)(name##_start))
 #define CHR_SIZE(name)  ((size_t)(name##_end - name##_start))

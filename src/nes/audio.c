@@ -43,23 +43,11 @@ void AudioInit(void) {
 }
 
 void TrackPlay(const uint8_t index) {
-    __asm__ volatile (
-        "lda #<%0\n"
-        "jsr famistudio_music_play\n"
-        :
-        : "i"(index)
-        : "memory"
-    );
+    famistudio_music_play(index);
 }
 
 void TrackPause(const uint8_t pause) {
-    __asm__ volatile (
-        "lda #<%0\n"
-        "jsr famistudio_music_pause\n"
-        :
-        : "i"(pause)
-        : "memory"
-    );
+    famistudio_music_pause(pause);
 }
 
 void TrackStop(void) {

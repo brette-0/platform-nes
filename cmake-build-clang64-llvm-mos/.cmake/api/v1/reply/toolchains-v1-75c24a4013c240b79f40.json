@@ -1,0 +1,51 @@
+{
+	"kind" : "toolchains",
+	"toolchains" : 
+	[
+		{
+			"compiler" : 
+			{
+				"id" : "Clang",
+				"implicit" : 
+				{
+					"includeDirectories" : 
+					[
+						"C:/llvm-mos/mos-platform/nes/asminc",
+						"C:/llvm-mos/mos-platform/common/asminc",
+						"C:/llvm-mos/mos-platform/nes/include",
+						"C:/llvm-mos/mos-platform/common/include",
+						"C:/llvm-mos/lib/clang/23/include"
+					],
+					"linkDirectories" : 
+					[
+						"C:/llvm-mos/mos-platform/nes-nrom/lib",
+						"C:/llvm-mos/mos-platform/nes/lib",
+						"C:/llvm-mos/mos-platform/common/lib"
+					],
+					"linkFrameworkDirectories" : [],
+					"linkLibraries" : 
+					[
+						"sr-complexity-limit=10000000",
+						"-l:crt0.o",
+						"crt0",
+						"crt",
+						"c"
+					]
+				},
+				"path" : "C:/llvm-mos/bin/mos-nes-nrom-clang.bat",
+				"version" : "23.0.0"
+			},
+			"language" : "C",
+			"sourceFileExtensions" : 
+			[
+				"c",
+				"m"
+			]
+		}
+	],
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 0
+	}
+}

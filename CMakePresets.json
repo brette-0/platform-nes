@@ -1,0 +1,87 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "_base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/cmake-build-${presetName}"
+    },
+    {
+      "name": "nes-release",
+      "inherits": "_base",
+      "displayName": "NES (Release)",
+      "description": "NES ROM via llvm-mos-sdk. Requires llvm-mos-sdk on CMAKE_PREFIX_PATH.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "nes",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "nes-debug",
+      "inherits": "nes-release",
+      "displayName": "NES (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "_base",
+      "displayName": "Linux (Release, Docker)",
+      "description": "Linux desktop build. Runs inside the Docker toolchain.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "linux",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "vendor": {
+        "jetbrains.com/clion": { "toolchain": "Docker" }
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "linux-release",
+      "displayName": "Linux (Debug, Docker)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "win-release",
+      "inherits": "_base",
+      "displayName": "Windows (Release)",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "win",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "win-debug",
+      "inherits": "win-release",
+      "displayName": "Windows (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "mac-release",
+      "inherits": "_base",
+      "displayName": "macOS (Release)",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "mac",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      }
+    },
+    {
+      "name": "mac-debug",
+      "inherits": "mac-release",
+      "displayName": "macOS (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ]
+}
