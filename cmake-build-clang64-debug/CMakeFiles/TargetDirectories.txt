@@ -1,9 +1,0 @@
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/CMakeFiles/platform-nes.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/CMakeFiles/demo.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/CMakeFiles/edit_cache.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/CMakeFiles/rebuild_cache.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/CMakeFiles/SDL3-static.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/CMakeFiles/SDL3_test.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/CMakeFiles/SDL_uclibc.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/CMakeFiles/edit_cache.dir
-C:/Users/benis/Documents/GitHub/platform-nes/cmake-build-clang64-debug/_deps/sdl3-build/CMakeFiles/rebuild_cache.dir
