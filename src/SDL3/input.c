@@ -5,19 +5,45 @@
 
 static SDL_Gamepad *gamepads[2] = {0};
 
+static void open_gamepad_id(SDL_JoystickID which) {
+    for (int i = 0; i < 2; i++) {
+        if (!gamepads[i]) {
+            gamepads[i] = SDL_OpenGamepad(which);
+            if (gamepads[i]) {
+                SDL_Log("Controller Connected: %u (%s)",
+                        (unsigned)which, SDL_GetGamepadName(gamepads[i]));
+            } else {
+                SDL_Log("SDL_OpenGamepad(%u) failed: %s",
+                        (unsigned)which, SDL_GetError());
+            }
+            return;
+        }
+    }
+}
+
 void input_init(void) {
-    SDL_Init(SDL_INIT_GAMEPAD);
+    if (!SDL_Init(SDL_INIT_GAMEPAD)) {
+        SDL_Log("SDL_INIT_GAMEPAD failed: %s", SDL_GetError());
+        return;
+    }
+
+    int count = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&count);
+    if (ids) {
+        for (int i = 0; i < count; i++) open_gamepad_id(ids[i]);
+        SDL_free(ids);
+    }
 }
 
 void input_handle_event(SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_ADDED) {
         for (int i = 0; i < 2; i++) {
-            if (!gamepads[i]) {
-                gamepads[i] = SDL_OpenGamepad(e->gdevice.which);
-                SDL_Log("Controller Connected: %d", e->gdevice.which);
-                break;
+            if (gamepads[i] &&
+                SDL_GetGamepadID(gamepads[i]) == e->gdevice.which) {
+                return;
             }
         }
+        open_gamepad_id(e->gdevice.which);
     }
     if (e->type == SDL_EVENT_GAMEPAD_REMOVED) {
         for (int i = 0; i < 2; i++) {
@@ -47,24 +73,7 @@ static uint8_t read_gamepad(SDL_Gamepad *pad) {
     return state;
 }
 
-static uint8_t read_keyboard(void) {
-    const bool *keys = SDL_GetKeyboardState(NULL);
-    if (!keys) return 0;
-
-    uint8_t state = 0;
-    if (keys[SDL_SCANCODE_X])         state |= 0x01;  // A
-    if (keys[SDL_SCANCODE_Z])         state |= 0x02;  // B
-    if (keys[SDL_SCANCODE_RSHIFT] ||
-        keys[SDL_SCANCODE_TAB])       state |= 0x04;  // Select
-    if (keys[SDL_SCANCODE_RETURN])    state |= 0x08;  // Start
-    if (keys[SDL_SCANCODE_UP])        state |= 0x10;
-    if (keys[SDL_SCANCODE_DOWN])      state |= 0x20;
-    if (keys[SDL_SCANCODE_LEFT])      state |= 0x40;
-    if (keys[SDL_SCANCODE_RIGHT])     state |= 0x80;
-    return state;
-}
-
 void PollControllers(uint8_t* port1, uint8_t* port2) {
-    *port1 = read_gamepad(gamepads[0]) | read_keyboard();
+    *port1 = read_gamepad(gamepads[0]);
     *port2 = read_gamepad(gamepads[1]);
 }

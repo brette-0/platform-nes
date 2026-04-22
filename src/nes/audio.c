@@ -38,7 +38,7 @@ void AudioInit(void) {
         "jsr famistudio_sfx_init\n"
         :
         : "i"(tracks), "i"(sfx)
-        : "memory"
+        : "memory", "a", "x", "y", "c", "v"
     );
 }
 
