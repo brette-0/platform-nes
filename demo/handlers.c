@@ -19,7 +19,7 @@ void SpriteZeroHandler(void) {
     spriteZeroHandled = 1;
     SetScroll(xWorldSpace, 16);
 
-    //AudioUpdate();    TODO: for any actual test, uncomment this, its just painful to listen to 24/7
+    AudioUpdate();    //TODO: for any actual test, uncomment this, its just painful to listen to 24/7
     if (levelStreamCommand & STREAM_LEVEL_LATCH) {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
             if (levelStreamCommand & STREAM_LEVEL_SWAP) {

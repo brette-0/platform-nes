@@ -17,9 +17,9 @@ services:
       context: docker
       dockerfile: Dockerfile.linux
     image: platform-nes-linux:bullseye
-    working_dir: /src
+    working_dir: /tmp/platform-nes
     volumes:
-      - .:/src
+      - .:/tmp/platform-nes
     environment:
       PRESET: ${PRESET:-linux-release}
     command:

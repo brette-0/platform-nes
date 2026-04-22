@@ -131,14 +131,14 @@ enum MASK {
 };
 
 enum PALETTE {
-    BG_0          = 0 << 4,
-    BG_1          = 2 << 4,
-    BG_2          = 3 << 4,
-    BG_3          = 4 << 4,
-    SPRITE_0      = 5 << 4,
-    SPRITE_1      = 6 << 4,
-    SPRITE_2      = 7 << 4,
-    SPRITE_3      = 8 << 4,
+    BG_0          = 0 << 2,
+    BG_1          = 1 << 2,
+    BG_2          = 2 << 2,
+    BG_3          = 3 << 2,
+    SPRITE_0      = 4 << 2,
+    SPRITE_1      = 5 << 2,
+    SPRITE_2      = 6 << 2,
+    SPRITE_3      = 7 << 2,
 };
 
 void WaitForPresent();

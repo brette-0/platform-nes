@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=@GAME_NAME@
+Exec=demo
+Icon=demo
+Categories=Game;
+Terminal=false

@@ -27,8 +27,10 @@
 #endif
 
 #define CM(ch, val) \
-"  .elseif \\c == " #ch "\n" \
-"    .byte " #val "\n"
+"  .ifc \\c, " #ch "\n" \
+"    .byte " #val "\n" \
+"    .exitm\n" \
+"  .endif\n"
 
 #if defined(__NES__) || defined(TARGET_NES)
   #define _RODATA_SECTION ".pushsection .rodata\n"
@@ -47,11 +49,8 @@
 #define CHARMAP(mapname, ...)                   \
 __asm__(                                        \
 ".macro emit_char_" #mapname " c\n"             \
-"  .if 0\n"                                     \
 __VA_ARGS__                                     \
-"  .else\n"                                     \
-"    .byte \\c\n"                               \
-"  .endif\n"                                    \
+"  .byte \\c\n"                                 \
 ".endm\n"                                       \
 )
 

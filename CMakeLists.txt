@@ -302,6 +302,14 @@ else()
         # usb-1.0 directly for its own NES-over-USB needs, and SDL3
         # still supports gamepads via the native hidraw backend.
         set(SDL_HIDAPI_LIBUSB OFF CACHE BOOL "" FORCE)
+
+        # Make SDL link the system audio/video libraries via DT_NEEDED
+        # instead of dlopen'ing them at runtime. Required so linuxdeploy's
+        # ldd walk can discover and bundle them into the AppImage.
+        set(SDL_ALSA_SHARED       OFF CACHE BOOL "" FORCE)
+        set(SDL_PULSEAUDIO_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_X11_SHARED        OFF CACHE BOOL "" FORCE)
+        set(SDL_WAYLAND_SHARED    OFF CACHE BOOL "" FORCE)
     endif()
 
     set(SDL_SHARED OFF CACHE BOOL "" FORCE)
@@ -379,5 +387,66 @@ else()
                 COMMAND ${CMAKE_STRIP} $<TARGET_FILE:demo>
                 COMMENT "Stripping demo executable"
         )
+    endif()
+
+    # ------------------------------------------------------------------
+    # AppImage packaging (Linux only). Produces a single-file executable
+    # bundling the demo, SDL3's dynamic deps, and the tracks/sfx assets.
+    # Runs on any glibc >= 2.31 distro with no install step.
+    # Build with: cmake --build <dir> --target demo-appimage
+    # ------------------------------------------------------------------
+    if(TARGET_PLATFORM STREQUAL "linux")
+        find_program(LINUXDEPLOY linuxdeploy)
+        if(LINUXDEPLOY)
+            set(APPDIR "${CMAKE_BINARY_DIR}/AppDir")
+
+            configure_file(
+                    "${CMAKE_SOURCE_DIR}/docker/demo.desktop.in"
+                    "${CMAKE_BINARY_DIR}/demo.desktop"
+                    @ONLY
+            )
+
+            # Custom AppRun — switches cwd to usr/bin so the demo finds
+            # its bundled tracks/ and sfx/ via the same relative paths
+            # used for local dev runs.
+            file(WRITE "${CMAKE_BINARY_DIR}/AppRun"
+"#!/bin/bash
+HERE=\"$(dirname \"$(readlink -f \"\${0}\")\")\"
+export LD_LIBRARY_PATH=\"\${HERE}/usr/lib:\${LD_LIBRARY_PATH}\"
+cd \"\${HERE}/usr/bin\"
+exec ./demo \"\$@\"
+")
+
+            add_custom_target(demo-appimage
+                    COMMAND ${CMAKE_COMMAND} -E rm -rf "${APPDIR}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${APPDIR}/usr/bin"
+                    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:demo> "${APPDIR}/usr/bin/demo"
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "${CMAKE_SOURCE_DIR}/demo/tracks" "${APPDIR}/usr/bin/tracks"
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory
+                            "${CMAKE_SOURCE_DIR}/demo/sfx"    "${APPDIR}/usr/bin/sfx"
+                    COMMAND ${CMAKE_COMMAND} -E copy
+                            "${CMAKE_BINARY_DIR}/AppRun"      "${APPDIR}/AppRun"
+                    COMMAND chmod +x "${APPDIR}/AppRun"
+                    COMMAND ${LINUXDEPLOY}
+                            --appdir "${APPDIR}"
+                            --executable "${APPDIR}/usr/bin/demo"
+                            --desktop-file "${CMAKE_BINARY_DIR}/demo.desktop"
+                            --icon-file "${CMAKE_SOURCE_DIR}/demo/demo.png"
+                            # Force-bundle libasound: AppImage's default excludelist skips it
+                            # on the assumption every Linux desktop has ALSA, but minimal
+                            # images (e.g., WSL's default Ubuntu) don't.
+                            --library /usr/lib/x86_64-linux-gnu/libasound.so.2
+                            --output appimage
+                    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+                    DEPENDS demo
+                    COMMENT "Packaging AppImage"
+                    VERBATIM
+            )
+        else()
+            message(STATUS
+                    "linuxdeploy not found on PATH; 'demo-appimage' target disabled. "
+                    "Build inside the provided Docker image, or install linuxdeploy locally.")
+        endif()
     endif()
 endif()

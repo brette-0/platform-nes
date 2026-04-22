@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         wget \
         ca-certificates \
+        file \
         pkg-config \
         libudev-dev \
         libasound2-dev \
@@ -47,5 +48,15 @@ RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSIO
     && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
     && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack \
     && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/bin/cmake
+
+# linuxdeploy + appimage plugin for producing portable AppImage bundles.
+# Both are AppImages themselves; APPIMAGE_EXTRACT_AND_RUN lets them run
+# inside the container without FUSE (which isn't available in Docker).
+ENV APPIMAGE_EXTRACT_AND_RUN=1
+RUN wget -qO /usr/local/bin/linuxdeploy \
+        https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+    && wget -qO /usr/local/bin/linuxdeploy-plugin-appimage \
+        https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage \
+    && chmod +x /usr/local/bin/linuxdeploy /usr/local/bin/linuxdeploy-plugin-appimage
 
 WORKDIR /src
