@@ -47,7 +47,24 @@ static uint8_t read_gamepad(SDL_Gamepad *pad) {
     return state;
 }
 
+static uint8_t read_keyboard(void) {
+    const bool *keys = SDL_GetKeyboardState(NULL);
+    if (!keys) return 0;
+
+    uint8_t state = 0;
+    if (keys[SDL_SCANCODE_X])         state |= 0x01;  // A
+    if (keys[SDL_SCANCODE_Z])         state |= 0x02;  // B
+    if (keys[SDL_SCANCODE_RSHIFT] ||
+        keys[SDL_SCANCODE_TAB])       state |= 0x04;  // Select
+    if (keys[SDL_SCANCODE_RETURN])    state |= 0x08;  // Start
+    if (keys[SDL_SCANCODE_UP])        state |= 0x10;
+    if (keys[SDL_SCANCODE_DOWN])      state |= 0x20;
+    if (keys[SDL_SCANCODE_LEFT])      state |= 0x40;
+    if (keys[SDL_SCANCODE_RIGHT])     state |= 0x80;
+    return state;
+}
+
 void PollControllers(uint8_t* port1, uint8_t* port2) {
-    *port1 = read_gamepad(gamepads[0]);
+    *port1 = read_gamepad(gamepads[0]) | read_keyboard();
     *port2 = read_gamepad(gamepads[1]);
 }

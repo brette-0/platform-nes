@@ -46,11 +46,17 @@
   #define _SYM(name) #name
 #endif
 
+// Note: CM(ch, val) uses bareword tokens (e.g. CM(M, 0x16)), not char
+// literals. Portable across GNU as and LLVM's integrated assembler —
+// passing `'\c'` from .irpc through to a macro doesn't survive GAS's
+// escape processing (`\c` inside single quotes collapses to literal
+// `c`), so we pass \c unquoted and compare with .ifc against a bare
+// token on the right-hand side.
 #define CHARMAP(mapname, ...)                   \
 __asm__(                                        \
 ".macro emit_char_" #mapname " c\n"             \
 __VA_ARGS__                                     \
-"  .byte \\c\n"                                 \
+"  .error \"emit_char_" #mapname ": char not in charmap\"\n" \
 ".endm\n"                                       \
 )
 
@@ -60,7 +66,7 @@ _RODATA_SECTION                                 \
 ".globl " _SYM(name) "\n"                       \
 _SYM(name) ":\n"                                \
 ".irpc c, " #chars "\n"                         \
-"  emit_char_" #mapname " '\\c'\n"              \
+"  emit_char_" #mapname " \\c\n"                \
 ".endr\n"                                       \
 ".byte 0x00\n"                                  \
 ".popsection\n"                                 \
@@ -72,7 +78,7 @@ _RODATA_SECTION                                 \
 ".globl " _SYM(name) "\n"                       \
 _SYM(name) ":\n"                                \
 ".irpc c, " #chars "\n"                         \
-"  emit_char_" #mapname " '\\c'\n"              \
+"  emit_char_" #mapname " \\c\n"                \
 ".endr\n"                                       \
 ".byte 0x00\n"                                  \
 ".popsection\n"                                 \
