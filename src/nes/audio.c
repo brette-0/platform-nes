@@ -1,45 +1,52 @@
 ﻿#include "../../include/platform-nes/audio.h"
 #include <stdint.h>
 
-#if defined(__clangd__) || defined(__JETBRAINS_IDE__)
-    #define FASTCALL void
+#if FAMISTUDIO_CFG_NTSC_SUPPORT
+    #define FAMISTUDIO_LOAD_REGION "lda #1\n"
+#elif FAMISTUDIO_CFG_PAL_SUPPORT
+    #define FAMISTUDIO_LOAD_REGION "lda #0\n"
 #else
-    // 2. SATISFY THE HARDWARE: The real compiler gets the hyphenated attribute
-    // If your compiler version panics on '-', change it to cc65_fastcall
-    #define FASTCALL __attribute__((cc65_fastcall)) void
+    #error "FamiStudio: neither NTSC nor PAL support enabled"
 #endif
 
-// FamiStudio C bindings — these are the actual exported symbol names
+#ifdef __MOS__
+    #define FASTCALL __attribute__((cc65_fastcall)) void
+#else
+    #define FASTCALL void
+#endif
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wattributes"
-extern FASTCALL __attribute__((leaf)) famistudio_init(uint8_t lo, uint8_t hi);
 extern FASTCALL __attribute__((leaf)) famistudio_music_play(uint8_t song_index);
 extern FASTCALL __attribute__((leaf)) famistudio_music_pause(uint8_t pause);
 extern FASTCALL __attribute__((leaf)) famistudio_music_stop(void);
-extern FASTCALL __attribute__((leaf)) famistudio_sfx_init(void *sfx_data);
+#if FAMISTUDIO_CFG_SFX_SUPPORT
 extern FASTCALL __attribute__((leaf)) famistudio_sfx_play(uint8_t sfx_index, uint8_t channel);
+#endif
 extern FASTCALL __attribute__((leaf)) famistudio_update(void);
 #pragma clang diagnostic pop
 
-
-
-
 void AudioInit(void) {
     __asm__ volatile (
-        // Init music
         "ldx #<%0\n"
         "ldy #>%0\n"
-        "lda #1\n"
+        FAMISTUDIO_LOAD_REGION
         "jsr famistudio_init\n"
-
-        // Init SFX
-        "ldx #<%1\n"
-        "ldy #>%1\n"
-        "jsr famistudio_sfx_init\n"
         :
-        : "i"(tracks), "i"(sfx)
+        : "i"(tracks)
         : "memory", "a", "x", "y", "c", "v"
     );
+
+#if FAMISTUDIO_CFG_SFX_SUPPORT
+    __asm__ volatile (
+        "ldx #<%0\n"
+        "ldy #>%0\n"
+        "jsr famistudio_sfx_init\n"
+        :
+        : "i"(sfx)
+        : "memory", "a", "x", "y", "c", "v"
+    );
+#endif
 }
 
 void TrackPlay(const uint8_t index) {
@@ -59,9 +66,17 @@ void AudioUpdate(void) {
 }
 
 void SfxPlay(const uint8_t index, const uint8_t channel) {
+#if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, channel);
+#else
+    (void)index; (void)channel;
+#endif
 }
 
 void SfxSamplePlay(const uint8_t index) {
+#if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, 1);
+#else
+    (void)index;
+#endif
 }

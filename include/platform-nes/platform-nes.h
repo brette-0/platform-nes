@@ -12,9 +12,7 @@
 
 
 
-#ifdef __JETBRAINS_IDE__
-    // The IDE doesn't know what this is, so we tell it to treat
-    // the attribute as "nothing" (whitespace).
+#ifndef __MOS__
     #define interrupt_norecurse
 #endif
 

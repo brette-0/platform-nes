@@ -47,6 +47,20 @@ if(TARGET_PLATFORM STREQUAL "nes")
     get_filename_component(LLVM_MOS_BIN ${CMAKE_C_COMPILER} DIRECTORY)
     find_program(LLVM_READELF llvm-readelf HINTS "${LLVM_MOS_BIN}" REQUIRED)
 
+    set(FAMISTUDIO_CFG_NTSC_SUPPORT 1 CACHE STRING "FamiStudio: enable NTSC timing tables")
+    set(FAMISTUDIO_CFG_PAL_SUPPORT  0 CACHE STRING "FamiStudio: enable PAL timing tables")
+    set(FAMISTUDIO_CFG_DPCM_SUPPORT 1 CACHE STRING "FamiStudio: enable DPCM sample playback")
+    set(FAMISTUDIO_CFG_SFX_SUPPORT  1 CACHE STRING "FamiStudio: enable SFX engine")
+    set(FAMISTUDIO_CFG_SFX_STREAMS  2 CACHE STRING "FamiStudio: number of concurrent SFX streams")
+    set(FAMISTUDIO_USE_VOLUME_TRACK 1 CACHE STRING "FamiStudio: enable per-note volume track")
+
+    if(FAMISTUDIO_CFG_NTSC_SUPPORT AND FAMISTUDIO_CFG_PAL_SUPPORT)
+        message(FATAL_ERROR
+                "FAMISTUDIO_CFG_NTSC_SUPPORT and FAMISTUDIO_CFG_PAL_SUPPORT "
+                "are both enabled; DUAL mode requires a runtime region "
+                "detection routine that this project does not yet provide.")
+    endif()
+
     # Common FamiStudio configuration block. The pass 1 build uses this
     # as-is; the pass 2 build prepends a generated padding include.
     set(FAMISTUDIO_CFG
@@ -55,12 +69,12 @@ if(TARGET_PLATFORM STREQUAL "nes")
 .define FAMISTUDIO_CA65_CODE_SEGMENT CODE
 
 FAMISTUDIO_CFG_EXTERNAL     = 1
-FAMISTUDIO_CFG_NTSC_SUPPORT = 1
-FAMISTUDIO_CFG_PAL_SUPPORT  = 0
-FAMISTUDIO_CFG_DPCM_SUPPORT = 1
-FAMISTUDIO_CFG_SFX_SUPPORT  = 1
-FAMISTUDIO_CFG_SFX_STREAMS  = 2
-FAMISTUDIO_USE_VOLUME_TRACK = 1
+FAMISTUDIO_CFG_NTSC_SUPPORT = ${FAMISTUDIO_CFG_NTSC_SUPPORT}
+FAMISTUDIO_CFG_PAL_SUPPORT  = ${FAMISTUDIO_CFG_PAL_SUPPORT}
+FAMISTUDIO_CFG_DPCM_SUPPORT = ${FAMISTUDIO_CFG_DPCM_SUPPORT}
+FAMISTUDIO_CFG_SFX_SUPPORT  = ${FAMISTUDIO_CFG_SFX_SUPPORT}
+FAMISTUDIO_CFG_SFX_STREAMS  = ${FAMISTUDIO_CFG_SFX_STREAMS}
+FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
 
 .include \"famistudio_ca65.s\"
 ")
@@ -117,7 +131,15 @@ FAMISTUDIO_USE_VOLUME_TRACK = 1
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_BINARY_DIR}/famistudio_include
     )
-    target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
+    target_compile_definitions(platform-nes PUBLIC
+            ${PLATFORM_DEFINE}
+            FAMISTUDIO_CFG_NTSC_SUPPORT=${FAMISTUDIO_CFG_NTSC_SUPPORT}
+            FAMISTUDIO_CFG_PAL_SUPPORT=${FAMISTUDIO_CFG_PAL_SUPPORT}
+            FAMISTUDIO_CFG_DPCM_SUPPORT=${FAMISTUDIO_CFG_DPCM_SUPPORT}
+            FAMISTUDIO_CFG_SFX_SUPPORT=${FAMISTUDIO_CFG_SFX_SUPPORT}
+            FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
+            FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
+    )
 
     file(GLOB DEMO_C_SOURCES ${CMAKE_SOURCE_DIR}/demo/*.c)
 
