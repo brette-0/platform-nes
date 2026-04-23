@@ -12,8 +12,8 @@ which are listed further down.
 
 `platform-nes` may require the user to include additional technologies for DRM and content obfuscation, the entire
 project is designed in c11 with LTO oriented design with a demo ready to demonstrate some 
-of the existing functions all of which are documented at the [docsite](). Which will demonstrate how you can easily
-begin using this project.
+of the existing functions all of which are documented at the [docsite](https://platform-nes.readthedocs.io/en/latest/).
+Which will demonstrate how you can easily begin using this project.
 
 > At this point in time, `platform-nes` recognises the following as dependancies:
 > 
