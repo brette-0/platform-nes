@@ -312,9 +312,8 @@ else()
     set(SDL_STATIC ON  CACHE BOOL "" FORCE)
     set(SDL_TEST   OFF CACHE BOOL "" FORCE)
     set(SDL_TESTS  OFF CACHE BOOL "" FORCE)
-    # Let SDL3 install its archives and CMakeConfig so the platform-nes
-    # SDK can hand off transitive link deps via find_dependency(SDL3).
-    set(SDL_INSTALL ON CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
     set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
     set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
     set(SDL_POWER OFF CACHE BOOL "" FORCE)
@@ -458,85 +457,5 @@ exec ./demo \"\$@\"
                     "linuxdeploy not found on PATH; 'demo-appimage' target disabled. "
                     "Build inside the provided Docker image, or install linuxdeploy locally.")
         endif()
-    endif()
-endif()
-
-# ==========================================================================
-# SDK install rules
-#
-# Produces a self-contained <prefix>/ tree that downstream projects can
-# consume via `find_package(platform-nes REQUIRED)`. The tree layout is
-# standard Unix:
-#
-#   <prefix>/
-#     include/platform-nes/       — public headers
-#     lib/libplatform-nes.a       — our static archive
-#     lib/libSDL3.a, ...          — SDL3 (desktop only, via SDL's own install)
-#     lib/libusb-1.0.a            — libusb (Linux only)
-#     lib/famistudio_pass1.o      — NES only; link into consumer's final ROM
-#     lib/cmake/platform-nes/     — CMake package config
-#     lib/cmake/SDL3/             — SDL3 package config (desktop only)
-# ==========================================================================
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
-
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(TARGETS platform-nes ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
-if(TARGET_PLATFORM STREQUAL "nes")
-    # FamiStudio pass1 object (no ZP/BSS padding). Consumer must pad and
-    # rebuild it themselves if their code coexists with FamiStudio's
-    # allocations — see CMakeLists.txt for the two-pass pattern.
-    install(FILES ${FAMISTUDIO_PASS1_OBJ}
-            DESTINATION ${CMAKE_INSTALL_LIBDIR})
-elseif(TARGET_PLATFORM STREQUAL "linux")
-    # libusb-cmake doesn't ship reliable install rules; grab the built
-    # archive directly.
-    install(FILES $<TARGET_FILE:usb-1.0>
-            DESTINATION ${CMAKE_INSTALL_LIBDIR})
-endif()
-
-configure_package_config_file(
-        ${CMAKE_SOURCE_DIR}/cmake/platform-nesConfig.cmake.in
-        ${CMAKE_BINARY_DIR}/platform-nesConfig.cmake
-        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/platform-nes
-        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_LIBDIR
-)
-write_basic_package_version_file(
-        ${CMAKE_BINARY_DIR}/platform-nesConfigVersion.cmake
-        VERSION 1.0.0
-        COMPATIBILITY SameMajorVersion
-)
-install(FILES
-        ${CMAKE_BINARY_DIR}/platform-nesConfig.cmake
-        ${CMAKE_BINARY_DIR}/platform-nesConfigVersion.cmake
-        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/platform-nes
-)
-
-# --------------------------------------------------------------------------
-# License notices for bundled third-party components.
-#
-# platform-nes itself is GPL-3.0-or-later. Desktop SDKs also include SDL3
-# (zlib license) and, on Linux, libusb (LGPL-2.1-or-later). Shipping the
-# verbatim license texts alongside the archives is what both licenses
-# require when redistributing in binary form.
-# --------------------------------------------------------------------------
-set(_PNES_LICENSE_DIR ${CMAKE_INSTALL_DATADIR}/licenses/platform-nes)
-
-install(FILES ${CMAKE_SOURCE_DIR}/LICENSE
-        DESTINATION ${_PNES_LICENSE_DIR})
-
-if(NOT TARGET_PLATFORM STREQUAL "nes")
-    # sdl3_SOURCE_DIR is populated by FetchContent_MakeAvailable(SDL3) above.
-    install(FILES ${sdl3_SOURCE_DIR}/LICENSE.txt
-            DESTINATION ${_PNES_LICENSE_DIR}
-            RENAME LICENSE.SDL3)
-
-    if(TARGET_PLATFORM STREQUAL "linux")
-        # libusb-cmake vendors libusb as a git subtree under libusb/.
-        # Its COPYING file is the LGPL-2.1 text we need to redistribute.
-        install(FILES ${libusb_cmake_SOURCE_DIR}/libusb/COPYING
-                DESTINATION ${_PNES_LICENSE_DIR}
-                RENAME LICENSE.libusb)
     endif()
 endif()
