@@ -31,6 +31,10 @@ Which will demonstrate how you can easily begin using this project.
 
 At this point in time, only `8x8` sprites are implemented and non-NES targets do not contain an `8x16` emulation.
 
+## Other Controller Types
+
+At this point the only supported controllers are NTSC NES Controllers.
+
 ### SaveFiles
 
 It's eventually planned to support cartridges that have the ability to save memory to either batter backed SRAM, EEPROM
