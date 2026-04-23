@@ -9,8 +9,15 @@ FROM debian:bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Use Clang for every compile step in this image. build-essential is kept
+# so libc-dev and binutils are present, but gcc is not used.
+ENV CC=clang
+ENV CXX=clang++
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
+        clang \
+        lld \
         gdb \
         ninja-build \
         git \

@@ -8,6 +8,13 @@ include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
 set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_NAME define")
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
+
+# src/SDL3/*.c uses <stdatomic.h>, which MSVC's CRT gates behind C11.
+# Setting this project-wide also covers the NES build (llvm-mos's clang
+# supports C11 natively) and the other desktop targets, where GCC/Clang
+# default to gnu11 or later anyway.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 # ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------

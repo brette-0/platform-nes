@@ -85,9 +85,11 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------------------------------
-  # Windows — MSVC + Ninja, static SDL3 built from source via FetchContent.
-  # Demo binary is bundled alongside tracks/ and sfx/ so the zip runs from
-  # any extraction location.
+  # Windows — clang-cl + Ninja, static SDL3 built from source via FetchContent.
+  # The MSVC environment action still runs because clang-cl consumes MSVC's
+  # Windows SDK headers and import libraries; only the compiler frontend is
+  # swapped. Demo binary is bundled alongside tracks/ and sfx/ so the zip
+  # runs from any extraction location.
   # --------------------------------------------------------------------------
   windows:
     name: Windows
@@ -99,7 +101,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset win-release
+        run: cmake --preset win-release -DCMAKE_C_COMPILER=clang-cl
 
       - name: Build
         run: cmake --build cmake-build-win-release
