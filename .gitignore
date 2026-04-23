@@ -53,3 +53,15 @@ dkms.conf
 
 # Per-developer CMake overrides (see local.cmake.example)
 local.cmake
+
+# CMake build trees. Releases are produced by GitHub Actions;
+# local build directories should never be committed.
+cmake-build-*/
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+Testing/

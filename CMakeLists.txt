@@ -15,7 +15,6 @@ if(TARGET_PLATFORM STREQUAL "nes")
     set(LLVM_MOS_PLATFORM nes-nrom)
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes C)
-    set(PLATFORM_DIR "nes")
     set(PLATFORM_DEFINE TARGET_NES)
 
     # FamiStudio sound engine sources are fetched directly from upstream
@@ -204,14 +203,11 @@ else()
     project(platform-nes C)
 
     if(TARGET_PLATFORM STREQUAL "mac")
-        set(PLATFORM_DIR "macos")
         set(PLATFORM_DEFINE TARGET_MACOS)
     elseif(TARGET_PLATFORM STREQUAL "win")
         set(PLATFORM_DEFINE TARGET_WINDOWS)
-        set(PLATFORM_DIR "windows")
     elseif(TARGET_PLATFORM STREQUAL "linux")
         set(PLATFORM_DEFINE TARGET_LINUX)
-        set(PLATFORM_DIR "linux")
     else()
         message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux")
     endif()
@@ -333,9 +329,8 @@ else()
     FetchContent_MakeAvailable(SDL3)
 
     file(GLOB SDL3_SOURCES src/SDL3/*.c)
-    file(GLOB PLATFORM_SOURCES src/${PLATFORM_DIR}/*.c)
 
-    add_library(platform-nes STATIC ${SDL3_SOURCES} ${PLATFORM_SOURCES})
+    add_library(platform-nes STATIC ${SDL3_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
     )
