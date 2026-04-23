@@ -43,7 +43,7 @@ if(TARGET_PLATFORM STREQUAL "nes")
 
     # Locate the ca65 assembler and llvm-readelf binary used during the
     # two-pass build below.
-    find_program(CA65 ca65 HINTS "C:/cc65/bin" REQUIRED)
+    find_program(CA65 ca65 HINTS "${CC65_DIR}/bin" "C:/cc65/bin" REQUIRED)
     get_filename_component(LLVM_MOS_BIN ${CMAKE_C_COMPILER} DIRECTORY)
     find_program(LLVM_READELF llvm-readelf HINTS "${LLVM_MOS_BIN}" REQUIRED)
 

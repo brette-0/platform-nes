@@ -65,3 +65,8 @@ cmake_install.cmake
 CTestTestfile.cmake
 install_manifest.txt
 Testing/
+
+# Sphinx/Doxygen build artifacts
+docs/_build/
+docs/doxygen-api/
+docs/doxygen-advanced/

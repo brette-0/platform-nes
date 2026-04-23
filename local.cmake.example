@@ -8,3 +8,8 @@
 # Path to your llvm-mos-sdk install, used by the NES build.
 # Only required if you build the NES target.
 set(CMAKE_PREFIX_PATH "C:/llvm-mos" CACHE PATH "" FORCE)
+
+# Path to your cc65 install (the directory that contains bin/ca65). Used by
+# the NES build to assemble the FamiStudio sound engine. Only required if
+# ca65 is not already on PATH.
+set(CC65_DIR "C:/cc65" CACHE PATH "" FORCE)
