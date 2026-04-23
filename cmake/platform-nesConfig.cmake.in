@@ -1,0 +1,72 @@
+# platform-nesConfig.cmake — consumer-side CMake config for the
+# prebuilt platform-nes SDK. Consumers invoke this via
+#
+#   find_package(platform-nes REQUIRED)
+#   target_link_libraries(mygame PRIVATE platform-nes::platform-nes)
+#
+# and CMake resolves includes, archives, and transitive deps from
+# whatever was baked into this SDK at release time.
+
+@PACKAGE_INIT@
+include(CMakeFindDependencyMacro)
+
+set_and_check(_PNES_INCLUDE "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set_and_check(_PNES_LIB     "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+
+set(_PNES_PLATFORM "@TARGET_PLATFORM@")
+
+if(_PNES_PLATFORM STREQUAL "nes")
+    # NES SDK: just the static archive + headers. Consumers drive their
+    # own 6502 toolchain, so no find_dependency calls are possible here.
+    # FamiStudio is shipped as a separate object file; its absolute path
+    # is exposed via platform-nes_FAMISTUDIO_OBJECT for inclusion in the
+    # consumer's final link.
+    add_library(platform-nes::platform-nes STATIC IMPORTED)
+    set_target_properties(platform-nes::platform-nes PROPERTIES
+        IMPORTED_LOCATION             "${_PNES_LIB}/libplatform-nes.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${_PNES_INCLUDE}"
+        INTERFACE_COMPILE_DEFINITIONS "TARGET_NES"
+    )
+    set(platform-nes_FAMISTUDIO_OBJECT "${_PNES_LIB}/famistudio_pass1.o")
+else()
+    # Desktop SDK: SDL3 is installed alongside us under the same prefix,
+    # and its own CMake config encodes all system-lib / framework deps.
+    # Pulling it in here gives the consumer the full transitive link
+    # closure for free.
+    find_dependency(SDL3 CONFIG REQUIRED
+        PATHS "${CMAKE_CURRENT_LIST_DIR}/../SDL3"
+        NO_DEFAULT_PATH
+    )
+
+    set(_PNES_LINK_LIBS SDL3::SDL3-static)
+
+    if(_PNES_PLATFORM STREQUAL "linux")
+        # libusb-cmake's install is unreliable across versions, so the
+        # static archive is shipped raw and wrapped in a local IMPORTED
+        # target. libudev is dynamically linked from the system since
+        # bundling it would force every consumer to match our systemd
+        # build config.
+        add_library(platform-nes::usb STATIC IMPORTED)
+        set_target_properties(platform-nes::usb PROPERTIES
+            IMPORTED_LOCATION     "${_PNES_LIB}/libusb-1.0.a"
+            INTERFACE_LINK_LIBRARIES "udev"
+        )
+        list(APPEND _PNES_LINK_LIBS platform-nes::usb)
+    endif()
+
+    if(WIN32 AND NOT MINGW)
+        set(_PNES_LIBFILE "${_PNES_LIB}/platform-nes.lib")
+    else()
+        set(_PNES_LIBFILE "${_PNES_LIB}/libplatform-nes.a")
+    endif()
+
+    add_library(platform-nes::platform-nes STATIC IMPORTED)
+    set_target_properties(platform-nes::platform-nes PROPERTIES
+        IMPORTED_LOCATION             "${_PNES_LIBFILE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_PNES_INCLUDE}"
+        INTERFACE_COMPILE_DEFINITIONS "@PLATFORM_DEFINE@"
+        INTERFACE_LINK_LIBRARIES      "${_PNES_LINK_LIBS}"
+    )
+endif()
+
+check_required_components(platform-nes)

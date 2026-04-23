@@ -1,0 +1,197 @@
+name: CI
+
+# Builds the demo and the per-platform SDK on every push/PR to main, and on
+# manual dispatch. Artifacts are downloadable from the Actions run page for
+# 90 days — no GitHub Release is cut. Promotion to an actual release is a
+# separate workflow we'll add once 1.0 ships.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Pin llvm-mos-sdk centrally so the NES ROM is bit-reproducible across runs.
+env:
+  LLVM_MOS_SDK_VERSION: v19.1.0
+
+jobs:
+  # --------------------------------------------------------------------------
+  # NES ROM — llvm-mos-sdk + ca65 on ubuntu-latest.
+  # Built natively (not in Docker) because the SDK ships prebuilt binaries
+  # and the toolchain has no system-library dependencies.
+  # --------------------------------------------------------------------------
+  nes:
+    name: NES ROM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ca65, ninja
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cc65 ninja-build
+
+      - name: Install llvm-mos-sdk
+        run: |
+          mkdir -p "$HOME/llvm-mos"
+          curl -fsSL "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/${LLVM_MOS_SDK_VERSION}/llvm-mos-linux.tar.xz" \
+            | tar -xJ -C "$HOME/llvm-mos" --strip-components=1
+          echo "$HOME/llvm-mos/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$HOME/llvm-mos" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: cmake --preset nes-release
+
+      - name: Build
+        run: cmake --build cmake-build-nes-release
+
+      - name: Install SDK
+        run: cmake --install cmake-build-nes-release --prefix sdk/platform-nes
+
+      - name: Package SDK
+        run: tar -czf platform-nes-sdk-nes.tar.gz -C sdk platform-nes
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-nes
+          path: cmake-build-nes-release/demo.nes
+          if-no-files-found: error
+
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-nes
+          path: platform-nes-sdk-nes.tar.gz
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # Linux AppImage — built inside docker/Dockerfile.linux so the resulting
+  # binary links against Debian Bullseye's glibc 2.31 and runs on anything
+  # from ~Ubuntu 20.04 onward.
+  # --------------------------------------------------------------------------
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build toolchain image
+        run: docker build -t platform-nes-linux:ci -f docker/Dockerfile.linux docker
+
+      - name: Build AppImage and install SDK
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" -w /src \
+            -e APPIMAGE_EXTRACT_AND_RUN=1 \
+            platform-nes-linux:ci \
+            bash -eu -c '
+              cmake --preset linux-release
+              cmake --build cmake-build-linux-release -j"$(nproc)" --target demo-appimage
+              cmake --install cmake-build-linux-release --prefix sdk/platform-nes
+            '
+
+      - name: Package SDK
+        run: tar -czf platform-nes-sdk-linux-x86_64.tar.gz -C sdk platform-nes
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-linux
+          path: cmake-build-linux-release/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-linux
+          path: platform-nes-sdk-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # Windows — MSVC + Ninja, static SDL3 built from source via FetchContent.
+  # Demo binary is bundled alongside tracks/ and sfx/ so the zip runs from
+  # any extraction location.
+  # --------------------------------------------------------------------------
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset win-release
+
+      - name: Build
+        run: cmake --build cmake-build-win-release
+
+      - name: Install SDK
+        run: cmake --install cmake-build-win-release --prefix sdk/platform-nes
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist/demo-windows
+          cp cmake-build-win-release/demo.exe dist/demo-windows/
+          cp -r demo/tracks demo/sfx dist/demo-windows/
+          tar -czf platform-nes-sdk-windows-x86_64.tar.gz -C sdk platform-nes
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-windows
+          path: dist/demo-windows
+          if-no-files-found: error
+
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-windows
+          path: platform-nes-sdk-windows-x86_64.tar.gz
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------------
+  # macOS — native Clang + Ninja on macos-latest (arm64).
+  # --------------------------------------------------------------------------
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset mac-release
+
+      - name: Build
+        run: cmake --build cmake-build-mac-release
+
+      - name: Install SDK
+        run: cmake --install cmake-build-mac-release --prefix sdk/platform-nes
+
+      - name: Package
+        run: |
+          mkdir -p dist/demo-macos
+          cp cmake-build-mac-release/demo dist/demo-macos/
+          cp -r demo/tracks demo/sfx dist/demo-macos/
+          tar -czf platform-nes-sdk-macos-arm64.tar.gz -C sdk platform-nes
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-macos
+          path: dist/demo-macos
+          if-no-files-found: error
+
+      - name: Upload SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-macos
+          path: platform-nes-sdk-macos-arm64.tar.gz
+          if-no-files-found: error
