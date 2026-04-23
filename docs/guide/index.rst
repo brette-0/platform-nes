@@ -10,3 +10,4 @@ rationale, caveats, and tutorials. Complements the auto-generated
    :caption: Guide
 
    limitations
+   introduction
