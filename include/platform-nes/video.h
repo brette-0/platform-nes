@@ -252,12 +252,19 @@ extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. */
 extern uint8_t scale;
 
-/** @brief Viewport width in tiles, computed from the desktop window size. */
+#ifdef LANDSCAPE
+/** @brief Viewport width in tiles — flexible on landscape, derived from window width. */
 #define VIEWPORT_TX  \
   (((mode->w / scale) >> 3) & ~3u)
-/** @brief Viewport height in tiles, computed from the desktop window size. */
+/** @brief Viewport height in tiles — pinned to 30, matching the axis `scale` was chosen for. */
+#define VIEWPORT_TY  30
+#else
+/** @brief Viewport width in tiles — pinned to 32, matching the axis `scale` was chosen for. */
+#define VIEWPORT_TX  32
+/** @brief Viewport height in tiles — flexible on portrait, derived from window height. */
 #define VIEWPORT_TY  \
   ((mode->h / scale) >> 3)
+#endif
 #endif
 
 /** @brief Viewport width in pixels (tiles * 8). */
