@@ -9,7 +9,7 @@
     #error "FamiStudio: neither NTSC nor PAL support enabled"
 #endif
 
-#ifdef __MOS__
+#ifdef __mos__
     #define FASTCALL __attribute__((cc65_fastcall)) void
 #else
     #define FASTCALL void

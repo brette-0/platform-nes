@@ -28,7 +28,7 @@
 
 
 
-#ifndef __MOS__
+#ifndef __mos__
     /**
      * @brief Attribute applied to interrupt handlers to suppress recursive
      *        entry on backends that lack llvm-mos's `interrupt_norecurse`.
