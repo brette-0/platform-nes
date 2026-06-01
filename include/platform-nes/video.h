@@ -86,21 +86,21 @@ _CHR_POP                                       \
 )
 
 #ifndef TARGET_NES
-/** @brief OAM coordinate type */
-typedef uint16_t video_t;
+/** @brief OAM coordinate type — 16-bit on desktop to allow off-screen sprites. */
+typedef uint16_t oam_t;
 #else
-/** @brief OAM coordinate type */
-typedef uint8_t video_t;
+/** @brief OAM coordinate type — 8-bit on NES to match hardware OAM layout. */
+typedef uint8_t oam_t;
 #endif
 
 /**
  * @brief A single sprite in the object attribute memory layout.
  */
 struct sprite_t {
-  video_t y;            /**< Y coordinate of the top-left corner. */
+  oam_t y;            /**< Y coordinate of the top-left corner. */
   uint8_t tile;       /**< Pattern table tile index. */
   uint8_t attributes; /**< Palette select, priority, flip flags. */
-  video_t x;            /**< X coordinate of the top-left corner. */
+  oam_t x;            /**< X coordinate of the top-left corner. */
 };
 
 #ifdef TARGET_NES
@@ -112,7 +112,7 @@ struct sprite_t {
   #define OAM_BUFFER oamBuffer
 #else
   /** @brief OAM buffer on desktop — growable dynamic array. */
-  typedef struct oamBuffer_t {
+  typedef struct {
       struct sprite_t* data; /**< Sprite array. */
       size_t           count;/**< Sprites currently used. */
       size_t           cap;  /**< Allocated capacity. */
@@ -402,7 +402,7 @@ void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value);
  * @param amt      Number of iterations.
  * @param polarity Non-zero for vertical writes, zero for horizontal.
  */
-void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, video_t (*fn)(uint16_t), uint8_t amt, uint8_t polarity);
+void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), uint8_t amt, uint8_t polarity);
 
 /**
  * @brief Converts a pixel position into a PPU VRAM address.
@@ -528,8 +528,5 @@ i++, POKE(PPUMASK, SPPUMASK))
 if (1)
 
 #endif
-
-#define SPRITE_STRIDE  sizeof(struct sprite_t)
-#define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
 
 #endif

@@ -7,9 +7,14 @@
 #include "handlers.h"
 #include "colors.h"
 
+#define SPRITE_STRIDE  sizeof(struct sprite_t)
+#define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
+
 uint8_t port1;
 uint8_t port2;
 
+uint8_t xPlayer;    // relative to top left of player
+uint8_t yPlayer;
 int8_t lastDeltaScroll;
 
 uint16_t levelSize;
@@ -21,14 +26,9 @@ atomic uint8_t spriteZeroHandled;
 struct sprite_t OAMBuffer[64];
 
 static uint8_t Clear(uint16_t _);
+static uint8_t AdjustSpriteY(uint16_t i);
+static uint8_t AdjustSpriteX(uint16_t i);
 static void    BuildLevelSize();
-
-
-// mario's positional information
-video_t marioXPosCoarse;    // px(x)
-video_t marioYPosCoarse;    // px(y)
-uint8_t marioXPosFine;      // spx(x)
-uint8_t marioYPosFine;      // spx(y)
 
 RESET {
     BuildLevelSize();
@@ -111,19 +111,56 @@ NMI {
     PollControllers(&port1, &port2);
     RefreshSprites();
 
+    const int8_t deltaScroll = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
+
+    if (deltaScroll) {
+        xWorldSpace = deltaScroll > 0
+            ? xWorldSpace + deltaScroll > (uint16_t)((levelSize - VIEWPORT_MX) << 4)
+                ? (uint16_t)((levelSize - VIEWPORT_MX) << 4)
+                : xWorldSpace + deltaScroll
+            : (uint16_t)(xWorldSpace + deltaScroll) > xWorldSpace
+                ? 0
+                : xWorldSpace + deltaScroll;
+
+        if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
+            if (deltaScroll > 0) {
+                if (xWorldSpace > lastXWorldSpace && xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
+                    levelStreamCommand =    STREAM_LEVEL_LATCH |
+                                            STREAM_LEVEL_RIGHT | (
+                                                lastDeltaScroll < 0
+                                                    ? STREAM_LEVEL_SWAP
+                                                    : 0
+                                                );
+                    lastDeltaScroll = deltaScroll;
+                    lastXWorldSpace = xWorldSpace;
+
+                }
+            } else if (xWorldSpace == lastXWorldSpace - 0x10) {
+                levelStreamCommand =    STREAM_LEVEL_LATCH |
+                                        STREAM_LEVEL_LEFT  | (
+                                            lastDeltaScroll > 0
+                                                ? STREAM_LEVEL_SWAP
+                                                : 0
+                                            );
+                lastDeltaScroll = deltaScroll;
+                lastXWorldSpace = xWorldSpace;
+            }
+        }
+    }
+
     spriteZeroHandled = 0;
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
             if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
-                WriteBufferToAttributeMemory((lastXWorldSpace >> 3) + VIEWPORT_TX & ~3, 2, AttributeBuffer, 8, 1);
+                WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) + VIEWPORT_TX) & ~3, 2, AttributeBuffer, 8, 1);
         } else {
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 1, 2, TileBuffer, 28, 1);
+            WriteBufferToVideoMemory(((lastXWorldSpace) >> 3) - 2, 2, TileBuffer + 28, 28, 1);
             if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
-                WriteBufferToAttributeMemory((lastXWorldSpace >> 3) - 2 & ~3, 2, AttributeBuffer, 8, 1);
+                WriteBufferToAttributeMemory((((lastXWorldSpace) >> 3) - 2) & ~3, 2, AttributeBuffer, 8, 1);
         }
     }
 
@@ -135,16 +172,16 @@ NMI {
     SetColorPriority(0);
 }
 
-static uint8_t Clear(const uint16_t _) {
+static uint8_t Clear(uint16_t _) {
     return 0xef;
 }
 
-video_t AdjustSpriteY(const uint16_t i) {
-    return marioYPosCoarse + (i >> 1) * 8;
+static uint8_t AdjustSpriteY(uint16_t i) {
+    return yPlayer + (i >> 1) * 8;
 }
 
-video_t AdjustSpriteX(const uint16_t i) {
-    return marioXPosCoarse + (i & 1) * 8;
+static uint8_t AdjustSpriteX(uint16_t i) {
+    return xPlayer + (i & 1) * 8;
 }
 
 MINSIZE static void BuildLevelSize() {
