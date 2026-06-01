@@ -20,7 +20,7 @@ const uint8_t LevelDataLengths[] = {
 };
 
 __attribute__((always_inline))
-uint8_t GetNextMetaTile() {
+inline uint8_t GetNextMetaTile() {
     if (!hunk_remaining) {
         level_data_index++;
         hunk_remaining = LevelDataLengths[level_data_index];
@@ -31,7 +31,7 @@ uint8_t GetNextMetaTile() {
 }
 
 __attribute__((always_inline))
-uint8_t GetPrevMetaTile() {
+inline uint8_t GetPrevMetaTile() {
     if (!hunk_remaining) {
         level_data_index--;
         hunk_remaining = LevelDataLengths[level_data_index];

@@ -8,11 +8,12 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/cmake-build-${presetName}"
     },
+
     {
       "name": "nes-release",
       "inherits": "_base",
       "displayName": "NES (Release)",
-      "description": "NES ROM via llvm-mos-sdk. Requires llvm-mos-sdk on CMAKE_PREFIX_PATH.",
+      "description": "NES ROM via llvm-mos-sdk. Requires llvm-mos-sdk on CMAKE_PREFIX_PATH (set it in local.cmake).",
       "cacheVariables": {
         "TARGET_PLATFORM": "nes",
         "CMAKE_BUILD_TYPE": "Release"
@@ -24,11 +25,34 @@
       "displayName": "NES (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
+
     {
       "name": "linux-release",
       "inherits": "_base",
+      "displayName": "Linux (Release)",
+      "description": "Linux desktop build using the host's native toolchain. Requires the SDL3 build deps and Ninja installed locally.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "linux",
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "linux-release",
+      "displayName": "Linux (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+
+    {
+      "name": "linux-docker-release",
+      "inherits": "_base",
       "displayName": "Linux (Release, Docker)",
-      "description": "Linux desktop build. Runs inside the Docker toolchain.",
+      "description": "Linux desktop build inside the docker/Dockerfile.linux toolchain image. Usable from a Linux or Windows host via CLion's Docker toolchain. Produces portable AppImages.",
       "cacheVariables": {
         "TARGET_PLATFORM": "linux",
         "CMAKE_BUILD_TYPE": "Release"
@@ -38,15 +62,17 @@
       }
     },
     {
-      "name": "linux-debug",
-      "inherits": "linux-release",
+      "name": "linux-docker-debug",
+      "inherits": "linux-docker-release",
       "displayName": "Linux (Debug, Docker)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
+
     {
       "name": "win-release",
       "inherits": "_base",
       "displayName": "Windows (Release)",
+      "description": "Windows desktop build using the host's native toolchain (MSVC/Clang).",
       "cacheVariables": {
         "TARGET_PLATFORM": "win",
         "CMAKE_BUILD_TYPE": "Release"
@@ -63,10 +89,12 @@
       "displayName": "Windows (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
+
     {
       "name": "mac-release",
       "inherits": "_base",
       "displayName": "macOS (Release)",
+      "description": "macOS desktop build using the host's native toolchain.",
       "cacheVariables": {
         "TARGET_PLATFORM": "mac",
         "CMAKE_BUILD_TYPE": "Release"
