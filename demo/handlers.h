@@ -11,9 +11,8 @@ extern uint8_t TileBuffer[56];
 enum eLevelStreamCommands {
     STREAM_LEVEL_LEFT  = 0x00,
     STREAM_LEVEL_RIGHT = 0x01,
-    STREAM_LEVEL_LATCH = 0x02,
-    STREAM_LEVEL_DONE  = 0x04,
-    STREAM_LEVEL_SWAP  = 0x08,
+    STREAM_LEVEL_DONE  = 0x02,
+    STREAM_LEVEL_SWAP  = 0x04,
 };
 
 #endif
