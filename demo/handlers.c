@@ -48,7 +48,7 @@ void SpriteZeroHandler(void) {
 
         xWorldSpace += movDeltaX;
 
-      g  if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
+        if (!levelStreamCommand && !(xWorldSpace & 0x0f)) {
             if (movDeltaX > 0) {
                 if (xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
                     levelStreamCommand = STREAM_LEVEL_RIGHT;
