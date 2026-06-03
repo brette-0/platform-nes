@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <SDL3/SDL.h>
 
 #include "platform-nes/technology.h"
@@ -26,7 +27,17 @@ void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void)) {
     RegisterIRQHandler(SPRITE_ZERO_IRQ_ID, fn);
 }
 
-extern const uint8_t *patternTable;
+SDL_Window   *window;
+SDL_Renderer *renderer;
+SDL_TimerID   timer_id;
+atomic_int    _vblank_flag;
+void        (*_nmi_callback)(void);
+int           quit;
+const SDL_DisplayMode *mode;
+uint8_t       scale;
+uint8_t      *VideoRAM;
+
+const uint8_t *patternTable = CHR_ROM;
 
 static const uint32_t nes_rgb[64] = {
     0xFF626262, 0xFF012090, 0xFF1B0CA4, 0xFF3B009E,
@@ -59,11 +70,17 @@ __asm__(
 #endif
 
 uint32_t vblank_tick(void *userdata, SDL_TimerID id, uint32_t interval) {
-    atomic_store(&_vblank_flag, 1);
+    _vblank_flag = 1;
     return interval;  // repeat every 16ms
 }
 
 static uint64_t last_frame;
+
+/* PPU-side OAM: a per-frame snapshot of the application's OAM buffer,
+ * mirroring the NES OAMDMA. GenerateFrame renders from this, never from the
+ * live buffer, so mid-frame writes (e.g. from the sprite-zero IRQ handler)
+ * only appear on the next frame — exactly as on hardware. */
+static struct sprite_t oamShadow[OAM_SPRITES];
 
 void EnableRendering(uint8_t ppuCtrl_, uint8_t ppuMask_) {
     ppuMask = ppuMask_;
@@ -132,9 +149,9 @@ static void GenerateFrame(void) {
         /* Sprites use screen-space Y — they don't scroll with the background. */
         int line_spr[64];
         int n_line = 0;
-        if ((ppuMask & SPRITE) && oamBuffer.data) {
-            for (size_t s = 0; s < oamBuffer.count && n_line < 64; s++) {
-                const int sy = (int)oamBuffer.data[s].y + 1;
+        if (ppuMask & SPRITE) {
+            for (size_t s = 0; s < OAM_SPRITES && n_line < 64; s++) {
+                const int sy = (int)oamShadow[s].y + 1;
                 if (py >= sy && py < sy + 8) line_spr[n_line++] = (int)s;
             }
         }
@@ -203,7 +220,7 @@ static void GenerateFrame(void) {
                 uint8_t spr_nes    = 0;
                 if ((ppuMask & SPRITE) && ((ppuMask & 0x04) || px >= 8)) {
                     for (int k = 0; k < n_line; k++) {
-                        const struct sprite_t spr = oamBuffer.data[line_spr[k]];
+                        const struct sprite_t spr = oamShadow[line_spr[k]];
                         const int sx  = (int)spr.x;
                         if (px < sx || px >= sx + 8) continue;
                         const int sy      = (int)spr.y + 1;
@@ -381,6 +398,12 @@ void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value)
     VideoRAM[offset] = value;
 }
 
+void StreamFromVideoMemory(const uint16_t offset, atomic uint8_t* target, const uint8_t size) {
+    for (uint8_t i = 0; i < size; i++) {
+        target[i] = VideoRAM[offset + i];
+    }
+}
+
 void SetScroll(uint16_t x, uint16_t y) {
     xScroll = x; yScroll = y;
     yScroll_written = 1;
@@ -426,45 +449,28 @@ void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, uint8_t va
     VideoRAM[offset] = value;
 }
 
-oamBuffer_t oamBuffer = { NULL, 0, 0 };
-size_t      sOAM      = 0;
-
-static void oam_grow_to(size_t sprites) {
-    if (sprites <= oamBuffer.cap) return;
-    size_t n = oamBuffer.cap ? oamBuffer.cap * 2 : 64;
-    while (n < sprites) n *= 2;
-    oamBuffer.data = realloc(oamBuffer.data, n * sizeof(struct sprite_t));
-    oamBuffer.cap  = n;
+void OAMFromBuffer(struct sprite_t* oam, uint8_t slot, uint16_t off,
+                   uint8_t width, const uint8_t* src, uint16_t count) {
+    uint8_t* dst = (uint8_t*)oam + (size_t)slot * SPRITE_STRIDE + off;
+    const uint8_t* s = src + off;
+    for (uint16_t i = 0; i < count; i++)
+        memcpy(dst + (size_t)i * SPRITE_STRIDE, s + (size_t)i * SPRITE_STRIDE, width);
 }
 
-/* Smallest buffer size in bytes that holds `count` strided writes from index 0 with
-   signed stride `step`. With non-positive step, the highest index written is 0. */
-static size_t strided_bytes(uint16_t count, int16_t step) {
-    if (count == 0) return 0;
-    if (step <= 0) return 1;
-    return (size_t)(count - 1) * (size_t)step + 1;
+void OAMFromProvider(struct sprite_t* oam, uint8_t slot, uint16_t off,
+                     uint8_t width, oam_t (*fn)(uint16_t), uint16_t count) {
+    uint8_t* base = (uint8_t*)oam + (size_t)slot * SPRITE_STRIDE + off;
+    for (uint16_t i = 0; i < count; i++) {
+        oam_t v = fn(i);
+        memcpy(base + (size_t)i * SPRITE_STRIDE, &v, width);  /* low `width` bytes (LE) */
+    }
 }
 
-void OAMPopulateFromBuffer(uint16_t offset, const uint8_t* buffer, uint16_t sBuffer, int16_t step) {
-    size_t last_byte = (size_t)offset + strided_bytes(sBuffer, step);
-    size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
-    oam_grow_to(sprites);
-    uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
-    for (uint16_t i = 0; i < sBuffer; i++) dst[(int)i * step] = buffer[i];
-    if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
+/* SDL analogue of OAMDMA: freeze the passed OAM buffer into the PPU-side
+ * snapshot that GenerateFrame renders from. Called from the app's NMI. */
+void RefreshSprites(struct sprite_t* oam) {
+    memcpy(oamShadow, oam, OAM_SPRITES * sizeof(struct sprite_t));
 }
-
-void OAMPopulateFromProvider(uint16_t offset, uint8_t (*fn)(uint16_t), uint16_t amt, int16_t step) {
-    size_t last_byte = (size_t)offset + strided_bytes(amt, step);
-    size_t sprites   = (last_byte + sizeof(struct sprite_t) - 1) / sizeof(struct sprite_t);
-    oam_grow_to(sprites);
-    uint8_t* dst = (uint8_t*)oamBuffer.data + offset;
-    for (uint16_t i = 0; i < amt; i++) dst[(int)i * step] = fn(i);
-    if (sprites > oamBuffer.count) { oamBuffer.count = sprites; sOAM = sprites; }
-}
-
-// link happy stub
-void RefreshSprites(void) { }
 
 uint16_t CartesianToAddress(uint16_t x, uint16_t y) {
     return xy_to_nt_addr(x, y);
@@ -482,4 +488,48 @@ void WaitThenReactToSpriteZero(uint16_t px, uint16_t py, void (*fn)(void), atomi
     *latch = true;
     SetSpriteZeroHandler(px, py, fn);
     SetNextIRQHandler((irq_t){ .id = SPRITE_ZERO_IRQ_ID, .px = px, .py = py });
+}
+
+#ifndef PROJECT_NAME
+#define PROJECT_NAME "Super Brette Bros"
+#endif
+
+void init() {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
+        SDL_Log("SDL_Init failed: %s", SDL_GetError());
+        return;
+    }
+
+    const SDL_DisplayID display = SDL_GetPrimaryDisplay();
+    mode = SDL_GetCurrentDisplayMode(display);
+
+    paletteRAM = malloc(32);
+
+#ifdef LANDSCAPE
+    scale = mode->h / 240;
+    VideoRAM = malloc(
+
+        mode->w / scale < 512 ? 0x800 : mode->w / scale * 0x400
+    );
+#endif
+#if PORTRAIT
+    scale = mode->w / 256;
+    VideoRAM = malloc(
+        mode->h / scale < 480 ? 0x800 : mode->w / scale * 0x400
+    );
+#endif
+
+
+    if (!SDL_CreateWindowAndRenderer(PROJECT_NAME, mode->w >> 1, mode->h >> 1, 0, &window, &renderer)) {
+        SDL_Log("Window creation failed: %s", SDL_GetError());
+        return;
+    }
+    timer_id = SDL_AddTimer(16, vblank_tick, NULL);
+}
+
+void post() {
+    SDL_RemoveTimer(timer_id);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
 }

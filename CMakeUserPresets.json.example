@@ -1,0 +1,38 @@
+{
+  "//": [
+    "Per-developer CMake preset overrides.",
+    "",
+    "Copy this file to CMakeUserPresets.json and edit LLVM_MOS_SDK for your",
+    "machine. CMakeUserPresets.json is gitignored, so the path stays local.",
+    "",
+    "The NES presets in CMakePresets.json reference",
+    "$env{LLVM_MOS_SDK}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake as their",
+    "toolchain. That toolchain selects the MOS-aware clang, which is what gives",
+    "CLion correct 6502 code intelligence (16-bit int, __NES__ defines, the",
+    "llvm-mos clangd) on the NES target while desktop presets keep the host",
+    "toolchain. Set LLVM_MOS_SDK below and build/index the *-local presets.",
+    "",
+    "LLVM_MOS_SDK is the root of your llvm-mos-sdk install (the directory that",
+    "contains lib/cmake/llvm-mos-sdk/). This is the same path you put in",
+    "local.cmake as CMAKE_PREFIX_PATH."
+  ],
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "nes-env",
+      "hidden": true,
+      "environment": { "LLVM_MOS_SDK": "/path/to/llvm-mos" }
+    },
+    {
+      "name": "nes-release-local",
+      "inherits": ["nes-env", "nes-release"],
+      "displayName": "NES (Release, local SDK)"
+    },
+    {
+      "name": "nes-debug-local",
+      "inherits": ["nes-env", "nes-debug"],
+      "displayName": "NES (Debug, local SDK)"
+    }
+  ]
+}

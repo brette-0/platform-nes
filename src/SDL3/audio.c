@@ -1,7 +1,6 @@
-﻿#include "../../include/platform-nes/audio.h"
-
+﻿#include <platform-nes/audio.h>
+#include <platform-nes/technology.h>
 #include <SDL3/SDL.h>
-#include "internal.h"
 
 typedef struct {
     uint32_t offset;
@@ -35,14 +34,14 @@ static void BuildPCMBuffer(void) {
         .freq = 48000
     };
 
-    uint32_t total = 0;
-    for (uint8_t i = 0; i < nTracks; i++) {
+    auto total = 0;
+    for (auto i = 0; i < nTracks; i++) {
         SDL_AudioSpec spec;
         uint8_t *data;
         uint32_t len;
         if (SDL_LoadWAV(tracks[i].fp, &spec, &data, &len)) {
             uint8_t *converted = NULL;
-            int converted_len = 0;
+            auto converted_len = 0;
             if (SDL_ConvertAudioSamples(&spec, data, (int)len,
                                          &target, &converted, &converted_len)) {
                 total += converted_len;
@@ -56,7 +55,7 @@ static void BuildPCMBuffer(void) {
     pcm_buffer_size = total;
 
     // second pass — load, convert, and fill runtime info
-    uint32_t offset = 0;
+    auto offset = 0;
     for (uint8_t i = 0; i < nTracks; i++) {
         SDL_AudioSpec spec;
         uint8_t *data;
@@ -71,7 +70,7 @@ static void BuildPCMBuffer(void) {
         }
 
         uint8_t *converted = NULL;
-        int converted_len = 0;
+        auto converted_len = 0;
         if (SDL_ConvertAudioSamples(&spec, data, (int)len,
                                      &target, &converted, &converted_len)) {
             SDL_memcpy((uint8_t *)pcm_buffer + offset, converted, converted_len);
@@ -124,22 +123,22 @@ void AudioInit(void) {
 void AudioUpdate(void) {
     if (!music_playing || music_paused || current_track < 0) return;
 
-    int queued = SDL_GetAudioStreamQueued(music_stream);
+    const auto queued = SDL_GetAudioStreamQueued(music_stream);
     if (queued > 32768) return;  // keep ~85ms buffered
 
-    track_runtime_t *t = &track_info[current_track];
-    uint32_t end = t->offset + t->length;
+    const track_runtime_t *t = &track_info[current_track];
+    const auto end = t->offset + t->length;
 
     // feed enough for several frames
-    int to_feed = 32768 - queued;
+    auto to_feed = 32768 - queued;
     while (to_feed > 0) {
-        uint32_t remaining = end - playback_pos;
-        uint32_t chunk = remaining < 16384 ? remaining : 16384;
+        const auto remaining = end - playback_pos;
+        const auto chunk = remaining < 16384 ? remaining : 16384;
 
         SDL_PutAudioStreamData(music_stream,
-            (uint8_t *)pcm_buffer + playback_pos, chunk);
+            (uint8_t *)pcm_buffer + playback_pos, (int)chunk);
         playback_pos += chunk;
-        to_feed -= chunk;
+        to_feed -= (int)chunk;
 
         if (playback_pos >= end) {
             playback_pos = t->loop_start;

@@ -1,4 +1,5 @@
 #include <platform-nes/interrupts.h>
+#include <platform-nes/technology.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,7 +13,7 @@ size_t          irqTableCap;
 
 void SetNextIRQHandler(const irq_t handle) {
     if (irqCount == irqCap) {
-        size_t n = irqCap ? irqCap * 2 : 8;
+        const auto n = irqCap ? irqCap * 2 : 8;
         irqBuffer = realloc(irqBuffer, n * sizeof(irq_t));
         irqCap = n;
     }
@@ -21,7 +22,7 @@ void SetNextIRQHandler(const irq_t handle) {
 
 void RegisterIRQHandler(uint8_t id, irq_handler_fn fn) {
     if ((size_t)id >= irqTableCap) {
-        size_t n = irqTableCap ? irqTableCap : 8;
+        auto n = irqTableCap ? irqTableCap : 8;
         while (n <= (size_t)id) n *= 2;
         irqTable = realloc(irqTable, n * sizeof(irq_handler_fn));
         memset(irqTable + irqTableCap, 0,
@@ -30,4 +31,9 @@ void RegisterIRQHandler(uint8_t id, irq_handler_fn fn) {
     }
     irqTable[id] = fn;
     if ((size_t)id + 1 > irqTableCount) irqTableCount = (size_t)id + 1;
+}
+
+void reset() {
+    post();
+    exit(0);
 }

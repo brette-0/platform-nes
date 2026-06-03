@@ -60,6 +60,10 @@
 #define atomic _Atomic
 #endif
 
+#if __STDC_VERSION__ < 202311L
+#define auto __auto_type   // pre-C23: borrow the extension
+#endif                     // C23+: native auto, no macro needed
+
 /**
  * @brief Clang-only function attribute biasing the optimiser toward small code.
  *
@@ -203,10 +207,6 @@ extern const uint8_t name[sizeof(#chars)]
  * `[0, sBuffer)`. @p step is signed; a negative value walks backward
  * from @p offset. The caller must ensure every written index stays
  * inside the target buffer.
- *
- * @note On SDL3 builds, if @p target is `&oamBuffer`, the call is
- *       routed through the OAM growth handler instead of being a
- *       straight byte copy.
  *
  * @param target  Destination buffer.
  * @param offset  Starting index inside @p target.

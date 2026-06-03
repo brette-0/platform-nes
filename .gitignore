@@ -51,8 +51,10 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Per-developer CMake overrides (see local.cmake.example)
+# Per-developer CMake overrides (see local.cmake.example
+# and CMakeUserPresets.json.example)
 local.cmake
+CMakeUserPresets.json
 
 # CMake build trees. Releases are produced by GitHub Actions;
 # local build directories should never be committed.

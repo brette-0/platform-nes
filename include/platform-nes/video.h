@@ -87,44 +87,32 @@ _CHR_POP                                       \
 
 #ifndef TARGET_NES
 /** @brief OAM coordinate type — 16-bit on desktop to allow off-screen sprites. */
-typedef uint16_t video_t;
+typedef uint16_t oam_t;
 #else
 /** @brief OAM coordinate type — 8-bit on NES to match hardware OAM layout. */
-typedef uint8_t video_t;
+typedef uint8_t oam_t;
 #endif
 
 /**
  * @brief A single sprite in the object attribute memory layout.
  */
 struct sprite_t {
-  video_t y;            /**< Y coordinate of the top-left corner. */
-  uint8_t tile;       /**< Pattern table tile index. */
-  uint8_t attributes; /**< Palette select, priority, flip flags. */
-  video_t x;            /**< X coordinate of the top-left corner. */
+  oam_t y;            /**< Y coordinate of the top-left corner. */
+  uint8_t tile;         /**< Pattern table tile index. */
+  uint8_t attributes;   /**< Palette select, priority, flip flags. */
+  oam_t x;            /**< X coordinate of the top-left corner. */
 };
 
-#ifdef TARGET_NES
-  /** @brief OAM buffer on NES — fixed 64-sprite array. */
-  typedef struct sprite_t oamBuffer_t[64];
-  /** @brief Number of sprites in the OAM buffer (NES hardware limit). */
-  #define sOAM 64
-  /** @brief Macro pointing at the raw OAM sprite array. */
-  #define OAM_BUFFER oamBuffer
-#else
-  /** @brief OAM buffer on desktop — growable dynamic array. */
-  typedef struct {
-      struct sprite_t* data; /**< Sprite array. */
-      size_t           count;/**< Sprites currently used. */
-      size_t           cap;  /**< Allocated capacity. */
-  } oamBuffer_t;
-  /** @brief Current sprite count on desktop (variable). */
-  extern size_t sOAM;
-  /** @brief Macro pointing at the underlying sprite array. */
-#define OAM_BUFFER oamBuffer.data
-#endif
-
-/** @brief Global OAM buffer populated by application code each frame. */
-extern oamBuffer_t oamBuffer;
+/**
+ * @brief Number of sprites in an OAM region.
+ *
+ * An OAM buffer is simply a pointer to `OAM_SPRITES` consecutive
+ * ::sprite_t records — `OAM_SPRITES * sizeof(struct sprite_t)` bytes —
+ * on both NES and desktop. Application code owns the storage and passes
+ * the pointer to every OAM call, so several independent buffers may
+ * coexist.
+ */
+#define OAM_SPRITES 64
 
 /**
  * @brief Forces alignment of the current insertion point inside the
@@ -402,7 +390,7 @@ void WriteSingleToPaletteMemory(const uint8_t offset, uint8_t value);
  * @param amt      Number of iterations.
  * @param polarity Non-zero for vertical writes, zero for horizontal.
  */
-void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, video_t (*fn)(const uint16_t), uint8_t amt, uint8_t polarity);
+void WriteProviderToVideoMemory(uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), uint8_t amt, uint8_t polarity);
 
 /**
  * @brief Converts a pixel position into a PPU VRAM address.
@@ -437,12 +425,16 @@ void WriteBufferToAttributeMemory(
 void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, uint8_t value);
 
 /**
- * @brief Uploads ::oamBuffer to the PPU via OAM DMA.
+ * @brief Uploads an OAM buffer to the PPU via OAM DMA.
  *
- * Call once per frame, after the application has populated sprites
- * in ::oamBuffer.
+ * Call once per frame, after the application has populated sprites in
+ * @p oam. On NES this triggers the hardware OAM DMA from the buffer's
+ * page (so @p oam must be 256-byte aligned); on desktop it freezes a
+ * snapshot the renderer reads for the next frame.
+ *
+ * @param oam Pointer to the ::OAM_SPRITES-sprite buffer to upload.
  */
-void RefreshSprites(void);
+void RefreshSprites(struct sprite_t *oam);
 
 /**
  * @brief Sets the color emphasis bits in ::PPUMASK (bits 5-7).
@@ -531,5 +523,55 @@ if (1)
 
 #define SPRITE_STRIDE  sizeof(struct sprite_t)
 #define SPRITE_SLOT(i) ((i) * SPRITE_STRIDE)
+
+/**
+ * @brief Writes one ::sprite_t field across @p count consecutive sprites.
+ *
+ * Hardware-specific OAM write: the sprite stride is baked in, and the
+ * field's byte offset and width are derived from @p member at compile
+ * time. On NES every field is one byte; on desktop ::oam_t coordinate
+ * fields are two bytes and are written in full, so off-screen sprite
+ * positions are preserved. The provider returns ::oam_t.
+ *
+ * @param oam    OAM buffer to write into.
+ * @param slot   First sprite index to write.
+ * @param member A field of ::sprite_t (e.g. `x`, `y`, `tile`).
+ * @param fn     Provider returning the value for iteration `i`.
+ * @param count  Number of sprites to write.
+ */
+#define PopulateOAMFromProvider(oam, slot, member, fn, count)   \
+    OAMFromProvider((oam), (slot),                             \
+                    offsetof(struct sprite_t, member),         \
+                    sizeof(((struct sprite_t *)0)->member),    \
+                    (fn), (count))
+
+/**
+ * @brief Copies one ::sprite_t field into @p count consecutive sprites.
+ *
+ * The buffer counterpart of ::PopulateOAMFromProvider: instead of a
+ * callback, each value is read from @p src, which is laid out as
+ * ::sprite_t records (e.g. a metasprite table). The @p member field is
+ * copied from `src[i]` to `oam[slot + i]`; the sprite stride, the
+ * field offset and its width are all handled internally.
+ *
+ * @param oam    OAM buffer to write into.
+ * @param slot   First sprite index to write.
+ * @param member A field of ::sprite_t (e.g. `tile`, `attributes`, `x`).
+ * @param src    Source laid out as ::sprite_t records.
+ * @param count  Number of sprites to write.
+ */
+#define PopulateOAMFromBuffer(oam, slot, member, src, count)    \
+    OAMFromBuffer((oam), (slot),                               \
+                  offsetof(struct sprite_t, member),           \
+                  sizeof(((struct sprite_t *)0)->member),      \
+                  (const uint8_t *)(src), (count))
+
+void OAMFromProvider(struct sprite_t *oam, uint8_t slot, uint16_t off,
+                     uint8_t width, oam_t (*fn)(uint16_t), uint16_t count);
+void OAMFromBuffer(struct sprite_t *oam, uint8_t slot, uint16_t off,
+                   uint8_t width, const uint8_t *src, uint16_t count);
+
+
+void StreamFromVideoMemory(const uint16_t offset, atomic uint8_t* target, const uint8_t size);
 
 #endif

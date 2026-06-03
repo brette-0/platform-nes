@@ -1,6 +1,5 @@
 ﻿#include "handlers.h"
 
-#include <stdbool.h>
 #include <platform-nes/video.h>
 #include <stdint.h>
 
@@ -12,11 +11,13 @@
 atomic uint8_t levelStreamCommand;
 uint8_t TileBuffer[56];
 
-#define PLAYER_SCROLL_POS (VIEWPORT_PX >> 1)
+#define PLAYER_SCROLL_POS   (VIEWPORT_PX >> 1)
+#define PLAYER_MAX_SPRITE_X (VIEWPORT_PX - 16)
 
 void SpriteZeroHandler(void) {
-    spriteZeroHandled = 1;
     SetScroll(xWorldSpace, 16);
+    PollControllers(&port1, &port2);
+    spriteZeroHandled = 1;
 
     AudioUpdate();
 
@@ -25,11 +26,7 @@ void SpriteZeroHandler(void) {
 
     if (deltaY) {
         playerY += deltaY;
-        PopulateFromProvider(
-            (uint8_t*)&oamBuffer,
-            SPRITE_SLOT(1) + offsetof(struct sprite_t, y),
-            AdjustSpriteY, 8, SPRITE_STRIDE
-        );
+        PopulateOAMFromProvider(OAMBuffer, 1, y, AdjustSpriteY, 8);
     }
 
     if (!deltaX) return;    // if no need to move player sprite x or sroll, return early
@@ -62,7 +59,7 @@ void SpriteZeroHandler(void) {
                     lastXWorldSpace = xWorldSpace;
                     levelStreamCommand |=  STREAM_LEVEL_DONE;
                 }
-            } else if (xWorldSpace == lastXWorldSpace - 0x10) {
+            } else if (xWorldSpace == lastXWorldSpace - 16) {
                 levelStreamCommand = STREAM_LEVEL_LEFT;
                 if (lastDeltaScroll > 0) {
                     levelStreamCommand |= STREAM_LEVEL_SWAP;
@@ -80,18 +77,18 @@ void SpriteZeroHandler(void) {
             }
         }
     } else {
-        const video_t lastPlayerX = playerX;
+        const oam_t lastPlayerX = playerX;
         playerX += deltaX;
-        if (playerX > (video_t)-16 && deltaX > 0) {
-            playerX = -16;
-        } else if (playerX > lastPlayerX && deltaX < 0) {
-            playerX = 0;
+        if (deltaX > 0) {
+            if (playerX > PLAYER_MAX_SPRITE_X) {
+                playerX = PLAYER_MAX_SPRITE_X;
+            }
+        } else {
+            if (playerX > lastPlayerX) {
+                playerX = 0;
+            }
         }
 
-        PopulateFromProvider(
-            (uint8_t*)&oamBuffer,
-            SPRITE_SLOT(1) + offsetof(struct sprite_t, x),
-            AdjustSpriteX, 8, SPRITE_STRIDE
-        );
+        PopulateOAMFromProvider(OAMBuffer, 1, x, AdjustSpriteX, 8);
     }
 }

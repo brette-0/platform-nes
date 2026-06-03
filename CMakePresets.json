@@ -12,7 +12,8 @@
       "name": "nes-release",
       "inherits": "_base",
       "displayName": "NES (Release)",
-      "description": "NES ROM via llvm-mos-sdk. Requires llvm-mos-sdk on CMAKE_PREFIX_PATH.",
+      "description": "NES ROM via llvm-mos-sdk. Set LLVM_MOS_SDK to your SDK install (see CMakeUserPresets.json.example); the toolchain selects the MOS-aware clang so the IDE gets 6502 intelligence.",
+      "toolchainFile": "$env{LLVM_MOS_SDK}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake",
       "cacheVariables": {
         "TARGET_PLATFORM": "nes",
         "CMAKE_BUILD_TYPE": "Release"
@@ -27,19 +28,31 @@
     {
       "name": "linux-release",
       "inherits": "_base",
-      "displayName": "Linux (Release, Docker)",
-      "description": "Linux desktop build. Runs inside the Docker toolchain.",
+      "displayName": "Linux (Release)",
+      "description": "Linux desktop build using the host toolchain.",
       "cacheVariables": {
         "TARGET_PLATFORM": "linux",
         "CMAKE_BUILD_TYPE": "Release"
-      },
-      "vendor": {
-        "jetbrains.com/clion": { "toolchain": "Docker" }
       }
     },
     {
       "name": "linux-debug",
       "inherits": "linux-release",
+      "displayName": "Linux (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-docker-release",
+      "inherits": "linux-release",
+      "displayName": "Linux (Release, Docker)",
+      "description": "Linux desktop build routed through the CLion Docker toolchain.",
+      "vendor": {
+        "jetbrains.com/clion": { "toolchain": "Docker" }
+      }
+    },
+    {
+      "name": "linux-docker-debug",
+      "inherits": "linux-docker-release",
       "displayName": "Linux (Debug, Docker)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },

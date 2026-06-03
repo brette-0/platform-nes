@@ -18,6 +18,10 @@
 #define PLATFORM_NES_LIBRARY_H
 #include <stdint.h>
 
+#if !defined(__GNUC__) && !defined(__clang__)
+#error "platform-nes requires GCC or Clang. MSVC is not supported."
+#endif
+
 #if defined(LANDSCAPE) && defined(PORTRAIT)
 #error "Must not define both Mirroring"
 #endif
@@ -59,7 +63,6 @@ extern int quit;
 
 #include "types.h"
 #include "technology.h"
-#include "reset.h"
 #include "input.h"
 #include "video.h"
 #include "audio.h"

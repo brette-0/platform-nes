@@ -10,8 +10,8 @@
 uint8_t port1;
 uint8_t port2;
 
-video_t playerX;
-video_t playerY;
+oam_t playerX;
+oam_t playerY;
 
 int8_t lastDeltaScroll;
 
@@ -21,46 +21,30 @@ atomic uint16_t lastXWorldSpace;
 
 atomic uint8_t spriteZeroHandled;
 
-struct sprite_t OAMBuffer[64];
+struct sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
-static uint8_t Clear(uint16_t _);
-static void    BuildLevelSize();
+static oam_t Clear(uint16_t _);
+static bool    BuildLevelSize();
 
 RESET {
-    BuildLevelSize();
+    if (!BuildLevelSize()) {
+        reset();    // spin reset on NES, exit on SDL3
+    }
     FlushVideoRAM(0x24, 0x00);
 
-    PopulateFromProvider(
-        (uint8_t*)&oamBuffer,
-        SPRITE_SLOT(0) + offsetof(struct sprite_t, y),
-        Clear, 64, SPRITE_STRIDE
-    );
-
+    PopulateOAMFromProvider(OAMBuffer, 0, y, Clear, 64);
 
     // fill in with mario metatiles
-    PopulateFromBuffer(
-        (uint8_t*)&oamBuffer, SPRITE_SLOT(1),
-        (const uint8_t*)msMario, 8 * SPRITE_STRIDE, 1
-    );
-
-    PopulateFromProvider(
-        (uint8_t*)&oamBuffer,
-        SPRITE_SLOT(1) + offsetof(struct sprite_t, y),
-        AdjustSpriteY, 8, SPRITE_STRIDE
-    );
-
-    PopulateFromProvider(
-        (uint8_t*)&oamBuffer,
-        SPRITE_SLOT(1) + offsetof(struct sprite_t, x),
-        AdjustSpriteX, 8, SPRITE_STRIDE
-    );
+    PopulateOAMFromBuffer(OAMBuffer, 1, tile, msMario, 8);
+    PopulateOAMFromProvider(OAMBuffer, 1, y, AdjustSpriteY, 8);
+    PopulateOAMFromProvider(OAMBuffer, 1, x, AdjustSpriteX, 8);
 
     WriteBufferToPaletteMemory(BG_0,         SIZED_OBJ(BGColours));
     WriteBufferToPaletteMemory(SPRITE_0 + 1, SIZED_OBJ(marioColors));
     WriteBufferToVideoMemory(VIEWPORT_TX - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
     WriteSingleToVideoMemory(0, 1, 0x2e);
-    OAM_BUFFER[0] = (struct sprite_t){
+    OAMBuffer[0] = (struct sprite_t){
         .y = 8,
         .tile = 0xff,
         .attributes = 0,
@@ -86,6 +70,7 @@ RESET {
 
     AudioInit();
     TrackPlay(0);
+    RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
     EnableRendering(BG_ADDR, BG_L | SPRITE_L);
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
@@ -104,8 +89,7 @@ RESET {
 
 NMI {
     SetColorPriority(BLUE);
-    PollControllers(&port1, &port2);
-    RefreshSprites();
+    RefreshSprites(OAMBuffer);
 
     spriteZeroHandled = 0;
 
@@ -131,25 +115,25 @@ NMI {
     SetColorPriority(0);
 }
 
-static uint8_t Clear(const uint16_t _) {
+static oam_t Clear(const uint16_t _) {
     return 0xef;
 }
 
-video_t AdjustSpriteY(const uint16_t i) {
+oam_t AdjustSpriteY(const uint16_t i) {
     return playerY + (i >> 1) * 8;
 }
 
-video_t AdjustSpriteX(const uint16_t i) {
+oam_t AdjustSpriteX(const uint16_t i) {
     return playerX + (i & 1) * 8;
 }
 
-MINSIZE static void BuildLevelSize() {
+MINSIZE static bool BuildLevelSize() {
     uint8_t temp = 0;
     levelSize    = 0;
 
     for (uint16_t i = 0; i < 0xffff; i++) {
         if (LevelDataLengths[i] == 0)
-            return;
+            return true;
 
         temp += LevelDataLengths[i];
 
@@ -159,5 +143,5 @@ MINSIZE static void BuildLevelSize() {
         }
     }
 
-    // TODO: implement universal 'Error' out
+    return false;
 }

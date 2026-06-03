@@ -2,8 +2,6 @@
 #include <platform-nes/technology.h>
 #include <stdint.h>
 
-#include <stdbool.h>
-
 const uint16_t PatternTables    = 0;
 const uint16_t NameTables       = 0x2000;
 const uint16_t PaletteTables    = 0x3f00;
@@ -14,21 +12,21 @@ atomic uint8_t SPPUCTRL;
 atomic uint8_t SPPUMASK;
 
 inline static uint16_t xy_to_nt_addr(uint16_t x, uint16_t y) {
-    uint16_t base = 0x2000;
-    uint16_t nt_h = ((x >> 5) & 1) << 10;
-    uint16_t nt_v = (y / 30) << 11;
-    uint16_t col  = x & 0x1F;
-    uint16_t row  = (y % 30);
+    const auto base = 0x2000;
+    const auto nt_h = ((x >> 5) & 1) << 10;
+    const auto nt_v = (y / 30) << 11;
+    const auto col  = x & 0x1F;
+    const auto row  = (y % 30);
 
     return base + nt_h + nt_v + row * 32 + col;
 }
 
 inline static uint16_t xy_to_at_addr(uint16_t x, uint16_t y) {
-    uint16_t base = 0x2000;
-    uint16_t nt_h = ((x >> 5) & 1) << 10;
-    uint16_t nt_v = (y / 30) << 11;
-    uint16_t col  = x & 0x1F;
-    uint16_t row  = (y % 30);
+    const auto base = 0x2000;
+    const auto nt_h = ((x >> 5) & 1) << 10;
+    const auto nt_v = (y / 30) << 11;
+    const auto col  = x & 0x1F;
+    const auto row  = (y % 30);
 
     return base + nt_h + nt_v + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
@@ -52,8 +50,8 @@ void FlushVideoRAM(const uint8_t nt, const uint8_t at) {
     POKE(PPUADDR, NameTables >> 8);
     POKE(PPUADDR, NameTables & 0xFF);
 
-    for (uint8_t page = 0; page < nVideoRam / 0x400; page++) {
-        for (uint8_t nt_hunk = 0; nt_hunk < 0xf0; nt_hunk++) {
+    for (auto page = 0; page < nVideoRam / 0x400; page++) {
+        for (auto nt_hunk = 0; nt_hunk < 0xf0; nt_hunk++) {
             POKE(PPUDATA, nt);
             POKE(PPUDATA, nt);
             POKE(PPUDATA, nt);
@@ -85,7 +83,7 @@ void SetScroll(uint16_t x, uint16_t y) {
         y ^= 0x100;
     }
 
-    uint8_t nt = x >> 8 & 0x01
+    const auto nt = x >> 8 & 0x01
                | y >> 7 & 0x02;
 
     SPPUCTRL = (SPPUCTRL & 0xFC) | nt;
@@ -103,7 +101,7 @@ __attribute__((hot))
 void WriteBufferToVideoMemory(
     const uint16_t x, const uint16_t y, const uint8_t* source, const uint8_t sBuffer, const uint8_t polarity
 ) {
-    const uint16_t offset = xy_to_nt_addr(x, y);
+    const auto offset = xy_to_nt_addr(x, y);
     SPPUCTRL &= ~POLARITY;
     if (polarity) SPPUCTRL |= POLARITY;
     POKE(PPUCTRL, SPPUCTRL);
@@ -112,14 +110,14 @@ void WriteBufferToVideoMemory(
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
 
-    for (uint8_t i = 0; i < sBuffer; i++) {
+    for (auto i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
     }
 }
 
 __attribute__((hot))
 void WriteSingleToVideoMemory(const uint16_t x, const uint16_t y, uint8_t value) {
-    const uint16_t offset = xy_to_nt_addr(x, y);
+    const auto offset = xy_to_nt_addr(x, y);
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
@@ -132,7 +130,7 @@ void WriteBufferToPaletteMemory(const uint8_t offset, const uint8_t* source, con
     POKE(PPUADDR, (uint8_t)((offset + PaletteTables) >> 8));
     POKE(PPUADDR, (uint8_t)( offset + PaletteTables  &  0xFF));
 
-    for (uint8_t i = 0; i < sBuffer; i++) {
+    for (auto i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
     }
 }
@@ -149,7 +147,7 @@ __attribute__((hot))
 void WriteProviderToVideoMemory(
     const uint16_t x, const uint16_t y, uint8_t (*fn)(uint16_t), const uint8_t amt, const uint8_t polarity
 ) {
-    const uint16_t offset = xy_to_nt_addr(x, y);
+    const auto offset = xy_to_nt_addr(x, y);
     SPPUCTRL &= ~POLARITY;
     if (polarity) SPPUCTRL |= POLARITY;
 
@@ -159,7 +157,7 @@ void WriteProviderToVideoMemory(
     POKE(PPUADDR, (uint8_t)(offset >> 8));
     POKE(PPUADDR, (uint8_t)(offset & 0xFF));
 
-    for (uint8_t i = 0; i < amt; i++) {
+    for (auto i = 0; i < amt; i++) {
         POKE(PPUDATA, fn(i));
     }
 }
@@ -191,9 +189,18 @@ void WriteBufferToAttributeMemory(
     }
 }
 
+void StreamFromVideoMemory(const uint16_t offset, atomic uint8_t* target, const uint8_t size) {
+    PEEK(PPUSTATUS);
+    POKE(PPUADDR, (uint8_t)(offset >> 8));
+    POKE(PPUADDR, (uint8_t)(offset & 0xFF));
+    for (auto i = 0; i < size; i++) {
+        target[i] = PEEK(PPUDATA);
+    }
+}
+
 __attribute__((always_inline))
 void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, const uint8_t value) {
-    const uint16_t offset = xy_to_at_addr(x, y);
+    const auto offset = xy_to_at_addr(x, y);
 
     PEEK(PPUSTATUS);
     POKE(PPUADDR, (uint8_t)(offset >> 8));
@@ -201,11 +208,26 @@ void WriteSingleToAttributeMemory(const uint16_t x, const uint16_t y, const uint
     POKE(PPUDATA, value);
 }
 
-oamBuffer_t oamBuffer __attribute__((aligned(256)));
-
 __attribute__((always_inline))
-void RefreshSprites(void) {
-    POKE(OAMDMA, (uint16_t)oamBuffer >> 8);
+void RefreshSprites(struct sprite_t *oam) {
+    POKE(OAMDMA, (uint16_t)oam >> 8);
+}
+
+void OAMFromBuffer(struct sprite_t *oam, uint8_t slot, uint16_t off,
+                   uint8_t width, const uint8_t *src, uint16_t count) {
+    (void)width;                                   /* oam_t == uint8_t on NES */
+    uint8_t *dst = (uint8_t *)oam + (uint16_t)slot * SPRITE_STRIDE + off;
+    const uint8_t *s = src + off;
+    for (uint16_t i = 0; i < count; i++)
+        dst[i * SPRITE_STRIDE] = s[i * SPRITE_STRIDE];
+}
+
+void OAMFromProvider(struct sprite_t *oam, uint8_t slot, uint16_t off,
+                     uint8_t width, oam_t (*fn)(uint16_t), uint16_t count) {
+    (void)width;                                   /* oam_t == uint8_t on NES */
+    uint8_t *base = (uint8_t *)oam + (uint16_t)slot * SPRITE_STRIDE + off;
+    for (uint16_t i = 0; i < count; i++)
+        base[i * SPRITE_STRIDE] = fn(i);
 }
 
 uint16_t CartesianToAddress(uint16_t x, uint16_t y) {
@@ -213,10 +235,10 @@ uint16_t CartesianToAddress(uint16_t x, uint16_t y) {
 }
 
 scroll_t CartesianToScroll(uint16_t px, uint16_t py) {
-    uint16_t y = py;
+    auto y = py;
     if (y >= 240) { y -= 240; y ^= 0x100; }
     if (y >= 240) { y -= 240; y ^= 0x100; }
-    uint8_t nt = (uint8_t)((px >> 8 & 0x01) | (y >> 7 & 0x02));
+    const auto nt = (uint8_t)((px >> 8 & 0x01) | (y >> 7 & 0x02));
     return (scroll_t){{ (uint8_t)(SPPUCTRL & 0xFC | nt), (uint8_t)(px & 0xFF), (uint8_t)(y & 0xFF) }};
 }
 

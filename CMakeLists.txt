@@ -9,11 +9,13 @@ set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_N
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
 
-# src/SDL3/*.c uses <stdatomic.h>, which MSVC's CRT gates behind C11.
-# Setting this project-wide also covers the NES build (llvm-mos's clang
-# supports C11 natively) and the other desktop targets, where GCC/Clang
-# default to gnu11 or later anyway.
-set(CMAKE_C_STANDARD 11)
+# C23 gives us native `auto` type inference, so technology.h's
+# `#define auto __auto_type` fallback stays inert (its guard is
+# __STDC_VERSION__ < 202311L) and the editor stops flagging
+# -Wkeyword-macro. Both toolchains we support handle it: llvm-mos's
+# clang and host GCC accept -std=gnu23. C23 still satisfies the
+# <stdatomic.h> requirement in src/SDL3/*.c that MSVC gates behind C11.
+set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 # ----------------------------------------------------------------------
 # NES target
@@ -107,7 +109,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             COMMENT "Assembling FamiStudio (pass 1)"
     )
 
-    file(GLOB_RECURSE DEMO_ASM_SOURCES ${CMAKE_SOURCE_DIR}/demo/*.s)
+    file(GLOB_RECURSE DEMO_ASM_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.s)
     set(DEMO_ASM_OBJECTS "")
     foreach(ASM_SRC ${DEMO_ASM_SOURCES})
         get_filename_component(ASM_NAME ${ASM_SRC} NAME_WE)
@@ -125,7 +127,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
         list(APPEND DEMO_ASM_OBJECTS ${ASM_OBJ})
     endforeach()
 
-    file(GLOB NES_SOURCES src/nes/*.c)
+    file(GLOB NES_SOURCES CONFIGURE_DEPENDS src/nes/*.c)
     add_library(platform-nes STATIC ${NES_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
@@ -141,12 +143,16 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
     )
 
-    file(GLOB DEMO_C_SOURCES ${CMAKE_SOURCE_DIR}/demo/*.c)
+    file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.c)
 
     set(PASS1_ELF ${CMAKE_BINARY_DIR}/demo_pass1.elf)
     add_custom_command(
             OUTPUT ${PASS1_ELF}
             COMMAND ${CMAKE_C_COMPILER}
+            # This hand-rolled invocation bypasses CMAKE_C_STANDARD, so the
+            # standard must be set explicitly to match the demo target (C23,
+            # for native bool/auto).
+            -std=gnu23
             -Os -DTARGET_NES -DLANDSCAPE "-DPROJECT_NAME=${GAME_NAME}"
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_BINARY_DIR}/famistudio_include
@@ -357,7 +363,7 @@ else()
     )
     FetchContent_MakeAvailable(SDL3)
 
-    file(GLOB SDL3_SOURCES src/SDL3/*.c)
+    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.c)
 
     add_library(platform-nes STATIC ${SDL3_SOURCES})
     target_include_directories(platform-nes PUBLIC
@@ -370,7 +376,7 @@ else()
         target_link_libraries(platform-nes PUBLIC usb-1.0)
     endif()
 
-    file(GLOB DEMO_SOURCES demo/*.c)
+    file(GLOB DEMO_SOURCES CONFIGURE_DEPENDS demo/*.c)
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
 

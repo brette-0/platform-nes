@@ -1,12 +1,14 @@
 ﻿#include <stdint.h>
 #include <SDL3/SDL.h>
 #include <platform-nes/input.h>
+#include <platform-nes/technology.h>
 #include "internal.h"
+
 
 static SDL_Gamepad *gamepads[2] = {0};
 
 static void open_gamepad_id(SDL_JoystickID which) {
-    for (int i = 0; i < 2; i++) {
+    for (auto i = 0; i < 2; i++) {
         if (!gamepads[i]) {
             gamepads[i] = SDL_OpenGamepad(which);
             if (gamepads[i]) {
@@ -27,17 +29,17 @@ void input_init(void) {
         return;
     }
 
-    int count = 0;
+    auto count = 0;
     SDL_JoystickID *ids = SDL_GetGamepads(&count);
     if (ids) {
-        for (int i = 0; i < count; i++) open_gamepad_id(ids[i]);
+        for (auto i = 0; i < count; i++) open_gamepad_id(ids[i]);
         SDL_free(ids);
     }
 }
 
 void input_handle_event(SDL_Event *e) {
     if (e->type == SDL_EVENT_GAMEPAD_ADDED) {
-        for (int i = 0; i < 2; i++) {
+        for (auto i = 0; i < 2; i++) {
             if (gamepads[i] &&
                 SDL_GetGamepadID(gamepads[i]) == e->gdevice.which) {
                 return;
@@ -46,7 +48,7 @@ void input_handle_event(SDL_Event *e) {
         open_gamepad_id(e->gdevice.which);
     }
     if (e->type == SDL_EVENT_GAMEPAD_REMOVED) {
-        for (int i = 0; i < 2; i++) {
+        for (auto i = 0; i < 2; i++) {
             if (gamepads[i] &&
                 SDL_GetGamepadID(gamepads[i]) == e->gdevice.which) {
                 SDL_CloseGamepad(gamepads[i]);
@@ -60,7 +62,7 @@ void input_handle_event(SDL_Event *e) {
 static uint8_t read_gamepad(SDL_Gamepad *pad) {
     if (!pad) return 0;
 
-    uint8_t state = 0;
+    auto state = 0;
     if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH))          state |= 0x01;  // A
     if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_EAST))           state |= 0x02;  // B
     if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK))           state |= 0x04;  // Select
