@@ -1,0 +1,5 @@
+#pragma once
+/* Extensionless umbrella so `#include <platform-nes>` works. Lives in its own
+ * include root (include/umbrella) to avoid colliding with the platform-nes/
+ * directory under include/. Forwards to the real aggregate header. */
+#include <platform-nes/platform-nes.hpp>

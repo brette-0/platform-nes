@@ -9,21 +9,22 @@ set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_N
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
 
-# C23 gives us native `auto` type inference, so technology.h's
-# `#define auto __auto_type` fallback stays inert (its guard is
-# __STDC_VERSION__ < 202311L) and the editor stops flagging
-# -Wkeyword-macro. Both toolchains we support handle it: llvm-mos's
-# clang and host GCC accept -std=gnu23. C23 still satisfies the
-# <stdatomic.h> requirement in src/SDL3/*.c that MSVC gates behind C11.
-set(CMAKE_C_STANDARD 23)
-set(CMAKE_C_STANDARD_REQUIRED ON)
+# The library and demo are compiled as C++23. C++20 would cover the
+# designated initialisers used throughout, but the SDL3 backend relies
+# on <stdatomic.h>'s `atomic_int` (_vblank_flag), which only became
+# usable from C++ in C++23. The gnu++ dialect (CMAKE_CXX_EXTENSIONS ON)
+# keeps the GNU compound-literal extension the video/interrupt code uses.
+# Both toolchains accept it: llvm-mos's clang++ and host GCC.
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS ON)
 # ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------
 if(TARGET_PLATFORM STREQUAL "nes")
     set(LLVM_MOS_PLATFORM nes-nrom)
     find_package(llvm-mos-sdk REQUIRED)
-    project(platform-nes C)
+    project(platform-nes CXX)
     set(PLATFORM_DEFINE TARGET_NES)
 
     # FamiStudio sound engine sources are fetched directly from upstream
@@ -127,10 +128,11 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
         list(APPEND DEMO_ASM_OBJECTS ${ASM_OBJ})
     endforeach()
 
-    file(GLOB NES_SOURCES CONFIGURE_DEPENDS src/nes/*.c)
+    file(GLOB NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp)
     add_library(platform-nes STATIC ${NES_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/include/umbrella
             ${CMAKE_BINARY_DIR}/famistudio_include
     )
     target_compile_definitions(platform-nes PUBLIC
@@ -143,20 +145,24 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
     )
 
-    file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.c)
+    file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.cpp)
 
     set(PASS1_ELF ${CMAKE_BINARY_DIR}/demo_pass1.elf)
     add_custom_command(
             OUTPUT ${PASS1_ELF}
-            COMMAND ${CMAKE_C_COMPILER}
-            # This hand-rolled invocation bypasses CMAKE_C_STANDARD, so the
-            # standard must be set explicitly to match the demo target (C23,
-            # for native bool/auto).
-            -std=gnu23
+            COMMAND ${CMAKE_CXX_COMPILER}
+            # This hand-rolled invocation bypasses CMAKE_CXX_STANDARD, so the
+            # standard must be set explicitly to match the demo target. -x c++
+            # forces the C++ frontend for the source inputs.
+            -std=gnu++23 -x c++
             -Os -DTARGET_NES -DLANDSCAPE "-DPROJECT_NAME=${GAME_NAME}"
             -I${CMAKE_SOURCE_DIR}/include
+            -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
             ${DEMO_C_SOURCES}
+            # Stop forcing the C++ frontend before the archive/object inputs
+            # so the driver treats them as link inputs, not source files.
+            -x none
             $<TARGET_FILE:platform-nes>
             ${FAMISTUDIO_PASS1_OBJ}
             ${DEMO_ASM_OBJECTS}
@@ -235,7 +241,7 @@ ${FAMISTUDIO_CFG}")
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()
-    project(platform-nes C)
+    project(platform-nes CXX)
 
     if(TARGET_PLATFORM STREQUAL "mac")
         set(PLATFORM_DEFINE TARGET_MACOS)
@@ -363,11 +369,11 @@ else()
     )
     FetchContent_MakeAvailable(SDL3)
 
-    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.c)
-
+    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp)
     add_library(platform-nes STATIC ${SDL3_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/include/umbrella
     )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
     target_link_libraries(platform-nes PUBLIC SDL3::SDL3-static)
@@ -376,7 +382,7 @@ else()
         target_link_libraries(platform-nes PUBLIC usb-1.0)
     endif()
 
-    file(GLOB DEMO_SOURCES CONFIGURE_DEPENDS demo/*.c)
+    file(GLOB DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
 
