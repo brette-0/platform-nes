@@ -1,6 +1,7 @@
-﻿#include <cstdint>
+﻿#include <intsh>
+using namespace br0::intsh;
 #include <platform-nes/input.hpp>
-void PollControllers(std::uint8_t* port1, std::uint8_t* port2) {
+void PollControllers(u8* port1, u8* port2) {
     IO_PORT1 = 1;
     IO_PORT1 = 0;
     *port1 = 0;

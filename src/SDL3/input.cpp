@@ -56,7 +56,7 @@ void input_handle_event(const SDL_Event *e) {
     }
 }
 
-static std::uint8_t read_gamepad(SDL_Gamepad *pad) {
+static u8 read_gamepad(SDL_Gamepad *pad) {
     if (!pad) return 0;
 
     auto state = 0;
@@ -72,7 +72,7 @@ static std::uint8_t read_gamepad(SDL_Gamepad *pad) {
     return state;
 }
 
-void PollControllers(std::uint8_t* port1, std::uint8_t* port2) {
+void PollControllers(u8* port1, u8* port2) {
     *port1 = read_gamepad(gamepads[0]);
     *port2 = read_gamepad(gamepads[1]);
 }

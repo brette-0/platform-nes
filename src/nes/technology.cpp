@@ -1,14 +1,15 @@
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 #include <platform-nes/technology.hpp>
 
-void PopulateFromBuffer(std::uint8_t* target, const std::uint16_t offset,
-                        const std::uint8_t* buffer, const std::uint16_t sBuffer, const std::int16_t step) {
+void PopulateFromBuffer(u8* target, const u16 offset,
+                        const u8* buffer, const u16 sBuffer, const i16 step) {
     const auto base = target + offset;
     for (auto i = 0; i < sBuffer; i++) base[i * step] = buffer[i];
 }
 
-void PopulateFromProvider(std::uint8_t* target, const std::uint16_t offset,
-                          std::uint8_t (*fn)(std::uint16_t), const std::uint16_t amt, const std::int16_t step) {
+void PopulateFromProvider(u8* target, const u16 offset,
+                          u8 (*fn)(u16), const u16 amt, const i16 step) {
     const auto base = target + offset;
     for (auto i = 0; i < amt; i++) base[i * step] = fn(i);
 }

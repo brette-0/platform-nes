@@ -1,5 +1,6 @@
 ﻿#include <platform-nes/audio.hpp>
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 #if FAMISTUDIO_CFG_NTSC_SUPPORT
     #define FAMISTUDIO_LOAD_REGION "lda #1\n"
@@ -20,11 +21,11 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-extern FASTCALL __attribute__((leaf)) famistudio_music_play(std::uint8_t song_index);
-extern FASTCALL __attribute__((leaf)) famistudio_music_pause(std::uint8_t pause);
+extern FASTCALL __attribute__((leaf)) famistudio_music_play(u8 song_index);
+extern FASTCALL __attribute__((leaf)) famistudio_music_pause(u8 pause);
 extern FASTCALL __attribute__((leaf)) famistudio_music_stop(void);
 #if FAMISTUDIO_CFG_SFX_SUPPORT
-extern FASTCALL __attribute__((leaf)) famistudio_sfx_play(std::uint8_t sfx_index, std::uint8_t channel);
+extern FASTCALL __attribute__((leaf)) famistudio_sfx_play(u8 sfx_index, u8 channel);
 #endif
 extern FASTCALL __attribute__((leaf)) famistudio_update(void);
 #ifdef __cplusplus
@@ -55,11 +56,11 @@ void AudioInit() {
 #endif
 }
 
-void TrackPlay(const uint8_t index) {
+void TrackPlay(const u8 index) {
     famistudio_music_play(index);
 }
 
-void TrackPause(const uint8_t pause) {
+void TrackPause(const u8 pause) {
     famistudio_music_pause(pause);
 }
 
@@ -71,7 +72,7 @@ void AudioUpdate() {
     famistudio_update();
 }
 
-void SfxPlay(const std::uint8_t index, const std::uint8_t channel) {
+void SfxPlay(const u8 index, const u8 channel) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, channel);
 #else
@@ -79,7 +80,7 @@ void SfxPlay(const std::uint8_t index, const std::uint8_t channel) {
 #endif
 }
 
-void SfxSamplePlay(const std::uint8_t index) {
+void SfxSamplePlay(const u8 index) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, 1);
 #else

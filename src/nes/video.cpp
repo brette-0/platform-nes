@@ -1,17 +1,18 @@
 ﻿#include <platform-nes/video.hpp>
 #include <platform-nes/technology.hpp>
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
-const std::uint16_t PatternTables        = 0;
-constexpr std::uint16_t NameTables       = 0x2000;
-constexpr std::uint16_t PaletteTables    = 0x3f00;
-constexpr std::uint16_t nVideoRam        = 0x800;
-atomic std::uint16_t xScroll = 0;
-atomic std::uint16_t yScroll = 0;
-atomic std::uint8_t SPPUCTRL;
-atomic std::uint8_t SPPUMASK;
+const u16 PatternTables        = 0;
+constexpr u16 NameTables       = 0x2000;
+constexpr u16 PaletteTables    = 0x3f00;
+constexpr u16 nVideoRam        = 0x800;
+atomic u16 xScroll = 0;
+atomic u16 yScroll = 0;
+atomic u8 SPPUCTRL;
+atomic u8 SPPUMASK;
 
-inline static std::uint16_t xy_to_nt_addr(const std::uint16_t x, const std::uint16_t y) {
+inline static u16 xy_to_nt_addr(const u16 x, const u16 y) {
     constexpr auto base = 0x2000;
     const auto nt_h = (x >> 5 & 1) << 10;
     const auto nt_v = (y / 30) << 11;
@@ -21,7 +22,7 @@ inline static std::uint16_t xy_to_nt_addr(const std::uint16_t x, const std::uint
     return base + nt_h + nt_v + row * 32 + col;
 }
 
-inline static std::uint16_t xy_to_at_addr(const std::uint16_t x, const std::uint16_t y) {
+inline static u16 xy_to_at_addr(const u16 x, const u16 y) {
     constexpr auto base = 0x2000;
     const auto nt_h = (x >> 5 & 1) << 10;
     const auto nt_v = (y / 30) << 11;
@@ -38,14 +39,14 @@ void WaitForPresent() {
 
 }
 
-void EnableRendering(const std::uint8_t ppuCtrl_, const std::uint8_t ppuMask_) {
+void EnableRendering(const u8 ppuCtrl_, const u8 ppuMask_) {
     SPPUMASK = ppuMask_;
     SPPUCTRL = 0x80 | ppuCtrl_;
     POKE(PPUCTRL, SPPUCTRL);
     POKE(PPUMASK, SPPUMASK);
 }
 
-void FlushVideoRAM(const std::uint8_t nt, const std::uint8_t at) {
+void FlushVideoRAM(const u8 nt, const u8 at) {
     PEEK(PPUSTATUS);
     POKE(PPUADDR, NameTables >> 8);
     POKE(PPUADDR, NameTables & 0xFF);
@@ -57,7 +58,7 @@ void FlushVideoRAM(const std::uint8_t nt, const std::uint8_t at) {
             POKE(PPUDATA, nt);
             POKE(PPUDATA, nt);
         }
-        for (std::uint8_t at_hunk = 0; at_hunk < 0x10; at_hunk++) {
+        for (u8 at_hunk = 0; at_hunk < 0x10; at_hunk++) {
             POKE(PPUDATA, at);
             POKE(PPUDATA, at);
             POKE(PPUDATA, at);
@@ -68,7 +69,7 @@ void FlushVideoRAM(const std::uint8_t nt, const std::uint8_t at) {
 }
 
 __attribute__((hot))
-void SetScroll(const std::uint16_t x, std::uint16_t y) {
+void SetScroll(const u16 x, u16 y) {
     xScroll = x; yScroll = y;
 
 
@@ -89,17 +90,17 @@ void SetScroll(const std::uint16_t x, std::uint16_t y) {
     SPPUCTRL = SPPUCTRL & 0xFC | nt;
     POKE(PPUCTRL, SPPUCTRL);
 
-    POKE(PPUSCROLL, static_cast<std::uint8_t>(x & 0xFF));
-    POKE(PPUSCROLL, static_cast<std::uint8_t>(y & 0xFF));
+    POKE(PPUSCROLL, static_cast<u8>(x & 0xFF));
+    POKE(PPUSCROLL, static_cast<u8>(y & 0xFF));
 }
 
-void DeltaScroll(const int8_t x, const int8_t y) {
+void DeltaScroll(const i8 x, const i8 y) {
     SetScroll(xScroll + x, yScroll + y);
 }
 
 __attribute__((hot))
 void WriteBufferToVideoMemory(
-    const std::uint16_t x, const std::uint16_t y, const std::uint8_t* source, const std::uint8_t sBuffer, const std::uint8_t polarity
+    const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
     SPPUCTRL = SPPUCTRL & ~POLARITY;
@@ -107,8 +108,8 @@ void WriteBufferToVideoMemory(
     POKE(PPUCTRL, SPPUCTRL);
 
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
 
     for (auto i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
@@ -116,19 +117,19 @@ void WriteBufferToVideoMemory(
 }
 
 __attribute__((hot))
-void WriteSingleToVideoMemory(const std::uint16_t x, const std::uint16_t y, const std::uint8_t value) {
+void WriteSingleToVideoMemory(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_nt_addr(x, y);
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
     POKE(PPUDATA, value);
 }
 
 __attribute__((hot))
-void WriteBufferToPaletteMemory(const std::uint8_t offset, const std::uint8_t* source, const std::uint8_t sBuffer) {
+void WriteBufferToPaletteMemory(const u8 offset, const u8* source, const u8 sBuffer) {
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>((offset + PaletteTables) >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset + PaletteTables & 0xFF));
+    POKE(PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
 
     for (auto i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
@@ -136,16 +137,16 @@ void WriteBufferToPaletteMemory(const std::uint8_t offset, const std::uint8_t* s
 }
 
 __attribute__((always_inline))
-void WriteSingleToPaletteMemory(const std::uint8_t offset, const std::uint8_t value) {
+void WriteSingleToPaletteMemory(const u8 offset, const u8 value) {
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>((offset + PaletteTables) >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset + PaletteTables & 0xFF));
+    POKE(PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
     POKE(PPUDATA, value);
 }
 
 __attribute__((hot))
 void WriteProviderToVideoMemory(
-    const std::uint16_t x, const std::uint16_t y, std::uint8_t (*fn)(std::uint16_t), const std::uint8_t amt, const std::uint8_t polarity
+    const u16 x, const u16 y, u8 (*fn)(u16), const u8 amt, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
     SPPUCTRL = SPPUCTRL & ~POLARITY;
@@ -154,8 +155,8 @@ void WriteProviderToVideoMemory(
     POKE(PPUCTRL, SPPUCTRL);
 
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
 
     for (auto i = 0; i < amt; i++) {
         POKE(PPUDATA, fn(i));
@@ -164,18 +165,18 @@ void WriteProviderToVideoMemory(
 
 __attribute__((hot))
 void WriteBufferToAttributeMemory(
-    const std::uint16_t x, const std::uint16_t y, const std::uint8_t* source, const std::uint8_t sBuffer, const std::uint8_t polarity
+    const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
-    const std::uint16_t offset = xy_to_at_addr(x, y);
+    const u16 offset = xy_to_at_addr(x, y);
 
     SPPUCTRL = SPPUCTRL & ~POLARITY;
     POKE(PPUCTRL, SPPUCTRL);
 
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
 
-    for (std::uint8_t i = 0; i < sBuffer; i++) {
+    for (u8 i = 0; i < sBuffer; i++) {
         POKE(PPUDATA, source[i]);
         if (polarity) {
             PEEK(PPUDATA);
@@ -189,72 +190,72 @@ void WriteBufferToAttributeMemory(
     }
 }
 
-void StreamFromVideoMemory(const std::uint16_t offset, atomic std::uint8_t* target, const std::uint8_t size) {
+void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
     for (auto i = 0; i < size; i++) {
         target[i] = PEEK(PPUDATA);
     }
 }
 
 __attribute__((always_inline))
-void WriteSingleToAttributeMemory(const std::uint16_t x, const std::uint16_t y, const std::uint8_t value) {
+void WriteSingleToAttributeMemory(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_at_addr(x, y);
 
     PEEK(PPUSTATUS);
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset >> 8));
-    POKE(PPUADDR, static_cast<std::uint8_t>(offset & 0xFF));
+    POKE(PPUADDR, static_cast<u8>(offset >> 8));
+    POKE(PPUADDR, static_cast<u8>(offset & 0xFF));
     POKE(PPUDATA, value);
 }
 
 __attribute__((always_inline))
 void RefreshSprites(const sprite_t *oam) {
-    std::uint16_t addr;
+    u16 addr;
     __builtin_memcpy(&addr, &oam, sizeof addr);
-    POKE(OAMDMA, static_cast<std::uint8_t>(addr >> 8));
+    POKE(OAMDMA, static_cast<u8>(addr >> 8));
 }
 
-void OAMFromBuffer(sprite_t *oam, const std::uint8_t slot, const std::uint16_t off,
-                   const std::uint8_t width, const std::uint8_t *src, const std::uint16_t count) {
+void OAMFromBuffer(sprite_t *oam, const u8 slot, const u16 off,
+                   const u8 width, const u8 *src, const u16 count) {
     (void)width;
-    std::uint8_t *dst = reinterpret_cast<std::uint8_t *>(oam) + static_cast<std::uint16_t>(slot) * SPRITE_STRIDE + off;
-    const std::uint8_t *s = src + off;
-    for (std::uint16_t i = 0; i < count; i++)
+    u8 *dst = reinterpret_cast<u8 *>(oam) + static_cast<u16>(slot) * SPRITE_STRIDE + off;
+    const u8 *s = src + off;
+    for (u16 i = 0; i < count; i++)
         dst[i * SPRITE_STRIDE] = s[i * SPRITE_STRIDE];
 }
 
-void OAMFromProvider(sprite_t *oam, const std::uint8_t slot, const std::uint16_t off,
-                     const std::uint8_t width, oam_t (*fn)(std::uint16_t), const std::uint16_t count) {
+void OAMFromProvider(sprite_t *oam, const u8 slot, const u16 off,
+                     const u8 width, oam_t (*fn)(u16), const u16 count) {
     (void)width;
-    std::uint8_t *base = reinterpret_cast<std::uint8_t *>(oam) + static_cast<std::uint16_t>(slot) * SPRITE_STRIDE + off;
-    for (std::uint16_t i = 0; i < count; i++)
+    u8 *base = reinterpret_cast<u8 *>(oam) + static_cast<u16>(slot) * SPRITE_STRIDE + off;
+    for (u16 i = 0; i < count; i++)
         base[i * SPRITE_STRIDE] = fn(i);
 }
 
-std::uint16_t CartesianToAddress(const std::uint16_t x, const std::uint16_t y) {
+u16 CartesianToAddress(const u16 x, const u16 y) {
     return xy_to_nt_addr(x, y);
 }
 
-scroll_t CartesianToScroll(const std::uint16_t px, const std::uint16_t py) {
+scroll_t CartesianToScroll(const u16 px, const u16 py) {
     auto y = py;
     if (y >= 240) { y -= 240; y ^= 0x100; }
     if (y >= 240) { y -= 240; y ^= 0x100; }
-    const auto nt = static_cast<std::uint8_t>(px >> 8 & 0x01 | y >> 7 & 0x02);
-    return (scroll_t){{ static_cast<std::uint8_t>(SPPUCTRL & 0xFC | nt),
-        static_cast<std::uint8_t>(px & 0xFF), static_cast<std::uint8_t>(y & 0xFF) }
+    const auto nt = static_cast<u8>(px >> 8 & 0x01 | y >> 7 & 0x02);
+    return (scroll_t){{ static_cast<u8>(SPPUCTRL & 0xFC | nt),
+        static_cast<u8>(px & 0xFF), static_cast<u8>(y & 0xFF) }
     };
 }
 
 __attribute__((hot))
-void SetColorPriority(const std::uint8_t priority) {
+void SetColorPriority(const u8 priority) {
     SPPUMASK = SPPUMASK & ~(RED | GREEN | BLUE);
     SPPUMASK = SPPUMASK | priority & (RED | GREEN | BLUE);
     POKE(PPUMASK, SPPUMASK);
 }
 
 __attribute__((hot))
-void WaitThenReactToSpriteZero(const std::uint16_t px, const std::uint16_t py, void (*fn)(), atomic std::uint8_t* latch) {
+void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     (void)px; (void)py;
 
     while (!*latch) {

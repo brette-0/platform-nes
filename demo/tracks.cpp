@@ -1,5 +1,6 @@
 ﻿#include "../include/platform-nes/audio.hpp"
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 #ifndef TARGET_NES
 TRACKS(
@@ -10,8 +11,8 @@ TRACKS(
 #ifdef __cplusplus
 extern "C" {
 #endif
-extern const std::uint8_t _music_data_mega_man_2[];
-extern const std::uint8_t _sounds[];
+extern const u8 _music_data_mega_man_2[];
+extern const u8 _sounds[];
 #ifdef __cplusplus
 }
 #endif

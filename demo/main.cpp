@@ -6,23 +6,23 @@
 #include "handlers.hpp"
 #include "colors.hpp"
 
-std::uint8_t port1;
-std::uint8_t port2;
+u8 port1;
+u8 port2;
 
 oam_t playerX;
 oam_t playerY;
 
-int8_t lastDeltaScroll;
+i8 lastDeltaScroll;
 
-std::uint16_t levelSize;
-atomic std::uint16_t xWorldSpace;
-atomic std::uint16_t lastXWorldSpace;
+u16 levelSize;
+atomic u16 xWorldSpace;
+atomic u16 lastXWorldSpace;
 
-atomic std::uint8_t spriteZeroHandled;
+atomic u8 spriteZeroHandled;
 
 sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
-static oam_t Clear(std::uint16_t _);
+static oam_t Clear(u16 _);
 static bool    BuildLevelSize();
 
 RESET {
@@ -114,23 +114,23 @@ NMI {
     SetColorPriority(0);
 }
 
-static oam_t Clear(const std::uint16_t _) {
+static oam_t Clear(const u16 _) {
     return 0xef;
 }
 
-oam_t AdjustSpriteY(const std::uint16_t i) {
+oam_t AdjustSpriteY(const u16 i) {
     return playerY + (i >> 1) * 8;
 }
 
-oam_t AdjustSpriteX(const std::uint16_t i) {
+oam_t AdjustSpriteX(const u16 i) {
     return playerX + (i & 1) * 8;
 }
 
 MINSIZE static bool BuildLevelSize() {
-    std::uint8_t temp = 0;
+    u8 temp = 0;
     levelSize    = 0;
 
-    for (std::uint16_t i = 0; i < 0xffff; i++) {
+    for (u16 i = 0; i < 0xffff; i++) {
         if (LevelDataLengths[i] == 0)
             return true;
 

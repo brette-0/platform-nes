@@ -16,7 +16,8 @@
  */
 #ifndef PLATFORM_NES_LIBRARY_H
 #define PLATFORM_NES_LIBRARY_H
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #error "platform-nes requires GCC or Clang. MSVC is not supported."

@@ -18,6 +18,22 @@ add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS ON)
+
+# ----------------------------------------------------------------------
+# br0::intsh — header-only integer type aliases, used via #include <intsh>.
+# An INTERFACE target, so the same declaration serves both the NES and
+# desktop builds; FetchContent_MakeAvailable is called inside each branch
+# below (after project()), and the target is linked PUBLIC onto the
+# platform-nes library so the include dir propagates to the demo.
+# ----------------------------------------------------------------------
+include(FetchContent)
+FetchContent_Declare(
+        intsh
+        GIT_REPOSITORY https://github.com/brette-0/intsh.git
+        GIT_TAG        master
+        GIT_SHALLOW    TRUE
+)
+
 # ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------
@@ -26,6 +42,8 @@ if(TARGET_PLATFORM STREQUAL "nes")
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes CXX)
     set(PLATFORM_DEFINE TARGET_NES)
+
+    FetchContent_MakeAvailable(intsh)
 
     # FamiStudio sound engine sources are fetched directly from upstream
     # to avoid vendoring a copy in the repository.
@@ -144,6 +162,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
     )
+    target_link_libraries(platform-nes PUBLIC br0::intsh)
 
     file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.cpp)
 
@@ -159,6 +178,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
+            -I${intsh_SOURCE_DIR}
             ${DEMO_C_SOURCES}
             # Stop forcing the C++ frontend before the archive/object inputs
             # so the driver treats them as link inputs, not source files.
@@ -242,6 +262,8 @@ ${FAMISTUDIO_CFG}")
     # ----------------------------------------------------------------------
 else()
     project(platform-nes CXX)
+
+    FetchContent_MakeAvailable(intsh)
 
     if(TARGET_PLATFORM STREQUAL "mac")
         set(PLATFORM_DEFINE TARGET_MACOS)
@@ -377,6 +399,7 @@ else()
     )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
     target_link_libraries(platform-nes PUBLIC SDL3::SDL3-static)
+    target_link_libraries(platform-nes PUBLIC br0::intsh)
 
     if(TARGET_PLATFORM STREQUAL "linux")
         target_link_libraries(platform-nes PUBLIC usb-1.0)

@@ -21,7 +21,7 @@ void SetNextIRQHandler(const irq_t handle) {
     irqBuffer[irqCount++] = handle;
 }
 
-void RegisterIRQHandler(const std::uint8_t id, const irq_handler_fn fn) {
+void RegisterIRQHandler(const u8 id, const irq_handler_fn fn) {
     if (static_cast<size_t>(id) >= irqTableCap) {
         auto n = irqTableCap ? irqTableCap : 8;
         while (n <= static_cast<size_t>(id)) n *= 2;

@@ -23,7 +23,8 @@
 #ifndef VIDEO_H
 #define VIDEO_H
 
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 #include <stddef.h>
 
 #include "technology.hpp"
@@ -33,7 +34,7 @@
 #endif
 
 /** @brief Base PPU address of the pattern tables (\$0000 / \$1000). */
-extern const std::uint16_t PatternTables;
+extern const u16 PatternTables;
 
 #ifdef TARGET_NES
   /** @brief Assembler `.pushsection` directive for CHR ROM on NES. */
@@ -70,8 +71,8 @@ _CHR_PUSH                                        \
 #name "_end:\n"                                  \
 _CHR_POP                                         \
 );                                               \
-ASM_LINKAGE const uint8_t name##_start[];        \
-ASM_LINKAGE const uint8_t name##_end[];
+ASM_LINKAGE const u8 name##_start[];        \
+ASM_LINKAGE const u8 name##_end[];
 
 /**
  * @brief Pads the CHR ROM section with @p count copies of @p val.
@@ -87,10 +88,10 @@ _CHR_POP                                       \
 
 #ifndef TARGET_NES
 /** @brief OAM coordinate type — 16-bit on desktop to allow off-screen sprites. */
-typedef uint16_t oam_t;
+typedef u16 oam_t;
 #else
 /** @brief OAM coordinate type — 8-bit on NES to match hardware OAM layout. */
-typedef std::uint8_t oam_t;
+typedef u8 oam_t;
 #endif
 
 /**
@@ -98,8 +99,8 @@ typedef std::uint8_t oam_t;
  */
 struct sprite_t {
   oam_t y;            /**< Y coordinate of the top-left corner. */
-  std::uint8_t tile;         /**< Pattern table tile index. */
-  std::uint8_t attributes;   /**< Palette select, priority, flip flags. */
+  u8 tile;         /**< Pattern table tile index. */
+  u8 attributes;   /**< Palette select, priority, flip flags. */
   oam_t x;            /**< X coordinate of the top-left corner. */
 };
 
@@ -136,7 +137,7 @@ _CHR_POP                                         \
  * @brief Typed pointer to the start of a named CHR ROM blob.
  * @param name Identifier previously passed to ::CHARACTER_ROM.
  */
-#define CHR(name)       ((const uint8_t *)(name##_start))
+#define CHR(name)       ((const u8 *)(name##_start))
 
 /**
  * @brief Size in bytes of a named CHR ROM blob.
@@ -146,14 +147,14 @@ _CHR_POP                                         \
 
 #ifndef TARGET_NES
   #if defined(_WIN32)
-    extern const uint8_t _chr_rom[];
+    extern const u8 _chr_rom[];
   #elif defined(__APPLE__)
-    extern const uint8_t _chr_rom[] __asm("section$start$__DATA$chr_rom");
+    extern const u8 _chr_rom[] __asm("section$start$__DATA$chr_rom");
   #else
-    extern const uint8_t _chr_rom[] __asm("__start_chr_rom");
+    extern const u8 _chr_rom[] __asm("__start_chr_rom");
   #endif
   /** @brief Base pointer to the merged CHR ROM section (desktop). */
-  #define CHR_ROM ((const uint8_t *)_chr_rom)
+  #define CHR_ROM ((const u8 *)_chr_rom)
 #endif
 
 /**
@@ -227,7 +228,7 @@ void WaitForPresent();
  * @param ppuCtrl_ Value to latch into ::PPUCTRL (see ::CTRL flags).
  * @param ppuMask_ Value to latch into ::PPUMASK (see ::MASK flags).
  */
-void EnableRendering(std::uint8_t ppuCtrl_, std::uint8_t ppuMask_);
+void EnableRendering(u8 ppuCtrl_, u8 ppuMask_);
 
 #ifdef TARGET_NES
 /** @brief Viewport width in tiles (NES: fixed 32). */
@@ -238,7 +239,7 @@ void EnableRendering(std::uint8_t ppuCtrl_, std::uint8_t ppuMask_);
 /** @brief Current desktop display mode (window + refresh info). */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. */
-extern uint8_t scale;
+extern u8 scale;
 
 #ifdef LANDSCAPE
 /** @brief Viewport width in tiles — flexible on landscape, derived from window width. */
@@ -263,13 +264,13 @@ extern uint8_t scale;
 
 #ifndef TARGET_NES
 /** @brief Desktop shadow of the PPU VRAM. */
-extern uint8_t* VideoRAM;
+extern u8* VideoRAM;
 /** @brief Desktop shadow of the PPU palette RAM. */
-extern uint8_t* paletteRAM;
+extern u8* paletteRAM;
 /** @brief Current horizontal scroll (pixels). */
-extern uint16_t xScroll;
+extern u16 xScroll;
 /** @brief Current vertical scroll (pixels). */
-extern uint16_t yScroll;
+extern u16 yScroll;
 #endif
 
 #ifdef TARGET_NES
@@ -281,10 +282,10 @@ extern uint16_t yScroll;
  * - `data[1]` = fine X scroll (`px & 0xFF`).
  * - `data[2]` = fine Y scroll (`py % 240` after nametable wrap).
  */
-typedef struct { std::uint8_t data[3]; } scroll_t;
+typedef struct { u8 data[3]; } scroll_t;
 #else
 /** @brief 2-D unsigned 16-bit vector used on desktop. */
-typedef struct { uint16_t x; uint16_t y; } vec2u16;
+typedef struct { u16 x; u16 y; } vec2u16;
 /** @brief Platform-specific scroll encoding (desktop: plain XY pixels). */
 typedef vec2u16 scroll_t;
 #endif
@@ -299,7 +300,7 @@ typedef vec2u16 scroll_t;
  * @param py Vertical pixel position.
  * @return   Encoded scroll value.
  */
-scroll_t CartesianToScroll(std::uint16_t px, std::uint16_t py);
+scroll_t CartesianToScroll(u16 px, u16 py);
 
 #ifdef TARGET_NES
   /**
@@ -307,9 +308,9 @@ scroll_t CartesianToScroll(std::uint16_t px, std::uint16_t py);
    * @param s A ::scroll_t produced by ::CartesianToScroll.
    */
   #define WRITE_SCROLL(s) do { \
-      (*(volatile std::uint8_t*)PPUCTRL)   = (s).data[0]; \
-      (*(volatile std::uint8_t*)PPUSCROLL) = (s).data[1]; \
-      (*(volatile std::uint8_t*)PPUSCROLL) = (s).data[2]; \
+      (*(volatile u8*)PPUCTRL)   = (s).data[0]; \
+      (*(volatile u8*)PPUSCROLL) = (s).data[1]; \
+      (*(volatile u8*)PPUSCROLL) = (s).data[2]; \
   } while(0)
 #else
   /** @brief Writes a ::scroll_t into the desktop scroll globals. */
@@ -321,14 +322,14 @@ scroll_t CartesianToScroll(std::uint16_t px, std::uint16_t py);
  * @param x Horizontal delta, in pixels.
  * @param y Vertical delta, in pixels.
  */
-void DeltaScroll(std::int8_t x, std::int8_t y);
+void DeltaScroll(i8 x, i8 y);
 
 /**
  * @brief Sets the absolute scroll of the screen.
  * @param x New horizontal scroll, in pixels.
  * @param y New vertical scroll, in pixels.
  */
-void SetScroll(std::uint16_t x, std::uint16_t y);
+void SetScroll(u16 x, u16 y);
 
 /**
  * @brief Writes an array of bytes into nametable memory with a stride.
@@ -344,7 +345,7 @@ void SetScroll(std::uint16_t x, std::uint16_t y);
  * @param polarity Non-zero for vertical writes, zero for horizontal.
  */
 void WriteBufferToVideoMemory(
-  const std::uint16_t x, const std::uint16_t y, const std::uint8_t* source, std::uint8_t sBuffer, std::uint8_t polarity
+  const u16 x, const u16 y, const u8* source, u8 sBuffer, u8 polarity
 );
 
 /**
@@ -353,14 +354,14 @@ void WriteBufferToVideoMemory(
  * @param y     Tile Y position.
  * @param value Byte value to write.
  */
-void WriteSingleToVideoMemory(const std::uint16_t x, const std::uint16_t y, std::uint8_t value);
+void WriteSingleToVideoMemory(const u16 x, const u16 y, u8 value);
 
 /**
  * @brief Flushes pending nametable and attribute-table writes to the PPU.
  * @param nt Nametable index to flush.
  * @param at Attribute-table index to flush.
  */
-void FlushVideoRAM(const std::uint8_t nt, const std::uint8_t at);
+void FlushVideoRAM(const u8 nt, const u8 at);
 
 /**
  * @brief Writes an array of bytes into palette memory.
@@ -368,14 +369,14 @@ void FlushVideoRAM(const std::uint8_t nt, const std::uint8_t at);
  * @param source   Source buffer of palette indices.
  * @param sBuffer  Size of @p source in bytes.
  */
-void WriteBufferToPaletteMemory(const std::uint8_t offset, const std::uint8_t* source, std::uint8_t sBuffer);
+void WriteBufferToPaletteMemory(const u8 offset, const u8* source, u8 sBuffer);
 
 /**
  * @brief Writes a single byte into palette memory.
  * @param offset Palette RAM offset.
  * @param value  Palette index to store.
  */
-void WriteSingleToPaletteMemory(const std::uint8_t offset, std::uint8_t value);
+void WriteSingleToPaletteMemory(const u8 offset, u8 value);
 
 /**
  * @brief Writes bytes produced by a provider callback into nametable memory.
@@ -390,8 +391,8 @@ void WriteSingleToPaletteMemory(const std::uint8_t offset, std::uint8_t value);
  * @param amt      Number of iterations.
  * @param polarity Non-zero for vertical writes, zero for horizontal.
  */
-void WriteProviderToVideoMemory(uint16_t x, const std::uint16_t y, uint8_t (*fn)(std::uint16_t),
-  std::uint8_t amt, std::uint8_t polarity);
+void WriteProviderToVideoMemory(u16 x, const u16 y, u8 (*fn)(u16),
+  u8 amt, u8 polarity);
 
 /**
  * @brief Converts a pixel position into a PPU VRAM address.
@@ -399,7 +400,7 @@ void WriteProviderToVideoMemory(uint16_t x, const std::uint16_t y, uint8_t (*fn)
  * @param y Tile Y position.
  * @return  Absolute PPU address of the corresponding nametable byte.
  */
-std::uint16_t CartesianToAddress(std::uint16_t x, std::uint16_t y);
+u16 CartesianToAddress(u16 x, u16 y);
 
 /**
  * @brief Writes an array of bytes into the attribute table with a stride.
@@ -414,8 +415,8 @@ std::uint16_t CartesianToAddress(std::uint16_t x, std::uint16_t y);
  * @param polarity Non-zero for vertical, zero for horizontal.
  */
 void WriteBufferToAttributeMemory(
-  const std::uint16_t x, const std::uint16_t y, const std::uint8_t* source,
-  const std::uint8_t sBuffer, std::uint8_t polarity
+  const u16 x, const u16 y, const u8* source,
+  const u8 sBuffer, u8 polarity
 );
 
 /**
@@ -424,7 +425,7 @@ void WriteBufferToAttributeMemory(
  * @param y     Tile Y position.
  * @param value Attribute byte (palette + flip flags).
  */
-void WriteSingleToAttributeMemory(const std::uint16_t x, const std::uint16_t y, std::uint8_t value);
+void WriteSingleToAttributeMemory(const u16 x, const u16 y, u8 value);
 
 /**
  * @brief Uploads an OAM buffer to the PPU via OAM DMA.
@@ -442,7 +443,7 @@ void RefreshSprites(const sprite_t *oam);
  * @brief Sets the color emphasis bits in ::PPUMASK (bits 5-7).
  * @param priority OR of ::MASK bits (::RED, ::GREEN, ::BLUE).
  */
-void SetColorPriority(std::uint8_t priority);
+void SetColorPriority(u8 priority);
 
 #ifdef TARGET_NES
 /** @brief Sprite-zero-hit handler — NES variant (parameterless). */
@@ -456,8 +457,8 @@ typedef void (*spriteZeroHandler_t)();
  */
 typedef struct {
   void (*method)(void); /**< Callback fired on sprite-zero hit. */
-  uint16_t px;          /**< Pixel X at which to fire. */
-  uint16_t py;          /**< Pixel Y at which to fire. */
+  u16 px;          /**< Pixel X at which to fire. */
+  u16 py;          /**< Pixel Y at which to fire. */
 } spriteZeroHandler_t;
 
 /**
@@ -466,7 +467,7 @@ typedef struct {
  * @param py Pixel Y at which to fire.
  * @param fn Callback to invoke when the sprite-zero test trips.
  */
-void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void));
+void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
 /** @brief Convenience wrapper around ::SetSpriteZeroHandler. */
 #define SET_SPRITE_ZERO_HANDLER(px, py, fn) SetSpriteZeroHandler(px, py, fn)
 #endif
@@ -484,13 +485,13 @@ void SetSpriteZeroHandler(uint16_t px, uint16_t py, void (*fn)(void));
  * @param fn    Callback to fire.
  * @param latch Flag written non-zero when @p fn has completed.
  */
-void WaitThenReactToSpriteZero(std::uint16_t px, std::uint16_t py, void (*fn)(), atomic std::uint8_t* latch);
+void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
 
 #ifdef TARGET_NES
 /** @brief Shadow copy of ::PPUCTRL, updated atomically. */
-extern atomic uint8_t SPPUCTRL;
+extern atomic u8 SPPUCTRL;
 /** @brief Shadow copy of ::PPUMASK, updated atomically. */
-extern atomic uint8_t SPPUMASK;
+extern atomic u8 SPPUMASK;
 
 /**
  * @brief Safe-VRAM-access block (NES).
@@ -507,7 +508,7 @@ extern atomic uint8_t SPPUMASK;
  */
 #define VRAM                                \
 for (                                       \
-std::uint8_t i = (POKE(PPUMASK, 0), 0);\
+u8 i = (POKE(PPUMASK, 0), 0);\
 __builtin_expect(i < 1, 1);                 \
 POKE(PPUMASK, SPPUMASK), i++)
 
@@ -566,14 +567,14 @@ if (1)
     OAMFromBuffer((oam), (slot),                               \
                   offsetof(struct sprite_t, member),           \
                   sizeof(((struct sprite_t *)0)->member),      \
-                  (const std::uint8_t *)(src), (count))
+                  (const u8 *)(src), (count))
 
-void OAMFromProvider(sprite_t *oam, std::uint8_t slot, std::uint16_t off,
-                     std::uint8_t width, oam_t (*fn)(uint16_t), std::uint16_t count);
-void OAMFromBuffer(sprite_t *oam, std::uint8_t slot, std::uint16_t off,
-                   std::uint8_t width, const std::uint8_t *src, std::uint16_t count);
+void OAMFromProvider(sprite_t *oam, u8 slot, u16 off,
+                     u8 width, oam_t (*fn)(u16), u16 count);
+void OAMFromBuffer(sprite_t *oam, u8 slot, u16 off,
+                   u8 width, const u8 *src, u16 count);
 
 
-void StreamFromVideoMemory(std::uint16_t offset, atomic uint8_t* target, std::uint8_t size);
+void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
 
 #endif

@@ -15,7 +15,8 @@
  */
 #ifndef INTERRUPTS_H
 #define INTERRUPTS_H
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 #include <cstddef>
 
 #ifndef TARGET_NES
@@ -24,9 +25,9 @@
  * @brief A pending IRQ event queued for the renderer (desktop only).
  */
 typedef struct irq_t {
- std::uint8_t  id; /**< Handler id to dispatch when this scanline fires. */
- std::uint16_t px; /**< Pixel X coordinate at which the IRQ should fire. */
- std::uint16_t py; /**< Pixel Y coordinate at which the IRQ should fire. */
+ u8  id; /**< Handler id to dispatch when this scanline fires. */
+ u16 px; /**< Pixel X coordinate at which the IRQ should fire. */
+ u16 py; /**< Pixel Y coordinate at which the IRQ should fire. */
 } irq_t;
 
 /** @brief Signature of an IRQ handler (no arguments, no return value). */
@@ -59,7 +60,7 @@ extern std::size_t  irqCap;
  * @param id Numeric identifier used later with ::SetNextIRQHandler.
  * @param fn Handler function to invoke when that id fires.
  */
-void RegisterIRQHandler(uint8_t id, irq_handler_fn fn);
+void RegisterIRQHandler(u8 id, irq_handler_fn fn);
 
 /**
  * @brief Declares an IRQ handler with the given id.
@@ -87,7 +88,7 @@ void RegisterIRQHandler(uint8_t id, irq_handler_fn fn);
 #else
 
 /** @brief Opaque IRQ handle on NES builds; the id is used directly. */
-typedef uint8_t irq_t;
+typedef u8 irq_t;
 
 /**
  * @brief NES variant of ::IRQ — emits a top-level `irq<id>` function.

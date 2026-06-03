@@ -1,11 +1,12 @@
 ﻿#ifndef HANDLER_H
 #define HANDLER_H
 #include <platform-nes/technology.hpp>
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 void SpriteZeroHandler();
-extern atomic uint8_t levelStreamCommand;;
-extern std::uint8_t TileBuffer[56];
+extern atomic u8 levelStreamCommand;;
+extern u8 TileBuffer[56];
 
 
 enum eLevelStreamCommands {

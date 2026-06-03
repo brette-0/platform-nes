@@ -47,7 +47,7 @@ CHARMAP(generic,                            // default char map
 
 MAPPED_STRING(generic, msg_mario, MARIO);
 
-const uint8_t BGColours[16] = {
+const u8 BGColours[16] = {
     0x22, 0x29, 0x1a, 0x0f,
     0x0f, 0x36, 0x17, 0x0f,
     0x0f, 0x30, 0x21, 0x0f,

@@ -4,10 +4,11 @@
 
 #include <platform-nes/audio.hpp>
 #include <platform-nes/video.hpp>
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
-atomic uint8_t levelStreamCommand;
-uint8_t TileBuffer[56];
+atomic u8 levelStreamCommand;
+u8 TileBuffer[56];
 
 #define PLAYER_SCROLL_POS   (VIEWPORT_PX >> 1)
 #define PLAYER_MAX_SPRITE_X (VIEWPORT_PX - 16)
@@ -19,9 +20,9 @@ void SpriteZeroHandler() {
 
     AudioUpdate();
 
-    const std::int8_t deltaX = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
+    const i8 deltaX = !!(port1 & LEFT) * -1 + !!(port1 & RIGHT) * 1; // NOLINT(*-narrowing-conversions)
     // ReSharper disable once CppTooWideScope
-    const std::int8_t deltaY = !!(port1 & UP  ) * -1 + !!(port1 & DOWN ) * 1; // NOLINT(*-narrowing-conversions)
+    const i8 deltaY = !!(port1 & UP  ) * -1 + !!(port1 & DOWN ) * 1; // NOLINT(*-narrowing-conversions)
 
     if (deltaY) {
         playerY += deltaY;

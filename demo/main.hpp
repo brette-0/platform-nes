@@ -11,22 +11,22 @@ enum spriteZeroStatus {
 #define VIEWPORT_MX (VIEWPORT_TX >> 1)
 #define VIEWPORT_MY (VIEWPORT_TY >> 1)
 
-oam_t AdjustSpriteY(std::uint16_t i);
-oam_t AdjustSpriteX(std::uint16_t i);
+oam_t AdjustSpriteY(u16 i);
+oam_t AdjustSpriteX(u16 i);
 
-extern std::uint8_t port1;
-extern std::uint8_t port2;
+extern u8 port1;
+extern u8 port2;
 
 extern oam_t playerX;
 extern oam_t playerY;
 
-extern int8_t lastDeltaScroll;
+extern i8 lastDeltaScroll;
 
-extern std::uint16_t levelSize;
-extern atomic std::uint16_t xWorldSpace;
-extern atomic std::uint16_t lastXWorldSpace;
+extern u16 levelSize;
+extern atomic u16 xWorldSpace;
+extern atomic u16 lastXWorldSpace;
 
-extern atomic std::uint8_t spriteZeroHandled;
+extern atomic u8 spriteZeroHandled;
 
 extern sprite_t OAMBuffer[64];
 

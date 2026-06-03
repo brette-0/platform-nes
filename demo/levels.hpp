@@ -1,20 +1,21 @@
 ﻿#ifndef LEVELS_H
 #define LEVELS_H
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 #define LEVEL_HEIGHT 14
 
-extern const std::uint8_t LevelData[];
-extern const std::uint8_t LevelDataLengths[];
-extern const std::uint8_t LevelDataAttributes[];
-extern std::uint8_t hunk_remaining;
-extern std::uint16_t level_data_index;
-extern std::uint8_t attr_column;
-extern std::uint8_t AttributeBuffer[8];
-std::uint8_t GetPrevWrite(std::uint16_t step);
-std::uint8_t GetNextWrite(std::uint16_t step);
-std::uint8_t GetCurrentNext(std::uint16_t step);
-std::uint8_t GetCurrentPrev(std::uint16_t step);
-std::uint8_t GetPrevMetaTile();
-std::uint8_t GetNextMetaTile();
+extern const u8 LevelData[];
+extern const u8 LevelDataLengths[];
+extern const u8 LevelDataAttributes[];
+extern u8 hunk_remaining;
+extern u16 level_data_index;
+extern u8 attr_column;
+extern u8 AttributeBuffer[8];
+u8 GetPrevWrite(u16 step);
+u8 GetNextWrite(u16 step);
+u8 GetCurrentNext(u16 step);
+u8 GetCurrentPrev(u16 step);
+u8 GetPrevMetaTile();
+u8 GetNextMetaTile();
 #endif

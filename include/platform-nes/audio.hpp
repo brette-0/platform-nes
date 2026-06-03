@@ -15,7 +15,8 @@
 #ifndef AUDIO_H
 #define AUDIO_H
 
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 
 
 /**
@@ -27,7 +28,7 @@
  */
 typedef struct {
 #ifdef TARGET_NES
-    const uint8_t *pTracks;       /**< Pointer to FamiStudio song data in ROM. */
+    const u8 *pTracks;       /**< Pointer to FamiStudio song data in ROM. */
 #else
     const char* fp;               /**< Filesystem path to the PCM/ogg/wav source. */
     float    loop_start;          /**< Byte offset where the loop begins (0 = loop the whole song). */
@@ -42,10 +43,10 @@ typedef struct {
  */
 typedef struct {
 #ifdef TARGET_NES
-    const uint8_t* pSFX;          /**< Pointer to the FamiStudio SFX bank. */
-    const uint8_t* pSSFX;         /**< Pointer to the FamiStudio sample-SFX bank. */
+    const u8* pSFX;          /**< Pointer to the FamiStudio SFX bank. */
+    const u8* pSSFX;         /**< Pointer to the FamiStudio sample-SFX bank. */
 #else
-    std::uint8_t *pcm;                 /**< Decoded PCM sample data. */
+    u8 *pcm;                 /**< Decoded PCM sample data. */
     float pcm_len;                /**< Length of ::pcm in samples. */
 #endif
 } sfx_t;
@@ -55,11 +56,11 @@ typedef struct {
 /** @brief Shared mixing buffer written by the SDL3 audio callback. */
 extern float *pcm_buffer;
 /** @brief Size of ::pcm_buffer, in samples. */
-extern std::uint32_t pcm_buffer_size;
+extern u32 pcm_buffer_size;
 /** @brief Application-defined track table; defined via ::TRACKS. */
 extern const music_t tracks[];
 /** @brief Number of entries in ::tracks. */
-extern const std::uint8_t nTracks;
+extern const u8 nTracks;
 
 /**
  * @brief Declares the application's track table (desktop build).
@@ -76,25 +77,25 @@ extern const std::uint8_t nTracks;
  */
 #define TRACKS(...)                         \
     const music_t  tracks[] = {__VA_ARGS__ }; \
-    const std::uint8_t nTracks = sizeof(tracks) / sizeof(music_t);
+    const u8 nTracks = sizeof(tracks) / sizeof(music_t);
 #else
 /** @brief Pointer to the FamiStudio music bank (NES build). */
-extern const uint8_t* tracks;
+extern const u8* tracks;
 /** @brief Pointer to the FamiStudio SFX bank (NES build). */
-extern const uint8_t* sfx;
+extern const u8* sfx;
 /**
  * @brief Binds a FamiStudio music bank for the NES build.
  * @param ptr Symbol or address of the FamiStudio music export.
  */
 #define TRACKS(ptr)                     \
-    const uint8_t* tracks = (const uint8_t*)(ptr)
+    const u8* tracks = (const u8*)(ptr)
 
 /**
  * @brief Binds a FamiStudio SFX bank for the NES build.
  * @param ptr Symbol or address of the FamiStudio SFX export.
  */
 #define SFX(ptr)                        \
-    const uint8_t* sfx = (const uint8_t*)(ptr);
+    const u8* sfx = (const u8*)(ptr);
 
 #endif
 
@@ -103,13 +104,13 @@ extern const uint8_t* sfx;
  * @brief Starts playback of the track at the given table index.
  * @param index Index into the application-declared track table.
  */
-void TrackPlay(std::uint8_t index);
+void TrackPlay(u8 index);
 
 /**
  * @brief Pauses or resumes the currently playing track.
  * @param pause Non-zero to pause; zero to resume.
  */
-void TrackPause(std::uint8_t pause);
+void TrackPause(u8 pause);
 
 /** @brief Stops the currently playing track and releases its resources. */
 void TrackStop();
@@ -119,13 +120,13 @@ void TrackStop();
  * @param index   SFX bank index.
  * @param channel Target audio channel.
  */
-void SfxPlay(std::uint8_t index, std::uint8_t channel) ;
+void SfxPlay(u8 index, u8 channel) ;
 
 /**
  * @brief Plays a sample-based sound effect (DPCM on NES).
  * @param index SFX sample index.
  */
-void SfxSamplePlay(std::uint8_t index);
+void SfxSamplePlay(u8 index);
 
 /** @brief Initializes the audio backend; must be called before any other audio function. */
 void AudioInit();

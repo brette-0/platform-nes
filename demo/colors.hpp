@@ -1,6 +1,7 @@
 ﻿#ifndef COLORS_H
 #define COLORS_H
 
-#include <cstdint>
-extern const std::uint8_t marioColors[3];
+#include <intsh>
+using namespace br0::intsh;
+extern const u8 marioColors[3];
 #endif

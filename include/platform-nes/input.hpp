@@ -11,13 +11,14 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#include <cstdint>
+#include <intsh>
+using namespace br0::intsh;
 #ifdef TARGET_NES
 #ifndef IO_PORT1
 /** @brief Memory-mapped register for controller 1 (NES \$4016). */
-#define IO_PORT1 *(volatile std::uint8_t*)0x4016
+#define IO_PORT1 *(volatile u8*)0x4016
 /** @brief Memory-mapped register for controller 2 (NES \$4017). */
-#define IO_PORT2 *(volatile std::uint8_t*)0x4017
+#define IO_PORT2 *(volatile u8*)0x4017
 #endif
 #endif
 
@@ -50,6 +51,6 @@ enum Buttons {
  * @param[out] port1 Receives the button mask for controller 1.
  * @param[out] port2 Receives the button mask for controller 2.
  */
-void PollControllers(std::uint8_t* port1, std::uint8_t* port2);
+void PollControllers(u8* port1, u8* port2);
 
 #endif //INPUT_H

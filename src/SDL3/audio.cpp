@@ -3,26 +3,26 @@
 #include <SDL3/SDL.h>
 
 typedef struct {
-    std::uint32_t offset;
-    std::uint32_t length;
-    std::uint32_t loop_start;
+    u32 offset;
+    u32 length;
+    u32 loop_start;
 } track_runtime_t;
 
 static track_runtime_t track_info[256];
 float *pcm_buffer = nullptr;
-std::uint32_t pcm_buffer_size = 0;
+u32 pcm_buffer_size = 0;
 static SDL_AudioStream *music_stream = nullptr;
-static std::uint32_t playback_pos = 0;
+static u32 playback_pos = 0;
 static int current_track = -1;
 static int music_playing = 0;
 static int music_paused = 0;
 
-inline static void PlaySFX(const std::uint8_t sample, const std::uint8_t index) {
+inline static void PlaySFX(const u8 sample, const u8 index) {
 
 }
 
-static std::uint32_t track_offsets[256];
-static std::uint32_t track_lengths[256];
+static u32 track_offsets[256];
+static u32 track_lengths[256];
 
 #define BYTES_PER_SECOND (48000 * 2 * sizeof(float))
 
@@ -37,10 +37,10 @@ static void BuildPCMBuffer() {
     auto total = 0;
     for (auto i = 0; i < nTracks; i++) {
         SDL_AudioSpec spec;
-        std::uint8_t *data;
-        std::uint32_t len;
+        u8 *data;
+        u32 len;
         if (SDL_LoadWAV(tracks[i].fp, &spec, &data, &len)) {
-            std::uint8_t *converted = nullptr;
+            u8 *converted = nullptr;
             auto converted_len = 0;
             if (SDL_ConvertAudioSamples(&spec, data, static_cast<int>(len),
                                          &target, &converted, &converted_len)) {
@@ -56,10 +56,10 @@ static void BuildPCMBuffer() {
 
     // second pass — load, convert, and fill runtime info
     auto offset = 0;
-    for (std::uint8_t i = 0; i < nTracks; i++) {
+    for (u8 i = 0; i < nTracks; i++) {
         SDL_AudioSpec spec;
-        std::uint8_t *data;
-        std::uint32_t len;
+        u8 *data;
+        u32 len;
 
         if (!SDL_LoadWAV(tracks[i].fp, &spec, &data, &len)) {
             SDL_Log("Failed to load %s: %s", tracks[i].fp, SDL_GetError());
@@ -69,18 +69,18 @@ static void BuildPCMBuffer() {
             continue;
         }
 
-        std::uint8_t *converted = nullptr;
+        u8 *converted = nullptr;
         auto converted_len = 0;
         if (SDL_ConvertAudioSamples(&spec, data, static_cast<int>(len),
                                      &target, &converted, &converted_len)) {
-            SDL_memcpy(reinterpret_cast<std::uint8_t *>(pcm_buffer) + offset, converted, converted_len);
+            SDL_memcpy(reinterpret_cast<u8 *>(pcm_buffer) + offset, converted, converted_len);
 
             track_info[i].offset = offset;
             track_info[i].length = converted_len;
 
             if (tracks[i].loop_start > 0.0f) {
-                auto loop_bytes = static_cast<std::uint32_t>(tracks[i].loop_start * BYTES_PER_SECOND);
-                if (loop_bytes > static_cast<std::uint32_t>(converted_len)) loop_bytes = 0;
+                auto loop_bytes = static_cast<u32>(tracks[i].loop_start * BYTES_PER_SECOND);
+                if (loop_bytes > static_cast<u32>(converted_len)) loop_bytes = 0;
                 track_info[i].loop_start = offset + loop_bytes;
             } else {
                 track_info[i].loop_start = offset;
@@ -95,12 +95,12 @@ static void BuildPCMBuffer() {
 }
 
 
-void SfxPlay(const std::uint8_t index, const std::uint8_t channel) {
+void SfxPlay(const u8 index, const u8 channel) {
     (void)channel;
     PlaySFX(0, index);
 }
 
-void SfxSamplePlay(const std::uint8_t index) {
+void SfxSamplePlay(const u8 index) {
     PlaySFX(1, index);
 }
 
@@ -137,7 +137,7 @@ void AudioUpdate() {
         const auto chunk = remaining < 16384 ? remaining : 16384;
 
         SDL_PutAudioStreamData(music_stream,
-            reinterpret_cast<std::uint8_t *>(pcm_buffer) + playback_pos, static_cast<int>(chunk));
+            reinterpret_cast<u8 *>(pcm_buffer) + playback_pos, static_cast<int>(chunk));
         playback_pos += chunk;
         to_feed -= static_cast<int>(chunk);
 
@@ -147,7 +147,7 @@ void AudioUpdate() {
     }
 }
 
-void TrackPlay(const std::uint8_t index) {
+void TrackPlay(const u8 index) {
     if (index >= nTracks) return;
     current_track = index;
     playback_pos = track_info[index].offset;
@@ -162,7 +162,7 @@ void TrackStop() {
     SDL_ClearAudioStream(music_stream);
 }
 
-void TrackPause(const std::uint8_t pause) {
+void TrackPause(const u8 pause) {
     (void)pause;
     music_paused = !music_paused;
 }
