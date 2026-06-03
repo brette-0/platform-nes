@@ -23,19 +23,42 @@
 using namespace br0::intsh;
 #include <type_traits>
 
+#ifdef __cplusplus
 /**
- * @brief Reads one byte from the given address, treating it as `volatile const`.
- * @param addr Pointer or integer address to dereference.
- * @return The byte stored at @p addr.
+ * @brief Reads one byte from a memory-mapped I/O address.
+ *
+ * Typed replacement for the former `PEEK()` macro: a single `volatile`
+ * load. `always_inline` collapses it to the identical 6502 codegen the
+ * macro produced, but with real parameter/return types and none of the
+ * macro's expansion pitfalls. The C build keeps the macro form (`#else`).
+ *
+ * @param addr Hardware address to read.
+ * @return The byte currently stored at @p addr.
  */
-#define PEEK(addr) (*(volatile const unsigned char *)(addr))
+inline __attribute__((always_inline))
+u8 peek(const u16 addr) {
+    return *reinterpret_cast<volatile const u8 *>(addr);
+}
 
 /**
- * @brief Writes one byte to the given address via a `volatile` store.
- * @param addr Pointer or integer address to write to.
- * @param data Byte value to store.
+ * @brief Writes one byte to a memory-mapped I/O address.
+ *
+ * Typed replacement for the former `POKE()` macro: a single `volatile`
+ * store, inlined to identical codegen.
+ *
+ * @param addr Hardware address to write.
+ * @param data Byte to store.
  */
-#define POKE(addr, data) (*(volatile unsigned char *)(addr)) = data
+inline __attribute__((always_inline))
+void poke(const u16 addr, const u8 data) {
+    *reinterpret_cast<volatile u8 *>(addr) = data;
+}
+#else
+/** @brief C fallback: byte read via a `volatile const` dereference. */
+#define PEEK(addr)       (*(volatile const unsigned char *)(addr))
+/** @brief C fallback: byte write via a `volatile` store. */
+#define POKE(addr, data) (*(volatile unsigned char *)(addr)) = (data)
+#endif
 
 /**
  * @brief Three-way comparison.
@@ -79,129 +102,66 @@ using namespace br0::intsh;
 #endif
 
 #ifdef __cplusplus
+#include <br0/tuple>
+
 /**
- * @brief Scoped save/restore of N variables.
+ * @brief Scoped save/restore of N variables — truly variadic.
  *
  * `SHADOW(a, b, ...) { body }` snapshots each listed lvalue, runs the body
  * once, then restores every snapshot in reverse (LIFO) order as the block
  * exits — including on `break`/`return` out of the body. Arguments may be of
  * mixed types; `volatile`/`atomic` lvalues are read and written exactly once.
- * Supports up to 32 arguments (extend the SH_FE_/SH_ARG_N tables for more).
+ *
+ * Unlike the previous macro-unrolled form there is no fixed argument cap: the
+ * snapshots live in a `br0::tuple`, so the count is bounded only by the
+ * compiler's parameter-pack limits. We use `br0::tuple` rather than
+ * `std::tuple` (which the llvm-mos freestanding library does not ship), so the
+ * implementation is byte-for-byte the same on the NES and desktop toolchains.
  *
  * @warning A bare `break`/`continue` inside the body binds to SHADOW's own
  *          hidden loop, not to any enclosing loop (same caveat as ::VRAM).
  */
-template <class T>
-struct shadow_guard {
-    T& ref;
-    std::remove_cv_t<T> saved;
+template <class... Ts>
+struct shadow_scope {
+    br0::tuple<Ts&...> refs;                    ///< the originals (pointers only)
+    br0::tuple<std::remove_cv_t<Ts>...> saved;  ///< one read each at entry
     bool first = true;
-    explicit shadow_guard(T& r) : ref(r), saved(r) {}
-    ~shadow_guard() { ref = saved; }
+
+    explicit shadow_scope(Ts&... rs) : refs(rs...), saved(rs...) {}
+    ~shadow_scope() { restore(br0::index_sequence_for<Ts...>{}); }
+
+    // One store, written as a discarded-value statement so the volatile
+    // assignment's result is never "used" (avoids -Wdeprecated-volatile under
+    // P1152, exactly like the longhand stores elsewhere in this header).
+    template <class D, class S>
+    static void store(D& dst, const S& src) { dst = src; }
+
+    // LIFO restore to match the documented contract; each element is a single
+    // write back through the original reference.
+    template <std::size_t... I>
+    void restore(br0::index_sequence<I...>) {
+        constexpr std::size_t N = sizeof...(Ts);
+        (store(br0::get<N - 1 - I>(refs), br0::get<N - 1 - I>(saved)), ...);
+    }
+
     explicit operator bool() { const bool f = first; first = false; return f; }
 };
+template <class... Ts>
+shadow_scope(Ts&...) -> shadow_scope<Ts...>;
 
 #define SH_CAT_(a, b) a##b
 #define SH_CAT(a, b)  SH_CAT_(a, b)
-#define SH_UID(i)     SH_CAT(SH_CAT(_shadow_, __LINE__), SH_CAT(_, i))
-#define SH_G(v, i)    for (::shadow_guard SH_UID(i){v}; SH_UID(i); )
-
-#define SH_ARG_N(_1,_2,_3,_4,_5,_6,_7,_8,_9,_10,_11,_12,_13,_14,_15,_16,_17,_18,_19,_20,_21,_22,_23,_24,_25,_26,_27,_28,_29,_30,_31,_32,Nm,...) Nm
-#define SH_RSEQ() 32,31,30,29,28,27,26,25,24,23,22,21,20,19,18,17,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0
-#define SH_NARG_(...) SH_ARG_N(__VA_ARGS__)
-#define SH_NARG(...)  SH_NARG_(__VA_ARGS__, SH_RSEQ())
-
-#define SH_FE_1(a)     SH_G(a, 0)
-#define SH_FE_2(a,...) SH_G(a, 1) SH_FE_1(__VA_ARGS__)
-#define SH_FE_3(a,...) SH_G(a, 2) SH_FE_2(__VA_ARGS__)
-#define SH_FE_4(a,...) SH_G(a, 3) SH_FE_3(__VA_ARGS__)
-#define SH_FE_5(a,...) SH_G(a, 4) SH_FE_4(__VA_ARGS__)
-#define SH_FE_6(a,...) SH_G(a, 5) SH_FE_5(__VA_ARGS__)
-#define SH_FE_7(a,...) SH_G(a, 6) SH_FE_6(__VA_ARGS__)
-#define SH_FE_8(a,...) SH_G(a, 7) SH_FE_7(__VA_ARGS__)
-#define SH_FE_9(a,...) SH_G(a, 8) SH_FE_8(__VA_ARGS__)
-#define SH_FE_10(a,...) SH_G(a, 9) SH_FE_9(__VA_ARGS__)
-#define SH_FE_11(a,...) SH_G(a, 10) SH_FE_10(__VA_ARGS__)
-#define SH_FE_12(a,...) SH_G(a, 11) SH_FE_11(__VA_ARGS__)
-#define SH_FE_13(a,...) SH_G(a, 12) SH_FE_12(__VA_ARGS__)
-#define SH_FE_14(a,...) SH_G(a, 13) SH_FE_13(__VA_ARGS__)
-#define SH_FE_15(a,...) SH_G(a, 14) SH_FE_14(__VA_ARGS__)
-#define SH_FE_16(a,...) SH_G(a, 15) SH_FE_15(__VA_ARGS__)
-#define SH_FE_17(a,...) SH_G(a, 16) SH_FE_16(__VA_ARGS__)
-#define SH_FE_18(a,...) SH_G(a, 17) SH_FE_17(__VA_ARGS__)
-#define SH_FE_19(a,...) SH_G(a, 18) SH_FE_18(__VA_ARGS__)
-#define SH_FE_20(a,...) SH_G(a, 19) SH_FE_19(__VA_ARGS__)
-#define SH_FE_21(a,...) SH_G(a, 20) SH_FE_20(__VA_ARGS__)
-#define SH_FE_22(a,...) SH_G(a, 21) SH_FE_21(__VA_ARGS__)
-#define SH_FE_23(a,...) SH_G(a, 22) SH_FE_22(__VA_ARGS__)
-#define SH_FE_24(a,...) SH_G(a, 23) SH_FE_23(__VA_ARGS__)
-#define SH_FE_25(a,...) SH_G(a, 24) SH_FE_24(__VA_ARGS__)
-#define SH_FE_26(a,...) SH_G(a, 25) SH_FE_25(__VA_ARGS__)
-#define SH_FE_27(a,...) SH_G(a, 26) SH_FE_26(__VA_ARGS__)
-#define SH_FE_28(a,...) SH_G(a, 27) SH_FE_27(__VA_ARGS__)
-#define SH_FE_29(a,...) SH_G(a, 28) SH_FE_28(__VA_ARGS__)
-#define SH_FE_30(a,...) SH_G(a, 29) SH_FE_29(__VA_ARGS__)
-#define SH_FE_31(a,...) SH_G(a, 30) SH_FE_30(__VA_ARGS__)
-#define SH_FE_32(a,...) SH_G(a, 31) SH_FE_31(__VA_ARGS__)
-
-#define SHADOW(...) SH_CAT(SH_FE_, SH_NARG(__VA_ARGS__))(__VA_ARGS__)
 
 /**
- * @brief Save/restore of N variables across separate statements.
+ * @brief Open a SHADOW scope over the listed lvalues.
  *
- * `PRESERVE(a, b, ...)` snapshots each listed lvalue into typed stack
- * locals; a later `RESTORE(a, b, ...)` writes the snapshots back. Unlike
- * ::SHADOW the two calls are independent statements, so restoration can
- * happen at an arbitrary point rather than at the end of a block.
- *
- * Both calls must list the same variables (RESTORE needs the names to know
- * what to assign), and both must sit in the same scope (the snapshots are
- * block-scoped locals). An early `return`/`break` between the two simply
- * skips restoration, which is correct — the live values are being discarded.
- * `volatile`/`atomic` lvalues are read once at PRESERVE and written once at
- * RESTORE. Supports up to 32 arguments.
- *
- * @warning A given variable may only be PRESERVE'd once per scope; a second
- *          PRESERVE of the same name collides on the snapshot local.
+ * Expands to a single-iteration `for` whose loop variable is a ::shadow_scope
+ * (CTAD deduces the element types). The body runs once; on exit the scope's
+ * destructor restores every snapshot.
  */
-#define PR_SAVE(v) std::remove_cv_t<decltype(v)> SH_CAT(_preserve_, v) = v;
-#define PR_REST(v) v = SH_CAT(_preserve_, v);
-
-#define PR_FE_1(m,a)     m(a)
-#define PR_FE_2(m,a,...) m(a) PR_FE_1(m,__VA_ARGS__)
-#define PR_FE_3(m,a,...) m(a) PR_FE_2(m,__VA_ARGS__)
-#define PR_FE_4(m,a,...) m(a) PR_FE_3(m,__VA_ARGS__)
-#define PR_FE_5(m,a,...) m(a) PR_FE_4(m,__VA_ARGS__)
-#define PR_FE_6(m,a,...) m(a) PR_FE_5(m,__VA_ARGS__)
-#define PR_FE_7(m,a,...) m(a) PR_FE_6(m,__VA_ARGS__)
-#define PR_FE_8(m,a,...) m(a) PR_FE_7(m,__VA_ARGS__)
-#define PR_FE_9(m,a,...) m(a) PR_FE_8(m,__VA_ARGS__)
-#define PR_FE_10(m,a,...) m(a) PR_FE_9(m,__VA_ARGS__)
-#define PR_FE_11(m,a,...) m(a) PR_FE_10(m,__VA_ARGS__)
-#define PR_FE_12(m,a,...) m(a) PR_FE_11(m,__VA_ARGS__)
-#define PR_FE_13(m,a,...) m(a) PR_FE_12(m,__VA_ARGS__)
-#define PR_FE_14(m,a,...) m(a) PR_FE_13(m,__VA_ARGS__)
-#define PR_FE_15(m,a,...) m(a) PR_FE_14(m,__VA_ARGS__)
-#define PR_FE_16(m,a,...) m(a) PR_FE_15(m,__VA_ARGS__)
-#define PR_FE_17(m,a,...) m(a) PR_FE_16(m,__VA_ARGS__)
-#define PR_FE_18(m,a,...) m(a) PR_FE_17(m,__VA_ARGS__)
-#define PR_FE_19(m,a,...) m(a) PR_FE_18(m,__VA_ARGS__)
-#define PR_FE_20(m,a,...) m(a) PR_FE_19(m,__VA_ARGS__)
-#define PR_FE_21(m,a,...) m(a) PR_FE_20(m,__VA_ARGS__)
-#define PR_FE_22(m,a,...) m(a) PR_FE_21(m,__VA_ARGS__)
-#define PR_FE_23(m,a,...) m(a) PR_FE_22(m,__VA_ARGS__)
-#define PR_FE_24(m,a,...) m(a) PR_FE_23(m,__VA_ARGS__)
-#define PR_FE_25(m,a,...) m(a) PR_FE_24(m,__VA_ARGS__)
-#define PR_FE_26(m,a,...) m(a) PR_FE_25(m,__VA_ARGS__)
-#define PR_FE_27(m,a,...) m(a) PR_FE_26(m,__VA_ARGS__)
-#define PR_FE_28(m,a,...) m(a) PR_FE_27(m,__VA_ARGS__)
-#define PR_FE_29(m,a,...) m(a) PR_FE_28(m,__VA_ARGS__)
-#define PR_FE_30(m,a,...) m(a) PR_FE_29(m,__VA_ARGS__)
-#define PR_FE_31(m,a,...) m(a) PR_FE_30(m,__VA_ARGS__)
-#define PR_FE_32(m,a,...) m(a) PR_FE_31(m,__VA_ARGS__)
-
-#define PRESERVE(...) SH_CAT(PR_FE_, SH_NARG(__VA_ARGS__))(PR_SAVE, __VA_ARGS__)
-#define RESTORE(...)  SH_CAT(PR_FE_, SH_NARG(__VA_ARGS__))(PR_REST, __VA_ARGS__)
+#define SHADOW(...)                                              \
+    for (::shadow_scope SH_CAT(_shadow_, __LINE__){__VA_ARGS__}; \
+         SH_CAT(_shadow_, __LINE__);)
 #endif // __cplusplus
 
 #if !defined(__cplusplus) && __STDC_VERSION__ < 202311L

@@ -35,6 +35,22 @@ FetchContent_Declare(
 )
 
 # ----------------------------------------------------------------------
+# br0::tuple — header-only freestanding tuple, used via #include <br0/tuple>.
+# SOURCE_SUBDIR points add_subdirectory at the repo's br0/ folder, which
+# defines just the br0::tuple INTERFACE target. This deliberately skips the
+# repo's top-level CMakeLists.txt, which hard-requires a machine-specific
+# cmake/local.cmake and builds the upstream test suite — neither of which we
+# want pulled into this build.
+# ----------------------------------------------------------------------
+FetchContent_Declare(
+        tuple
+        GIT_REPOSITORY https://github.com/brette-0/tuple.git
+        GIT_TAG        master
+        GIT_SHALLOW    TRUE
+        SOURCE_SUBDIR  br0
+)
+
+# ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------
 if(TARGET_PLATFORM STREQUAL "nes")
@@ -43,7 +59,7 @@ if(TARGET_PLATFORM STREQUAL "nes")
     project(platform-nes CXX)
     set(PLATFORM_DEFINE TARGET_NES)
 
-    FetchContent_MakeAvailable(intsh)
+    FetchContent_MakeAvailable(intsh tuple)
 
     # FamiStudio sound engine sources are fetched directly from upstream
     # to avoid vendoring a copy in the repository.
@@ -162,7 +178,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
     )
-    target_link_libraries(platform-nes PUBLIC br0::intsh)
+    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
     file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.cpp)
 
@@ -179,6 +195,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
             -I${intsh_SOURCE_DIR}
+            -I${tuple_SOURCE_DIR}
             ${DEMO_C_SOURCES}
             # Stop forcing the C++ frontend before the archive/object inputs
             # so the driver treats them as link inputs, not source files.
@@ -263,7 +280,7 @@ ${FAMISTUDIO_CFG}")
 else()
     project(platform-nes CXX)
 
-    FetchContent_MakeAvailable(intsh)
+    FetchContent_MakeAvailable(intsh tuple)
 
     if(TARGET_PLATFORM STREQUAL "mac")
         set(PLATFORM_DEFINE TARGET_MACOS)
@@ -399,7 +416,7 @@ else()
     )
     target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE})
     target_link_libraries(platform-nes PUBLIC SDL3::SDL3-static)
-    target_link_libraries(platform-nes PUBLIC br0::intsh)
+    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
     if(TARGET_PLATFORM STREQUAL "linux")
         target_link_libraries(platform-nes PUBLIC usb-1.0)

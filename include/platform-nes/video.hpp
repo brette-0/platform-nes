@@ -508,9 +508,9 @@ extern atomic u8 SPPUMASK;
  */
 #define VRAM                                \
 for (                                       \
-u8 i = (POKE(PPUMASK, 0), 0);\
+u8 i = (poke(PPUMASK, 0), 0);\
 __builtin_expect(i < 1, 1);                 \
-POKE(PPUMASK, SPPUMASK), i++)
+poke(PPUMASK, SPPUMASK), i++)
 
 #else
 /**
