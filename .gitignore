@@ -51,8 +51,7 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# Per-developer CMake overrides (see local.cmake.example
-# and CMakeUserPresets.json.example)
+# Per-developer CMake overrides (see local.cmake.example)
 local.cmake
 CMakeUserPresets.json
 

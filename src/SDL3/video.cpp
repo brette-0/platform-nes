@@ -1,4 +1,4 @@
-﻿#include "../SDL3/internal.hpp"
+#include "../SDL3/internal.hpp"
 
 #include <platform-nes/video.hpp>
 #include <platform-nes/interrupts.hpp>
@@ -80,12 +80,7 @@ static u64 last_frame;
  * mirroring the NES OAMDMA. GenerateFrame renders from this, never from the
  * live buffer, so mid-frame writes (e.g. from the sprite-zero IRQ handler)
  * only appear on the next frame — exactly as on hardware. */
-static struct sprite_t oamShadow[OAM_SPRITES];
-
-void EnableRendering(u8 ppuCtrl_, u8 ppuMask_) {
-    ppuMask = ppuMask_;
-    ppuCtrl = ppuCtrl_;
-}
+static struct oam::sprite_t oamShadow[OAM_SPRITES];
 
 static void toggle_fullscreen() {
     if (const u32 flags = SDL_GetWindowFlags(window); flags & SDL_WINDOW_FULLSCREEN) {
@@ -114,8 +109,8 @@ static void toggle_fullscreen() {
  * mutate xScroll, yScroll, ppuCtrl, palette — anything — and the very
  * next pixel sees the new state in both axes. */
 static void GenerateFrame() {
-    const int vpw = VIEWPORT_PX;
-    constexpr int vph = VIEWPORT_PY;
+    const int vpw = video::viewport_px();
+    constexpr int vph = video::viewport_py();
 
     if (!bgTexture) {
         bgTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888,
@@ -131,7 +126,7 @@ static void GenerateFrame() {
 
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
-    const int spr_base = (ppuCtrl & SPRITE_ADDR) ? 0x1000 : 0x0000;
+    const int spr_base = (ppuCtrl & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
 
     /* PPU Y counter: the absolute VRAM row currently being sourced.
      * Initialised from yScroll, then auto-incremented after each scanline.
@@ -147,7 +142,7 @@ static void GenerateFrame() {
         /* Sprites use screen-space Y — they don't scroll with the background. */
         int line_spr[64];
         int n_line = 0;
-        if (ppuMask & SPRITE) {
+        if (ppuMask & ppu::mask::SPRITE) {
             for (size_t s = 0; s < OAM_SPRITES && n_line < 64; s++) {
                 if (const int sy = static_cast<int>(oamShadow[s].y) + 1; py >= sy && py < sy + 8)
                     line_spr[n_line++] = static_cast<int>(s);
@@ -188,7 +183,7 @@ static void GenerateFrame() {
                 /* --- Background ---------------------------------------- */
                 int     bg_cidx = 0;
                 u8 bg_pal  = 0;
-                if ((ppuMask & BG) && ((ppuMask & 0x02) || px >= 8)) {
+                if ((ppuMask & ppu::mask::BG) && ((ppuMask & 0x02) || px >= 8)) {
                     const int wx        = (static_cast<int>(xScroll) + px) % world_w;
                     const int tile_col  = wx / 8;
                     const int local_col = tile_col % 32;
@@ -204,7 +199,7 @@ static void GenerateFrame() {
                                     + ((local_row >> 1) & 1) * 4;
                     bg_pal = (attr >> shift) & 3;
 
-                    const int chr_base = ((ppuCtrl & BG_ADDR) ? 0x1000 : 0)
+                    const int chr_base = ((ppuCtrl & ppu::ctrl::BG_ADDR) ? 0x1000 : 0)
                                        + tile_id * 16 + fine_y;
                     const int bit = 7 - fine_x;
                     bg_cidx = ((patternTable[chr_base]     >> bit) & 1)
@@ -216,7 +211,7 @@ static void GenerateFrame() {
                 int     spr_hit    = 0;
                 int     spr_behind = 0;
                 u8 spr_nes    = 0;
-                if ((ppuMask & SPRITE) && ((ppuMask & 0x04) || px >= 8)) {
+                if ((ppuMask & ppu::mask::SPRITE) && ((ppuMask & 0x04) || px >= 8)) {
                     for (int k = 0; k < n_line; k++) {
                         const auto [y, tile, attributes, x] = oamShadow[line_spr[k]];
                         const int sx  = (int)x;
@@ -285,8 +280,28 @@ static void GenerateFrame() {
 
 #pragma endregion
 
+inline static u16 xy_to_nt_addr(u16 x, u16 y) {
+    const u16 nt_cols = (video::viewport_tx() < 64 ? 2 : (video::viewport_tx() + 31) / 32);
+    const u16 nt_h = (x / 32) % nt_cols;
+    const u16 nt_v = y / 30;
+    const u16 col  = x % 32;
+    const u16 row  = y % 30;
 
+    return (nt_h + nt_v * nt_cols) * 0x400 + row * 32 + col;
+}
 
+inline static u16 xy_to_at_addr(u16 x, u16 y) {
+    const u16 nt_cols = (video::viewport_tx() < 64 ? 2 : (video::viewport_tx() + 31) / 32);
+    const u16 nt_h = (x / 32) % nt_cols;
+    const u16 nt_v = y / 30;
+    const u16 col  = x % 32;
+    const u16 row  = y % 30;
+
+    return (nt_h + nt_v * nt_cols) * 0x400
+         + 0x3C0 + (row / 4) * 8 + (col / 4);
+}
+
+namespace video {
 
 void WaitForPresent() {
     // pump events once
@@ -321,12 +336,12 @@ void WaitForPresent() {
     }
 
     const u64 elapsed = SDL_GetTicksNS() - last_frame;
-    if (const u64 target = 16666667; elapsed < target) {
+    if (constexpr u64 target = 16666667; elapsed < target) {
         SDL_DelayPrecise(target - elapsed);
     }
     last_frame = SDL_GetTicksNS();
 
-    if (ppuMask & (BG | SPRITE)) {
+    if (ppuMask & (ppu::mask::BG | ppu::mask::SPRITE)) {
         GenerateFrame();
         SDL_RenderPresent(renderer);
     } else {
@@ -339,7 +354,16 @@ void WaitForPresent() {
     nmi();
 }
 
-void FlushVideoRAM(const u8 nt, const u8 at) {
+}   // namespace video
+
+namespace ppu {
+
+void EnableRendering(u8 ppuCtrl_, u8 ppuMask_) {
+    ppuMask = ppuMask_;
+    ppuCtrl = ppuCtrl_;
+}
+
+void Flush(const u8 nt, const u8 at) {
 
     for (u16 page = 0;
         mode->w / scale < 512 ? page < 2 : page < mode->w / scale;
@@ -355,47 +379,20 @@ void FlushVideoRAM(const u8 nt, const u8 at) {
     }
 }
 
-inline static u16 xy_to_nt_addr(u16 x, u16 y) {
-    const u16 nt_cols = (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32);
-    const u16 nt_h = (x / 32) % nt_cols;
-    const u16 nt_v = y / 30;
-    const u16 col  = x % 32;
-    const u16 row  = y % 30;
-
-    return (nt_h + nt_v * nt_cols) * 0x400 + row * 32 + col;
-}
-
-inline static u16 xy_to_at_addr(u16 x, u16 y) {
-    const u16 nt_cols = (VIEWPORT_TX < 64 ? 2 : (VIEWPORT_TX + 31) / 32);
-    const u16 nt_h = (x / 32) % nt_cols;
-    const u16 nt_v = y / 30;
-    const u16 col  = x % 32;
-    const u16 row  = y % 30;
-
-    return (nt_h + nt_v * nt_cols) * 0x400
-         + 0x3C0 + (row / 4) * 8 + (col / 4);
-}
-
-void WriteBufferToVideoMemory(
+void WriteFromBufferToNameTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, u8 polarity
 ) {
-    ppuCtrl &= ~POLARITY;
-    if (polarity) ppuCtrl |= POLARITY;
+    ppuCtrl &= ~ppu::ctrl::POLARITY;
+    if (polarity) ppuCtrl |= ppu::ctrl::POLARITY;
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 32 : 1)] = source[i];
+        VideoRAM[offset + i * (ppuCtrl & ppu::ctrl::POLARITY ? 32 : 1)] = source[i];
     }
 }
 
-void WriteSingleToVideoMemory(const u16 x, const u16 y, u8 value) {
+void WriteSingleToNameTable(const u16 x, const u16 y, u8 value) {
     const u16 offset = xy_to_nt_addr(x, y);
     VideoRAM[offset] = value;
-}
-
-void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
-    for (u8 i = 0; i < size; i++) {
-        target[i] = VideoRAM[offset + i];
-    }
 }
 
 void SetScroll(const u16 x, const u16 y) {
@@ -409,28 +406,20 @@ void DeltaScroll(const i8 x, const i8 y) {
     yScroll_written = 1;
 }
 
-void WriteBufferToPaletteMemory(const u8 offset, const u8* source, const u8 sBuffer) {
-    memcpy(paletteRAM + offset, source, sBuffer);
-}
-
-void WriteSingleToPaletteMemory(const u8 offset, const u8 value) {
-    paletteRAM[offset] = value;
-}
-
-void WriteProviderToVideoMemory(
+void WriteFromProviderToNameTable(
     const u16 x, const u16 y, u8 (*fn)(u16), const u8 amt,
     const u8 polarity
 ) {
-    ppuCtrl &= ~POLARITY;
-    if (polarity) ppuCtrl |= POLARITY;
+    ppuCtrl &= ~ppu::ctrl::POLARITY;
+    if (polarity) ppuCtrl |= ppu::ctrl::POLARITY;
 
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < amt; i++) {
-        VideoRAM[offset + i * (ppuCtrl & POLARITY ? 32 : 1)] = fn(i);
+        VideoRAM[offset + i * (ppuCtrl & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
     }
 }
 
-void WriteBufferToAttributeMemory(
+void WriteFromBufferToAttributeTable(
     const u16 x, const u16 y, const u8* source,
     const u8 sBuffer, const u8 polarity
 ) {
@@ -440,32 +429,9 @@ void WriteBufferToAttributeMemory(
     }
 }
 
-void WriteSingleToAttributeMemory(const u16 x, const u16 y, const u8 value) {
+void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const u16 offset = xy_to_at_addr(x, y);
     VideoRAM[offset] = value;
-}
-
-void OAMFromBuffer(sprite_t* oam, const u8 slot, const u16 off,
-                   const u8 width, const u8* src, const u16 count) {
-    u8* dst = reinterpret_cast<u8 *>(oam) + static_cast<size_t>(slot) * SPRITE_STRIDE + off;
-    const u8* s = src + off;
-    for (u16 i = 0; i < count; i++)
-        memcpy(dst + static_cast<size_t>(i) * SPRITE_STRIDE, s + static_cast<size_t>(i) * SPRITE_STRIDE, width);
-}
-
-void OAMFromProvider(sprite_t* oam, const u8 slot, const u16 off,
-                     const u8 width, oam_t (*fn)(u16), const u16 count) {
-    u8* base = reinterpret_cast<u8 *>(oam) + static_cast<size_t>(slot) * SPRITE_STRIDE + off;
-    for (u16 i = 0; i < count; i++) {
-        oam_t v = fn(i);
-        memcpy(base + static_cast<size_t>(i) * SPRITE_STRIDE, &v, width);  /* low `width` bytes (LE) */
-    }
-}
-
-/* SDL analogue of OAMDMA: freeze the passed OAM buffer into the PPU-side
- * snapshot that GenerateFrame renders from. Called from the app's NMI. */
-void RefreshSprites(const sprite_t* oam) {
-    memcpy(oamShadow, oam, OAM_SPRITES * sizeof(struct sprite_t));
 }
 
 u16 CartesianToAddress(const u16 x, const u16 y) {
@@ -477,8 +443,61 @@ scroll_t CartesianToScroll(const u16 px, const u16 py) {
 }
 
 void SetColorPriority(const u8 priority) {
-    ppuMask = (ppuMask & ~(RED | GREEN | BLUE)) | (priority & (RED | GREEN | BLUE));
+    ppuMask = (ppuMask & ~(ppu::mask::RED | ppu::mask::GREEN | ppu::mask::BLUE)) |
+        (priority & (ppu::mask::RED | ppu::mask::GREEN | ppu::mask::BLUE)
+    );
 }
+
+namespace pal {
+
+void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuffer) {
+    memcpy(paletteRAM + offset, source, sBuffer);
+}
+
+void WriteSingle(const u8 offset, const u8 value) {
+    paletteRAM[offset] = value;
+}
+
+}   // namespace pal
+
+}   // namespace ppu
+
+namespace oam {
+
+void OAMFromBuffer(sprite_t* oam, const u8 slot, const u16 off,
+                   const u8 width, const u8* src, const u16 count) {
+    u8* dst = reinterpret_cast<u8 *>(oam) + static_cast<size_t>(slot) * spriteStride + off;
+    const u8* s = src + off;
+    for (u16 i = 0; i < count; i++)
+        memcpy(dst + static_cast<size_t>(i) * spriteStride, s + static_cast<size_t>(i) * spriteStride, width);
+}
+
+void OAMFromProvider(sprite_t* oam, const u8 slot, const u16 off,
+                     const u8 width, oam_t (*fn)(u16), const u16 count) {
+    u8* base = reinterpret_cast<u8 *>(oam) + static_cast<size_t>(slot) * spriteStride + off;
+    for (u16 i = 0; i < count; i++) {
+        oam_t v = fn(i);
+        memcpy(base + static_cast<size_t>(i) * spriteStride, &v, width);  /* low `width` bytes (LE) */
+    }
+}
+
+/* SDL analogue of OAMDMA: freeze the passed OAM buffer into the PPU-side
+ * snapshot that GenerateFrame renders from. Called from the app's NMI. */
+void RefreshSprites(const sprite_t* oam) {
+    memcpy(oamShadow, oam, OAM_SPRITES * sizeof(struct sprite_t));
+}
+
+}   // namespace oam
+
+namespace ppu {
+
+void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
+    for (u8 i = 0; i < size; i++) {
+        target[i] = VideoRAM[offset + i];
+    }
+}
+
+}   // namespace ppu
 
 void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     *latch = true;

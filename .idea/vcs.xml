@@ -3,6 +3,5 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-linux-debug/_deps/libusb_cmake-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/libusb_cmake-src" vcs="Git" />
   </component>
 </project>

@@ -2,6 +2,7 @@
 #define HANDLER_H
 #include <platform-nes/technology.hpp>
 #include <intsh>
+
 using namespace br0::intsh;
 
 void SpriteZeroHandler();

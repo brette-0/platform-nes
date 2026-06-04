@@ -3,7 +3,7 @@
 #include <intsh>
 using namespace br0::intsh;
 
-#define LEVEL_HEIGHT 14
+constexpr auto levelHeight = 14;
 
 extern const u8 LevelData[];
 extern const u8 LevelDataLengths[];

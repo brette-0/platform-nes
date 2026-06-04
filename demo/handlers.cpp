@@ -10,11 +10,16 @@ using namespace br0::intsh;
 atomic u8 levelStreamCommand;
 u8 TileBuffer[56];
 
-#define PLAYER_SCROLL_POS   (VIEWPORT_PX >> 1)
-#define PLAYER_MAX_SPRITE_X (VIEWPORT_PX - 16)
-
 void SpriteZeroHandler() {
-    SetScroll(xWorldSpace, 16);
+    // Recomputed per call: on NES these fold to literals (-O3); on desktop the
+    // viewport is a runtime value, so they must be read after video init, not
+    // bound to a constexpr / static-init global.
+    // ReSharper disable once CppVariableCanBeMadeConstexpr
+    const auto playerScrollPos = (video::viewport_px() >> 1);
+    // ReSharper disable once CppVariableCanBeMadeConstexpr
+    const auto playerMaxXPos   = (video::viewport_px() - 16);
+
+    ppu::SetScroll(xWorldSpace, 16);
     PollControllers(&port1, &port2);
     spriteZeroHandled = 1;
 
@@ -26,13 +31,13 @@ void SpriteZeroHandler() {
 
     if (deltaY) {
         playerY += deltaY;
-        PopulateOAMFromProvider(OAMBuffer, 1, y, AdjustSpriteY, 8);
+        oam::PopulateFromProvider(OAMBuffer, 1, oam::y, AdjustSpriteY, 8);
     }
 
     if (!deltaX) return;    // if no need to move player sprite x or sroll, return early
 
-    const bool couldScroll = playerX == PLAYER_SCROLL_POS
-        && ((deltaX > 0 && xWorldSpace + deltaX <= (levelSize - VIEWPORT_MX) << 4)
+    const bool couldScroll = playerX == playerScrollPos
+        && ((deltaX > 0 && xWorldSpace + deltaX <= (levelSize - viewport_mx()) << 4)
             | (xWorldSpace + deltaX < xWorldSpace));
 
     if (couldScroll) {
@@ -41,12 +46,12 @@ void SpriteZeroHandler() {
 
         if (!(xWorldSpace & 0x0f)) {
             if (deltaX > 0) {
-                if (xWorldSpace > lastXWorldSpace && xWorldSpace != (levelSize - VIEWPORT_MX) << 4) {
+                if (xWorldSpace > lastXWorldSpace && xWorldSpace != (levelSize - viewport_mx()) << 4) {
                     levelStreamCommand = STREAM_LEVEL_RIGHT;
                     if (lastDeltaScroll < 0) {
                         levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
                         hunk_remaining = LevelDataLengths[level_data_index] - hunk_remaining;
-                        for (auto i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT + 2 * LEVEL_HEIGHT; i++) {
+                        for (auto i = 0; i < viewport_mx() * levelHeight + 2 * levelHeight; i++) {
                             GetNextMetaTile();
                         }
                     }
@@ -63,7 +68,7 @@ void SpriteZeroHandler() {
                 if (lastDeltaScroll > 0) {
                     levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
                     hunk_remaining = LevelDataLengths[level_data_index] - hunk_remaining;
-                    for (auto i = 0; i < VIEWPORT_MX * LEVEL_HEIGHT + 2 * LEVEL_HEIGHT; i++) {
+                    for (auto i = 0; i < viewport_mx() * levelHeight + 2 * levelHeight; i++) {
                         GetPrevMetaTile();
                     }
                 }
@@ -76,11 +81,11 @@ void SpriteZeroHandler() {
             }
         }
     } else {
-        const oam_t lastPlayerX = playerX;
+        const oam::oam_t lastPlayerX = playerX;
         playerX += deltaX;
         if (deltaX > 0) {
-            if (playerX > PLAYER_MAX_SPRITE_X) {
-                playerX = PLAYER_MAX_SPRITE_X;
+            if (playerX > playerMaxXPos) {
+                playerX = playerMaxXPos;
             }
         } else {
             if (playerX > lastPlayerX) {
@@ -88,6 +93,6 @@ void SpriteZeroHandler() {
             }
         }
 
-        PopulateOAMFromProvider(OAMBuffer, 1, x, AdjustSpriteX, 8);
+        oam::PopulateFromProvider(OAMBuffer, 1, oam::x, AdjustSpriteX, 8);
     }
 }

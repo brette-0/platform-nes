@@ -5,6 +5,17 @@
 # local.cmake is gitignored.
 include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
 
+# The NES target cross-compiles with llvm-mos. Derive its toolchain from the
+# SDK path (CMAKE_PREFIX_PATH, set in local.cmake) so the machine-specific
+# path lives in exactly one place. Runs before project(), and yields to an
+# explicitly supplied toolchain (-DCMAKE_TOOLCHAIN_FILE=... or an IDE preset).
+if(TARGET_PLATFORM STREQUAL "nes" AND NOT CMAKE_TOOLCHAIN_FILE AND CMAKE_PREFIX_PATH)
+    list(GET CMAKE_PREFIX_PATH 0 _llvm_mos_sdk_root)
+    set(CMAKE_TOOLCHAIN_FILE
+        "${_llvm_mos_sdk_root}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake")
+    unset(_llvm_mos_sdk_root)
+endif()
+
 set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_NAME define")
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${GAME_NAME}")

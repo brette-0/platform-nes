@@ -9,8 +9,8 @@
 u8 port1;
 u8 port2;
 
-oam_t playerX;
-oam_t playerY;
+oam::oam_t playerX;
+oam::oam_t playerY;
 
 i8 lastDeltaScroll;
 
@@ -20,30 +20,30 @@ atomic u16 lastXWorldSpace;
 
 atomic u8 spriteZeroHandled;
 
-sprite_t OAMBuffer[64] __attribute__((aligned(256)));
+oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
-static oam_t Clear(u16 _);
+static oam::oam_t Clear(u16 _);
 static bool    BuildLevelSize();
 
 RESET {
     if (!BuildLevelSize()) {
         reset();    // spin reset on NES, exit on SDL3
     }
-    FlushVideoRAM(0x24, 0x00);
+    ppu::Flush(0x24, 0x00);
 
-    PopulateOAMFromProvider(OAMBuffer, 0, y, Clear, 64);
+    oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
     // fill in with mario metatiles
-    PopulateOAMFromBuffer(OAMBuffer, 1, tile, msMario, 8);
-    PopulateOAMFromProvider(OAMBuffer, 1, y, AdjustSpriteY, 8);
-    PopulateOAMFromProvider(OAMBuffer, 1, x, AdjustSpriteX, 8);
+    oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile, msMario, 8);
+    oam::PopulateFromProvider(OAMBuffer, 1, oam::y, AdjustSpriteY, 8);
+    oam::PopulateFromProvider(OAMBuffer, 1, oam::x, AdjustSpriteX, 8);
 
-    WriteBufferToPaletteMemory(BG_0,         SIZED_OBJ(BGColours));
-    WriteBufferToPaletteMemory(SPRITE_0 + 1, SIZED_OBJ(marioColors));
-    WriteBufferToVideoMemory(VIEWPORT_TX - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
+    ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
+    ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(marioColors));
+    ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mario), 0, SIZED_OBJ(msg_mario), 0);
 
-    WriteSingleToVideoMemory(0, 1, 0x2e);
-    OAMBuffer[0] = ( sprite_t){
+    ppu::WriteSingleToNameTable(0, 1, 0x2e);
+    OAMBuffer[0] = ( oam::sprite_t){
         .y = 8,
         .tile = 0xff,
         .attributes = 0,
@@ -51,26 +51,26 @@ RESET {
     };
 
     hunk_remaining = LevelDataLengths[0];
-    for (auto i = 0; i < 2 + VIEWPORT_TX; i += 2) {
-        WriteProviderToVideoMemory(
+    for (auto i = 0; i < 2 + video::viewport_tx(); i += 2) {
+        ppu::WriteFromProviderToNameTable(
             i, 2,
             GetNextWrite, 28, 1
         );
 
-        WriteProviderToVideoMemory(
+        ppu::WriteFromProviderToNameTable(
             i + 1, 2,
             GetCurrentNext, 28, 1
         );
 
-        WriteBufferToAttributeMemory(i & ~3, 2, AttributeBuffer, 8, 1);
+        ppu::WriteFromBufferToAttributeTable(i & ~3, 2, AttributeBuffer, 8, 1);
     }
 
-    SetScroll(0, 0);
+    ppu::SetScroll(0, 0);
 
     AudioInit();
     TrackPlay(0);
-    RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
-    EnableRendering(BG_ADDR, BG_L | SPRITE_L);
+    oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
+    ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
         if (port1 & START) {
@@ -82,53 +82,53 @@ RESET {
 
         WaitThenReactToSpriteZero(0, 16, SpriteZeroHandler, &spriteZeroHandled);
 
-        WaitForPresent();
+        video::WaitForPresent();
     }
 }
 
 NMI {
-    SetColorPriority(BLUE);
-    RefreshSprites(OAMBuffer);
+    ppu::SetColorPriority(ppu::mask::BLUE);
+    oam::RefreshSprites(OAMBuffer);
 
     spriteZeroHandled = 0;
 
     if (levelStreamCommand & STREAM_LEVEL_DONE) VRAM {
         if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) + VIEWPORT_TX + 0, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) + VIEWPORT_TX + 1, 2, TileBuffer + 28, 28, 1);
+            ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 0, 2, TileBuffer, 28, 1);
+            ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 1, 2, TileBuffer + 28, 28, 1);
             if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
-                WriteBufferToAttributeMemory((lastXWorldSpace >> 3) + VIEWPORT_TX & ~3, 2, AttributeBuffer, 8, 1);
+                ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) + video::viewport_tx() & ~3, 2, AttributeBuffer, 8, 1);
         } else {
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
-            WriteBufferToVideoMemory((lastXWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+            ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
+            ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
             if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
-                WriteBufferToAttributeMemory((lastXWorldSpace >> 3) - 2 & ~3, 2, AttributeBuffer, 8, 1);
+                ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, AttributeBuffer, 8, 1);
         }
     }
 
-    SetScroll(0, 0);
+    ppu::SetScroll(0, 0);
     if (levelStreamCommand & STREAM_LEVEL_DONE) {
         levelStreamCommand = 0;
     }
 
-    SetColorPriority(0);
+    ppu::SetColorPriority(0);
 }
 
-static oam_t Clear(const u16 _) {
+static oam::oam_t Clear(const u16 _) {
     return 0xef;
 }
 
-oam_t AdjustSpriteY(const u16 i) {
+oam::oam_t AdjustSpriteY(const u16 i) {
     return playerY + (i >> 1) * 8;
 }
 
-oam_t AdjustSpriteX(const u16 i) {
+oam::oam_t AdjustSpriteX(const u16 i) {
     return playerX + (i & 1) * 8;
 }
 
 MINSIZE static bool BuildLevelSize() {
-    u8 temp = 0;
-    levelSize    = 0;
+    u8 temp   = 0;
+    levelSize = 0;
 
     for (u16 i = 0; i < 0xffff; i++) {
         if (LevelDataLengths[i] == 0)
@@ -136,9 +136,9 @@ MINSIZE static bool BuildLevelSize() {
 
         temp += LevelDataLengths[i];
 
-        while (temp >= LEVEL_HEIGHT) {
+        while (temp >= levelHeight) {
             levelSize++;
-            temp -= LEVEL_HEIGHT;
+            temp -= levelHeight;
         }
     }
 

@@ -12,8 +12,7 @@
       "name": "nes-release",
       "inherits": "_base",
       "displayName": "NES (Release)",
-      "description": "NES ROM via llvm-mos-sdk. Set LLVM_MOS_SDK to your SDK install (see CMakeUserPresets.json.example); the toolchain selects the MOS-aware clang so the IDE gets 6502 intelligence.",
-      "toolchainFile": "$env{LLVM_MOS_SDK}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake",
+      "description": "NES ROM via llvm-mos-sdk. Point CMAKE_PREFIX_PATH at your SDK install in local.cmake (copy local.cmake.example); CMakeLists.txt derives the MOS-aware toolchain from it so the IDE gets 6502 intelligence.",
       "cacheVariables": {
         "TARGET_PLATFORM": "nes",
         "CMAKE_BUILD_TYPE": "Release"

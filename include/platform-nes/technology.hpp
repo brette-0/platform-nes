@@ -105,6 +105,42 @@ void poke(const u16 addr, const u8 data) {
 #include <br0/tuple>
 
 /**
+ * @brief Write-only hardware register with a RAM shadow.
+ *
+ * Models a memory-mapped port that cannot be read back (e.g. the NES
+ * PPUCTRL/PPUMASK registers). The RAM shadow is the readable copy, and because
+ * the only write path also pokes the hardware, shadow and register can never
+ * drift: `get()` returns the shadow, `set()` writes both.
+ *
+ * The value-like surface (`operator u8`, `operator=(u8)`) lets an instance be
+ * used in expressions exactly like the bare `atomic u8` shadow it replaces, so
+ * existing read-modify-write code compiles unchanged. Copy-construction takes a
+ * snapshot *without* poking, while copy-assignment writes through — precisely
+ * what ::SHADOW needs to save on entry and restore (re-poking) on exit.
+ *
+ * The shadow keeps the `atomic` qualifier the bare shadow had, so its ordering
+ * guarantees survive for callers that touch it from an interrupt. The default
+ * constructor is trivial, so instances live in zero-initialised `.bss` with no
+ * startup constructor — identical placement to the `atomic u8` they replace.
+ *
+ * @tparam Addr Memory-mapped address backing this register.
+ */
+template <u16 Addr>
+class wo_register {
+    atomic u8 shadow_;
+public:
+    wo_register() = default;                                  ///< trivial: instance lives in .bss
+    wo_register(const wo_register &o) : shadow_(o.shadow_) {} ///< snapshot, no poke
+
+    u8   get() const     { return shadow_; }                  ///< read  = shadow
+    void set(const u8 v) { shadow_ = v; poke(Addr, v); }      ///< write = shadow + hardware
+
+    operator u8() const { return shadow_; }
+    wo_register &operator=(const u8 v)           { set(v);         return *this; }
+    wo_register &operator=(const wo_register &o) { set(o.shadow_); return *this; } ///< restore path
+};
+
+/**
  * @brief Scoped save/restore of N variables — truly variadic.
  *
  * `SHADOW(a, b, ...) { body }` snapshots each listed lvalue, runs the body
