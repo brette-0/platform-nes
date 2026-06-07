@@ -13,10 +13,13 @@
 u16 xScroll;
 u16 yScroll;
 u8* paletteRAM;
-static u8  ppuMask;
 static SDL_Texture *bgTexture;
-static u8 ppuCtrl;
 static int yScroll_written;
+
+namespace ppu {
+u8 PPUCTRL;
+u8 PPUMASK;
+}   // namespace ppu
 
 #define SPRITE_ZERO_IRQ_ID 0xFF
 
@@ -106,7 +109,7 @@ static void toggle_fullscreen() {
  *
  * IRQ dispatch: each scanline is split at the px of the next queued IRQ.
  * The handler fires before the pixel at its (px, py) renders, so it can
- * mutate xScroll, yScroll, ppuCtrl, palette — anything — and the very
+ * mutate xScroll, yScroll, ppu::PPUCTRL, palette — anything — and the very
  * next pixel sees the new state in both axes. */
 static void GenerateFrame() {
     const int vpw = video::viewport_px();
@@ -126,7 +129,7 @@ static void GenerateFrame() {
 
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
-    const int spr_base = (ppuCtrl & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
+    const int spr_base = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
 
     /* PPU Y counter: the absolute VRAM row currently being sourced.
      * Initialised from yScroll, then auto-incremented after each scanline.
@@ -142,7 +145,7 @@ static void GenerateFrame() {
         /* Sprites use screen-space Y — they don't scroll with the background. */
         int line_spr[64];
         int n_line = 0;
-        if (ppuMask & ppu::mask::SPRITE) {
+        if (ppu::PPUMASK & ppu::mask::SPRITE) {
             for (size_t s = 0; s < OAM_SPRITES && n_line < 64; s++) {
                 if (const int sy = static_cast<int>(oamShadow[s].y) + 1; py >= sy && py < sy + 8)
                     line_spr[n_line++] = static_cast<int>(s);
@@ -183,7 +186,7 @@ static void GenerateFrame() {
                 /* --- Background ---------------------------------------- */
                 int     bg_cidx = 0;
                 u8 bg_pal  = 0;
-                if ((ppuMask & ppu::mask::BG) && ((ppuMask & 0x02) || px >= 8)) {
+                if ((ppu::PPUMASK & ppu::mask::BG) && ((ppu::PPUMASK & 0x02) || px >= 8)) {
                     const int wx        = (static_cast<int>(xScroll) + px) % world_w;
                     const int tile_col  = wx / 8;
                     const int local_col = tile_col % 32;
@@ -199,7 +202,7 @@ static void GenerateFrame() {
                                     + ((local_row >> 1) & 1) * 4;
                     bg_pal = (attr >> shift) & 3;
 
-                    const int chr_base = ((ppuCtrl & ppu::ctrl::BG_ADDR) ? 0x1000 : 0)
+                    const int chr_base = ((ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 0x1000 : 0)
                                        + tile_id * 16 + fine_y;
                     const int bit = 7 - fine_x;
                     bg_cidx = ((patternTable[chr_base]     >> bit) & 1)
@@ -211,7 +214,7 @@ static void GenerateFrame() {
                 int     spr_hit    = 0;
                 int     spr_behind = 0;
                 u8 spr_nes    = 0;
-                if ((ppuMask & ppu::mask::SPRITE) && ((ppuMask & 0x04) || px >= 8)) {
+                if ((ppu::PPUMASK & ppu::mask::SPRITE) && ((ppu::PPUMASK & 0x04) || px >= 8)) {
                     for (int k = 0; k < n_line; k++) {
                         const auto [y, tile, attributes, x] = oamShadow[line_spr[k]];
                         const int sx  = (int)x;
@@ -237,17 +240,17 @@ static void GenerateFrame() {
                 else if (bg_opaque)                               final_nes = paletteRAM[bg_pal * 4 + bg_cidx];
                 else                                              final_nes = paletteRAM[0];
 
-                if (ppuMask & 0x01) final_nes &= 0x30;
+                if (ppu::PPUMASK & 0x01) final_nes &= 0x30;
 
                 u32 col = nes_rgb[final_nes & 0x3F];
 
-                if (ppuMask & 0xE0) {
+                if (ppu::PPUMASK & 0xE0) {
                     u32 r = (col >> 16) & 0xFF;
                     u32 g = (col >>  8) & 0xFF;
                     u32 b =  col        & 0xFF;
-                    if (ppuMask & 0x20) { g = g * 3 / 4; b = b * 3 / 4; }
-                    if (ppuMask & 0x40) { r = r * 3 / 4; b = b * 3 / 4; }
-                    if (ppuMask & 0x80) { r = r * 3 / 4; g = g * 3 / 4; }
+                    if (ppu::PPUMASK & 0x20) { g = g * 3 / 4; b = b * 3 / 4; }
+                    if (ppu::PPUMASK & 0x40) { r = r * 3 / 4; b = b * 3 / 4; }
+                    if (ppu::PPUMASK & 0x80) { r = r * 3 / 4; g = g * 3 / 4; }
                     col = 0xFF000000u | (r << 16) | (g << 8) | b;
                 }
 
@@ -341,7 +344,7 @@ void WaitForPresent() {
     }
     last_frame = SDL_GetTicksNS();
 
-    if (ppuMask & (ppu::mask::BG | ppu::mask::SPRITE)) {
+    if (ppu::PPUMASK & (ppu::mask::BG | ppu::mask::SPRITE)) {
         GenerateFrame();
         SDL_RenderPresent(renderer);
     } else {
@@ -359,8 +362,8 @@ void WaitForPresent() {
 namespace ppu {
 
 void EnableRendering(u8 ppuCtrl_, u8 ppuMask_) {
-    ppuMask = ppuMask_;
-    ppuCtrl = ppuCtrl_;
+    ppu::PPUMASK = ppuMask_;
+    ppu::PPUCTRL = ppuCtrl_;
 }
 
 void Flush(const u8 nt, const u8 at) {
@@ -382,11 +385,11 @@ void Flush(const u8 nt, const u8 at) {
 void WriteFromBufferToNameTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, u8 polarity
 ) {
-    ppuCtrl &= ~ppu::ctrl::POLARITY;
-    if (polarity) ppuCtrl |= ppu::ctrl::POLARITY;
+    ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
+    if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (ppuCtrl & ppu::ctrl::POLARITY ? 32 : 1)] = source[i];
+        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = source[i];
     }
 }
 
@@ -410,12 +413,12 @@ void WriteFromProviderToNameTable(
     const u16 x, const u16 y, u8 (*fn)(u16), const u8 amt,
     const u8 polarity
 ) {
-    ppuCtrl &= ~ppu::ctrl::POLARITY;
-    if (polarity) ppuCtrl |= ppu::ctrl::POLARITY;
+    ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
+    if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
 
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < amt; i++) {
-        VideoRAM[offset + i * (ppuCtrl & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
+        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
     }
 }
 
@@ -443,7 +446,7 @@ scroll_t CartesianToScroll(const u16 px, const u16 py) {
 }
 
 void SetColorPriority(const u8 priority) {
-    ppuMask = (ppuMask & ~(ppu::mask::RED | ppu::mask::GREEN | ppu::mask::BLUE)) |
+    ppu::PPUMASK = (ppu::PPUMASK & ~(ppu::mask::RED | ppu::mask::GREEN | ppu::mask::BLUE)) |
         (priority & (ppu::mask::RED | ppu::mask::GREEN | ppu::mask::BLUE)
     );
 }

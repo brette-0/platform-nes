@@ -191,7 +191,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
     )
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
-    file(GLOB DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.cpp)
+    file(GLOB_RECURSE DEMO_C_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.cpp)
 
     set(PASS1_ELF ${CMAKE_BINARY_DIR}/demo_pass1.elf)
     add_custom_command(
@@ -433,7 +433,7 @@ else()
         target_link_libraries(platform-nes PUBLIC usb-1.0)
     endif()
 
-    file(GLOB DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+    file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
 

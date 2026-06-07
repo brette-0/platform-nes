@@ -1,4 +1,4 @@
-﻿#include "../metatiles.hpp"
+﻿#include "metatiles.hpp"
 
 #include <intsh>
 using namespace br0::intsh;
@@ -272,3 +272,16 @@ const u8 MetatileAttributes[64] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
+
+const u8 MetatileCollisions[] {
+    /* none, */ 0x3c
+};
+
+EMetatileCollisions GetMetatileCollisions(const u8 metatile) {
+    u8 index = 0;
+    while (metatile > MetatileCollisions[index]) {
+        index++;
+    }
+
+    return static_cast<EMetatileCollisions>(index - 1);
+}

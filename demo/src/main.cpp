@@ -1,9 +1,10 @@
 ﻿#include <platform-nes>
-#include "../main.hpp"
+#include "main.hpp"
 #include "graphics.hpp"
-#include "../level/levels.hpp"
-#include "../metasprites.hpp"
-#include "../colors.hpp"
+#include "level/levels.hpp"
+#include "graphics/metasprites.hpp"
+#include "colors.hpp"
+#include "level/actor.hpp"
 
 using namespace demo;
 
@@ -12,6 +13,8 @@ u8 port2;
 
 oam::oam_t playerX;
 oam::oam_t playerY;
+
+Actor player;
 
 i8 lastDeltaScroll;
 
@@ -27,9 +30,11 @@ atomic u8 levelStreamCommand;
 u8 TileBuffer[56];
 
 static oam::oam_t Clear(u16 _);
+static void PlayerUpdate(Actor* self);
+static void PlayerReset(Actor* self);
 
 RESET {
-    if (!level::BuildLevelSize()) {
+    if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3
     }
     ppu::Flush(0x24, 0x00);
@@ -72,6 +77,18 @@ RESET {
 
     AudioInit();
     TrackPlay(0);
+
+    player.cursor.base     = TileData;
+    player.cursor.offset   = 0;
+    player.cursor.progress = 0;
+
+    player.size = {
+        16, 16
+    };
+
+    player.start = PlayerReset;
+
+    player.Start();
     oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
     ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
     // ReSharper disable once CppDFAEndlessLoop
@@ -215,4 +232,24 @@ void SpriteZeroHandler() {
 
         oam::PopulateFromProvider(OAMBuffer, 1, oam::x, AdjustSpriteX, 8);
     }
+}
+
+void PlayerUpdate(Actor* self) {
+
+}
+
+void PlayerReset(Actor* self) {
+    // Stream the cursor from the level start, then walk it to the actor's
+    // current metatile.  Column-major: index = col*levelHeight + row.
+    self->cursor.base     = TileData;
+    self->cursor.offset   = 0;
+    self->cursor.progress = 0;
+
+    const u16 y   = self->worldSpace.y.coarse;
+    const i16 col = static_cast<i16>(self->worldSpace.x.coarse >> 4);
+    const i16 row = (y & 0x8000)                                   ? 0                      // above the field -> top row
+                  : (static_cast<i16>(y >> 4) < level::levelHeight ? static_cast<i16>(y >> 4)
+                                                                   : level::levelHeight - 1); // below the floor -> bottom row
+
+    if (const i16 amt = col * level::levelHeight + row) self->cursor.Move(amt);
 }

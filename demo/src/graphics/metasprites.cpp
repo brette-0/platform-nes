@@ -1,4 +1,4 @@
-#include "../metasprites.hpp"
+#include "metasprites.hpp"
 #include <platform-nes/video.hpp>
 
 const oam::sprite_t msMario[0x10] = {

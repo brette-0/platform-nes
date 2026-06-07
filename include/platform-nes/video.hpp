@@ -577,31 +577,28 @@ void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
 void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
 
 #ifdef TARGET_NES
-/** @brief Write-through register+shadow for ::PPUCTRL (see ::wo_register). */
-extern wo_register<ppu::raw::PPUCTRL> SPPUCTRL;
-/** @brief Write-through register+shadow for ::PPUMASK (see ::wo_register). */
-extern wo_register<ppu::raw::PPUMASK> SPPUMASK;
+namespace ppu {
+/** @brief Write-through register+shadow for ::ppu::raw::PPUCTRL (see ::wo_register). */
+extern wo_register<ppu::raw::PPUCTRL>   PPUCTRL;
+/** @brief Write-through register+shadow for ::ppu::raw::PPUMASK (see ::wo_register). */
+extern wo_register<ppu::raw::PPUMASK>   PPUMASK;
+}   // namespace ppu
 
-/**
- * @brief Safe-VRAM-access block (NES).
- *
- * Disables rendering by zeroing ::PPUMASK, runs the body once, then
- * restores the shadowed mask. Use it to bracket VRAM writes that must
- * not happen mid-frame:
- *
- * @code
- *   VRAM {
- *     WriteSingleToVideoMemory(0, 0, 0x20);
- *   }
- * @endcode
- */
-#define VRAM                                \
-for (                                       \
-u8 i = (poke(ppu::raw::PPUMASK, 0), 0);\
-__builtin_expect(i < 1, 1);                 \
-poke(ppu::raw::PPUMASK, SPPUMASK), i++)
+namespace oam {
+/** @brief Write-through register+shadow for ::ppu::raw::OAMADDR (see ::wo_register). */
+extern wo_register<ppu::raw::OAMADDR>   OAMADDR;
+/** @brief Write-through register+shadow for ::ppu::raw::OAMDMA (see ::wo_register). */
+extern wo_register<ppu::raw::OAMDMA>    OAMDMA;
+}   // namespace oam
 
 #else
+namespace ppu {
+/** @brief Desktop equivalent of the ::ppu::PPUCTRL register — a plain shadow byte the renderer reads. */
+extern u8 PPUCTRL;
+/** @brief Desktop equivalent of the ::ppu::PPUMASK register — a plain shadow byte the renderer reads. */
+extern u8 PPUMASK;
+}   // namespace ppu
+
 /**
  * @brief Safe-VRAM-access block (desktop).
  *

@@ -1,8 +1,10 @@
-﻿#include "../levels.hpp"
-#include "../src/metatiles.hpp"
+﻿#include "levels.hpp"
+#include "../graphics/metatiles.hpp"
 
 #include <intsh>
 #include <platform-nes/technology.hpp>
+
+#include "types.hpp"
 using namespace br0::intsh;
 
 namespace demo::level {
@@ -10,20 +12,34 @@ namespace demo::level {
     u16 level_data_index;
     u16 nColumns;
 
+    const u8* TileData;
+    const u8* HunkLengths;
+
     u8 MetatileBuffer[14];
     u8 AttributeBuffer[8];
     u8 attr_column = 0xFF;
 
-    const u8 TileData[] = {
-    #include "../tiled/include/1-1_c"
+    const u8 TileData_1_1[] = {
+    #include "../../tiled/include/1-1_c"
 
     };
 
-    const u8 HunkLengths[] = {
-    #include "../tiled/include/1-1_s"
+    const u8 HunkLengths_1_1[] = {
+    #include "../../tiled/include/1-1_s"
 
         , 0x00
     };
+
+    const Level Levels[] = {
+        {TileData_1_1, HunkLengths_1_1}
+    };
+
+    bool LoadLevel(const u16 n) {
+        if (!BuildLevelSize()) return false;
+        TileData = Levels[n].TileData;
+        HunkLengths = Levels[n].HunkLengths;
+        return true;
+    }
 
     __attribute__((always_inline))
     u8 GetNextMetaTile() {
