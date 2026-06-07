@@ -1,6 +1,6 @@
 ﻿#include <platform-nes/video.hpp>
 #include <platform-nes/technology.hpp>
-#include "graphics.hpp"
+#include "../graphics.hpp"
 
 CHARACTER_ROM(crate, "../demo/chr/all");
 

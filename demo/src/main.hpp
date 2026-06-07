@@ -24,12 +24,23 @@ extern oam::oam_t playerY;
 
 extern i8 lastDeltaScroll;
 
-extern u16 levelSize;
 extern atomic u16 xWorldSpace;
 extern atomic u16 lastXWorldSpace;
 
 extern atomic u8 spriteZeroHandled;
 
 extern oam::sprite_t OAMBuffer[64];
+
+void SpriteZeroHandler();
+extern atomic u8 levelStreamCommand;;
+extern u8 TileBuffer[56];
+
+
+enum eLevelStreamCommands {
+    STREAM_LEVEL_LEFT  = 0x00,
+    STREAM_LEVEL_RIGHT = 0x01,
+    STREAM_LEVEL_DONE  = 0x02,
+    STREAM_LEVEL_SWAP  = 0x04,
+};
 
 #endif //PLATFORM_NES_MAIN_H
