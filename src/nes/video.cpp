@@ -135,9 +135,10 @@ void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
     poke(raw::PPUDATA, value);
 }
 
+template <typename Idx>
 __attribute__((hot))
 void WriteFromProviderToNameTable(
-    const u16 x, const u16 y, u8 (*fn)(u16), const u8 amt, const u8 polarity
+    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
     u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
@@ -148,10 +149,15 @@ void WriteFromProviderToNameTable(
     poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
     poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
 
-    for (auto i = 0; i < amt; i++) {
+    for (Idx i = 0; i < amt; ++i) {
         poke(raw::PPUDATA, fn(i));
     }
 }
+
+// Explicit instantiations for the provider index types in use. The body pokes
+// PPU registers, so it must stay in this backend rather than the header.
+template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
 
 __attribute__((hot))
 void WriteFromBufferToAttributeTable(

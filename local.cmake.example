@@ -5,6 +5,11 @@
 #
 # CMakeLists.txt includes local.cmake automatically if it exists.
 
+# Application / SDL3 window title. Compiled in as the PROJECT_NAME define and
+# used to name the SDL3 window. Optional -- CMakeLists.txt falls back to a
+# default if this is left unset.
+set(PROJECT_NAME "My Super Game")
+
 # Path to your llvm-mos-sdk install, used by the NES build.
 # Only required if you build the NES target.
 set(CMAKE_PREFIX_PATH "C:/llvm-mos" CACHE PATH "" FORCE)

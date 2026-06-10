@@ -409,18 +409,24 @@ void DeltaScroll(const i8 x, const i8 y) {
     yScroll_written = 1;
 }
 
+template <typename Idx>
 void WriteFromProviderToNameTable(
-    const u16 x, const u16 y, u8 (*fn)(u16), const u8 amt,
+    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt,
     const u8 polarity
 ) {
     ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
 
     const u16 offset = xy_to_nt_addr(x, y);
-    for (u8 i = 0; i < amt; i++) {
+    for (Idx i = 0; i < amt; ++i) {
         VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
     }
 }
+
+// Explicit instantiations for the provider index types in use. The body writes
+// host video RAM, so it must stay in this backend rather than the header.
+template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
 
 void WriteFromBufferToAttributeTable(
     const u16 x, const u16 y, const u8* source,
@@ -507,10 +513,6 @@ void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic 
     SetSpriteZeroHandler(px, py, fn);
     SetNextIRQHandler((irq_t){ .id = SPRITE_ZERO_IRQ_ID, .px = px, .py = py });
 }
-
-#ifndef PROJECT_NAME
-#define PROJECT_NAME "Super Brette Bros"
-#endif
 
 void init() {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {

@@ -16,9 +16,18 @@ if(TARGET_PLATFORM STREQUAL "nes" AND NOT CMAKE_TOOLCHAIN_FILE AND CMAKE_PREFIX_
     unset(_llvm_mos_sdk_root)
 endif()
 
-set(GAME_NAME "Super Brette Bros" CACHE STRING "Project name passed as PROJECT_NAME define")
+# Application / SDL3 window title, compiled in as the PROJECT_NAME define.
+# Set PROJECT_NAME in local.cmake to override per-developer; a default keeps
+# the window titled when local.cmake is absent or leaves it unset.
+#
+# NOTE: this must stay ABOVE the project() calls below -- project() sets its
+# own PROJECT_NAME variable, which would otherwise clobber this value before
+# the define is created.
+if(NOT PROJECT_NAME)
+    set(PROJECT_NAME "My Platform-NES Game")
+endif()
 add_compile_definitions(LANDSCAPE)
-add_compile_definitions(PROJECT_NAME="${GAME_NAME}")
+add_compile_definitions(PROJECT_NAME="${PROJECT_NAME}")
 
 # The library and demo are compiled as C++23. C++20 would cover the
 # designated initialisers used throughout, but the SDL3 backend relies
@@ -201,7 +210,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # standard must be set explicitly to match the demo target. -x c++
             # forces the C++ frontend for the source inputs.
             -std=gnu++23 -x c++
-            -Os -DTARGET_NES -DLANDSCAPE "-DPROJECT_NAME=${GAME_NAME}"
+            -Os -DTARGET_NES -DLANDSCAPE
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
@@ -266,6 +275,12 @@ ${FAMISTUDIO_CFG}")
     # ------------------------------------------------------------------
     # Final link
     # ------------------------------------------------------------------
+
+    # graphics.cpp embeds demo/chr/all via .incbin inside inline asm, which the
+    # compiler's depfile cannot see. Declare it explicitly so editing the art
+    # retriggers a recompile.
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
+            PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/all)
 
     add_executable(demo ${DEMO_C_SOURCES})
     set_target_properties(demo PROPERTIES SUFFIX ".nes")
@@ -434,6 +449,13 @@ else()
     endif()
 
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+    # graphics.cpp embeds demo/chr/all via .incbin inside inline asm, which the
+    # compiler's depfile cannot see. Declare it explicitly so editing the art
+    # retriggers a recompile.
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
+            PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/all)
+
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
 

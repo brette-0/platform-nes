@@ -458,13 +458,22 @@ namespace ppu {
      * from `fn(i)` instead of a preallocated buffer — useful for patterns and
      * procedurally generated rows.
      *
+     * The provider's iteration/index type @p Idx is generic, so a `u8`
+     * provider (with a single-byte loop counter) binds directly without
+     * forcing the callback signature up to `u16`. The body differs per target
+     * (PPU register pokes on NES, host video RAM on SDL3), so it is defined
+     * out-of-line in each backend with explicit instantiations for the index
+     * types actually used (`u8` and `u16`).
+     *
+     * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
      * @param x        Tile X position.
      * @param y        Tile Y position.
      * @param fn       Provider returning the byte to write for iteration `i`.
      * @param amt      Number of iterations.
      * @param polarity Non-zero for vertical writes, zero for horizontal.
      */
-    void WriteFromProviderToNameTable(u16 x, u16 y, u8 (*fn)(u16), u8 amt, u8 polarity);
+    template <typename Idx>
+    void WriteFromProviderToNameTable(u16 x, u16 y, u8 (*fn)(Idx), u8 amt, u8 polarity);
 
     /**
      * @brief Writes an array of bytes into the attribute table with a stride.

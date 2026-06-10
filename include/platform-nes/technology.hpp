@@ -353,14 +353,25 @@ ASM_LINKAGE const u8 name[sizeof(#chars)]
  * from @p offset. The caller must ensure every written index stays
  * inside the target buffer.
  *
+ * The count and stride types are generic: pass `u8`/`i8` where the run is
+ * short to keep the loop counter and comparison single-byte, or the wider
+ * `u16`/`i16` for larger spans. The index arithmetic is evaluated in `int`
+ * so a negative @p step is portable across the 16-bit (NES) and host builds.
+ *
+ * @tparam Count Unsigned integer type of @p sBuffer / the loop counter.
+ * @tparam Step  Signed integer type of @p step.
  * @param target  Destination buffer.
  * @param offset  Starting index inside @p target.
  * @param buffer  Source byte array.
  * @param sBuffer Number of bytes to copy from @p buffer.
  * @param step    Signed stride in @p target between consecutive writes.
  */
-void PopulateFromBuffer(u8* target, u16 offset,
-                        const u8* buffer, u16 sBuffer, i16 step);
+template <typename Count, typename Step>
+void PopulateFromBuffer(u8* target, const u16 offset,
+                        const u8* buffer, const Count sBuffer, const Step step) {
+    const auto base = target + offset;
+    for (Count i = 0; i < sBuffer; ++i) base[static_cast<int>(i) * step] = buffer[i];
+}
 
 /**
  * @brief General-purpose fill from a provider function with stride.
@@ -368,14 +379,28 @@ void PopulateFromBuffer(u8* target, u16 offset,
  * Writes `fn(i)` to `target[offset + i * step]` for `i` in `[0, amt)`.
  * @p step is signed; a negative value walks backward from @p offset.
  *
+ * The iteration/index type (@p Idx, deduced from @p fn), the count type
+ * (@p Count) and the stride type (@p Step) are all generic, so a caller can
+ * pass narrow integers (e.g. a `u8` provider with a `u8` count and unit
+ * stride) and the loop control / callback argument stay single-byte. The
+ * index multiply is evaluated in `int` for portable negative-stride support.
+ *
+ * @tparam Idx   Parameter type of @p fn (the value handed to the callback).
+ * @tparam Count Unsigned integer type of @p amt / the loop counter.
+ * @tparam Step  Signed integer type of @p step.
  * @param target Destination buffer.
  * @param offset Starting index inside @p target.
  * @param fn     Provider callback returning the byte to store at iteration `i`.
  * @param amt    Number of iterations to perform.
  * @param step   Signed stride in @p target between consecutive writes.
  */
-void PopulateFromProvider(u8* target, u16 offset,
-                          u8 (*fn)(u16), u16 amt, i16 step);
+template <typename Idx, typename Count, typename Step>
+void PopulateFromProvider(u8* target, const u16 offset,
+                          u8 (*fn)(Idx), const Count amt, const Step step) {
+    const auto base = target + offset;
+    for (Count i = 0; i < amt; ++i)
+        base[static_cast<int>(i) * step] = fn(static_cast<Idx>(i));
+}
 
 
 
