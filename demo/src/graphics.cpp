@@ -2,7 +2,8 @@
 #include <platform-nes/technology.hpp>
 #include "graphics.hpp"
 
-CHARACTER_ROM(crate, "../demo/chr/all");
+CHARACTER_ROM(crate, "../demo/chr/rest");
+CHARACTER_ROM(font,  "../demo/chr/font");
 
 CHARACTER_ROM_ALIGN(0x2000);                // gen full (SDL3 compat)
 
@@ -17,32 +18,32 @@ CHARMAP(generic,                            // default char map
     CM(7, 0x07)
     CM(8, 0x08)
     CM(9, 0x09)
-    CM(A, 0x0a)
-    CM(B, 0x0b)
-    CM(C, 0x0c)
-    CM(D, 0x0d)
-    CM(E, 0x0e)
-    CM(F, 0x0f)
-    CM(G, 0x10)
-    CM(H, 0x11)
-    CM(I, 0x12)
-    CM(J, 0x13)
-    CM(K, 0x14)
-    CM(L, 0x15)
-    CM(M, 0x16)
-    CM(N, 0x17)
-    CM(O, 0x18)
-    CM(P, 0x19)
-    CM(Q, 0x1a)
-    CM(R, 0x1b)
-    CM(S, 0x1c)
-    CM(T, 0x1d)
-    CM(U, 0x1e)
-    CM(W, 0x1f)
-    CM(V, 0x20)
-    CM(X, 0x21)
-    CM(Y, 0x22)
-    CM(Z, 0x23)
+    CM(A, 0xe1)
+    CM(B, 0xe2)
+    CM(C, 0xe3)
+    CM(D, 0xe4)
+    CM(E, 0xe5)
+    CM(F, 0xe6)
+    CM(G, 0xe7)
+    CM(H, 0xe8)
+    CM(I, 0xe9)
+    CM(J, 0xea)
+    CM(K, 0xeb)
+    CM(L, 0xec)
+    CM(M, 0xed)
+    CM(N, 0xee)
+    CM(O, 0xef)
+    CM(P, 0xf0)
+    CM(Q, 0xf1)
+    CM(R, 0xf2)
+    CM(S, 0xf3)
+    CM(T, 0xf4)
+    CM(U, 0xf5)
+    CM(W, 0xf6)
+    CM(V, 0xf7)
+    CM(X, 0xf8)
+    CM(Y, 0xf9)
+    CM(Z, 0xfa)
 );
 
 MAPPED_STRING(generic, msg_mary, MARY);

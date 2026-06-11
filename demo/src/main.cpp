@@ -23,6 +23,12 @@ u8    playerJumpForce;
 i8 lastDeltaScroll;
 
 u16 levelSize;
+
+// World-pixel boundary of the most recently streamed column (always a multiple
+// of 16).  Doubles as the scroll hysteresis marker: a new column is only built
+// once the camera has travelled a full 16px column past it, so jitter or a
+// direction reversal near a boundary can't rapidly toggle BuildNext/BuildPrev
+// and drift the edge cursors.  Read by the NMI to place the nametable write.
 atomic u16 lastXWorldSpace;
 
 // Right edge's absolute metatile offset from the level start. Tracked so the
@@ -56,7 +62,7 @@ RESET {
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3
     }
-    ppu::Flush(0xff, 0x00);
+    ppu::Flush(0xdf, 0x00);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
@@ -215,7 +221,7 @@ void PlayerUpdate(Actor* self) {
 
     if (self->gravity < 127) self->gravity++;
     const auto inputForce = vec2 {
-        static_cast<i8>(!!(port1 & LEFT) * -8 + !!(port1 & RIGHT) * 8),
+        static_cast<i8>(!!(port1 & LEFT) * -128 + !!(port1 & RIGHT) * 127),
         static_cast<i8>(self->gravity - playerJumpForce)
     };
 
@@ -280,71 +286,88 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     if (PlayerBlocked(self, col, row, PlayerWorldX(self) + dx, self->screen.y))
         return;
 
-    const bool couldScroll = self->screen.x == playerScrollPos
-        && ((dx > 0 && cameraX + dx <= (level::nColumns - viewport_mx()) << 4)
-            | (dx < 0 && cameraX > 0));
+    // Pin the player to the viewport midpoint by absorbing off-centre motion into
+    // camera scroll; the player only leaves the midpoint when the camera is
+    // clamped at a level edge.  Exact-centre equality used to gate scrolling, but
+    // a large dx steps over the midpoint pixel and strands the player at the
+    // screen edge -- so split this frame's motion: walk up to the midpoint and
+    // scroll the remainder (pulling the player back when it overshoots).  sx is
+    // computed in i16 to survive the off-screen over/underflow before clamping.
+    const u16 maxCam = (level::nColumns - viewport_mx()) << 4;
+    i16       sx     = static_cast<i16>(self->screen.x) + dx;
+    const i16 excess = sx - static_cast<i16>(playerScrollPos);   // signed: +right, -left
 
-    if (couldScroll) {
-        if (dx > 0) cameraX = cameraX + 1;
-        else        cameraX = cameraX - 1;
+    i16 scroll = 0;
+    if (excess > 0) {                                      // right of centre -> scroll right
+        const u16 room = cameraX < maxCam ? maxCam - cameraX : 0;
+        scroll = static_cast<u16>(excess) <= room ? excess : static_cast<i16>(room);
+    } else if (excess < 0) {                               // left of centre -> scroll left
+        const u16 want = static_cast<u16>(-excess);
+        scroll = want <= cameraX ? excess : -static_cast<i16>(cameraX);
+    }
 
-        if (!(cameraX & 0x0f)) {
-            if (dx > 0) {
-                if (cameraX > lastXWorldSpace && cameraX != (level::nColumns - viewport_mx()) << 4) {
-                    levelStreamCommand = STREAM_LEVEL_RIGHT;
-                    // SWAP only suppresses the NMI attribute write on a reversal;
-                    // edgeR is already parked at the right edge, so no re-walk.
-                    if (lastDeltaScroll < 0)
-                        levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
+    if (scroll) {
+        cameraX = static_cast<u16>(static_cast<i16>(cameraX) + scroll);
+        sx     -= scroll;                                  // re-centre by the absorbed amount
 
-                    level::BuildNextColumn(TileBuffer);
-                    // Keep the left edge parked kEdgeGap metatiles behind the right
-                    // edge.  Past the startup gap both advance one full column per
-                    // right-stream; before then the clamp holds edgeL at the level
-                    // start and it closes the gap by 13 then 14 over two streams.
-                    const u16 kEdgeGap   = (viewport_mx() + 2) * level::levelHeight + 1;
-                    const u16 oldTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
-                    edgeRAbs += level::levelHeight;
-                    const u16 newTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
-                    level::edgeL.Move(static_cast<i16>(newTarget - oldTarget));
-                    lastDeltaScroll = static_cast<i8>(dx);
-                    lastXWorldSpace = cameraX;
-                    levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
-                }
-            } else if (cameraX == lastXWorldSpace - 16 && cameraX != 0) {
-                // No column exists left of column 0.  Firing here would walk
-                // edgeL/edgeR backward past offset 0 (Cursor::Move has no floor),
-                // wrapping offset to 0xFFFF and fetching adjacent ROM as bogus
-                // metatile ids -- real-looking tiles streamed to the wrong place
-                // (the left-edge "displacement"/"split ground"), and the corrupt
-                // cursor then poisons every later stream.  col 0 itself is still
-                // revealed normally at cameraX==16, so nothing is lost.
-                levelStreamCommand = STREAM_LEVEL_LEFT;
-                if (lastDeltaScroll > 0)
+        // Stream against lastXWorldSpace (the last built column's boundary), not
+        // against an exact-boundary landing: a build fires only once the camera
+        // has travelled a full 16px column *past* the last build.  That dead zone
+        // is the hysteresis -- without it, jitter or a reversal just past a
+        // boundary would toggle BuildNext/BuildPrev every frame and the
+        // asymmetric edge bookkeeping below would drift the level vs the camera.
+        // |scroll| <= 16 plus the dead zone => at most one boundary per frame, so
+        // a single (non-looping) build per frame is sufficient.
+        if (scroll > 0) {
+            if (cameraX >= lastXWorldSpace + 16 && lastXWorldSpace + 16 != maxCam) {
+                levelStreamCommand = STREAM_LEVEL_RIGHT;
+                // SWAP only suppresses the NMI attribute write on a reversal;
+                // edgeR is already parked at the right edge, so no re-walk.
+                if (lastDeltaScroll < 0)
                     levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
-                lastDeltaScroll = static_cast<i8>(dx);
-                lastXWorldSpace = cameraX;
-                level::BuildPrevColumn(TileBuffer);   // walks edgeL back one column
-                // The right edge retreated one column too; keep edgeR parked there.
-                level::edgeR.Move(-level::levelHeight);
-                edgeRAbs -= level::levelHeight;
+                level::BuildNextColumn(TileBuffer);
+                // Keep the left edge parked kEdgeGap metatiles behind the right
+                // edge.  Past the startup gap both advance one full column per
+                // right-stream; before then the clamp holds edgeL at the level
+                // start and it closes the gap by 13 then 14 over two streams.
+                const u16 kEdgeGap   = (viewport_mx() + 2) * level::levelHeight + 1;
+                const u16 oldTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
+                edgeRAbs += level::levelHeight;
+                const u16 newTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
+                level::edgeL.Move(static_cast<i16>(newTarget - oldTarget));
+                lastDeltaScroll = static_cast<i8>(scroll);
+                lastXWorldSpace += 16;
                 levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
             }
-        }
-    } else {
-        const oam::oam_t lastPlayerX = self->screen.x;
-        self->screen.x += dx;
-        if (dx > 0) {
-            if (self->screen.x > playerMaxXPos) {
-                self->screen.x = playerMaxXPos;
-            }
-        } else {
-            if (self->screen.x > lastPlayerX) {
-                self->screen.x = 0;
-            }
-        }
+        } else if (cameraX <= lastXWorldSpace - 16 && lastXWorldSpace != 16) {
+            // No column exists left of column 0.  Firing at boundary 0 would walk
+            // edgeL/edgeR backward past offset 0 (Cursor::Move has no floor),
+            // wrapping offset to 0xFFFF and fetching adjacent ROM as bogus
+            // metatile ids -- real-looking tiles streamed to the wrong place
+            // (the left-edge "displacement"/"split ground"), and the corrupt
+            // cursor then poisons every later stream.  col 0 itself is still
+            // revealed normally at cameraX==16, so nothing is lost.
+            levelStreamCommand = STREAM_LEVEL_LEFT;
+            if (lastDeltaScroll > 0)
+                levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
+            lastDeltaScroll = static_cast<i8>(scroll);
+            level::BuildPrevColumn(TileBuffer);   // walks edgeL back one column
+            // The right edge retreated one column too; keep edgeR parked there.
+            level::edgeR.Move(-level::levelHeight);
+            edgeRAbs -= level::levelHeight;
+            lastXWorldSpace -= 16;
+            levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
+        }
+    }
+
+    // Clamp the residual on-screen position (the part of dx not absorbed into
+    // scroll) and refresh the sprite only when it actually moved on screen.
+    if (sx < 0) sx = 0;
+    else if (sx > static_cast<i16>(playerMaxXPos)) sx = static_cast<i16>(playerMaxXPos);
+    if (static_cast<oam::oam_t>(sx) != self->screen.x) {
+        self->screen.x = static_cast<oam::oam_t>(sx);
         oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, 8);
     }
 

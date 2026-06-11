@@ -380,7 +380,7 @@ void PopulateFromBuffer(u8* target, const u16 offset,
  * @p step is signed; a negative value walks backward from @p offset.
  *
  * The iteration/index type (@p Idx, deduced from @p fn), the count type
- * (@p Count) and the stride type (@p Step) are all generic, so a caller can
+ * (@p Count) and the stride type (@p Step) are rest generic, so a caller can
  * pass narrow integers (e.g. a `u8` provider with a `u8` count and unit
  * stride) and the loop control / callback argument stay single-byte. The
  * index multiply is evaluated in `int` for portable negative-stride support.

@@ -276,11 +276,12 @@ ${FAMISTUDIO_CFG}")
     # Final link
     # ------------------------------------------------------------------
 
-    # graphics.cpp embeds demo/chr/all via .incbin inside inline asm, which the
-    # compiler's depfile cannot see. Declare it explicitly so editing the art
-    # retriggers a recompile.
+    # graphics.cpp embeds the demo/chr art files via .incbin inside inline asm,
+    # which the compiler's depfile cannot see. Declare them explicitly so editing
+    # the art retriggers a recompile.
+    file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
     set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
-            PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/all)
+            PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
 
     add_executable(demo ${DEMO_C_SOURCES})
     set_target_properties(demo PROPERTIES SUFFIX ".nes")
@@ -450,11 +451,12 @@ else()
 
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
 
-    # graphics.cpp embeds demo/chr/all via .incbin inside inline asm, which the
-    # compiler's depfile cannot see. Declare it explicitly so editing the art
-    # retriggers a recompile.
+    # graphics.cpp embeds the demo/chr art files via .incbin inside inline asm,
+    # which the compiler's depfile cannot see. Declare them explicitly so editing
+    # the art retriggers a recompile.
+    file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
     set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
-            PROPERTIES OBJECT_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/all)
+            PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
 
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)

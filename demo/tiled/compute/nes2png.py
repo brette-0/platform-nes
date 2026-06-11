@@ -399,7 +399,7 @@ def main():
                 sheet.save(outdir / f"metatiles_pal{pg}.png")
                 total += 1
 
-            # Combined sheet: all 4 palette groups
+            # Combined sheet: rest 4 palette groups
             max_cols = 16
             all_entries = []
             for pg in range(4):

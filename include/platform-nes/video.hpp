@@ -218,7 +218,7 @@ namespace oam {
      * callback, each value is read from @p src, which is laid out as
      * ::sprite_t records (e.g. a metasprite table). The field selected by the
      * @p field tag is copied from `src[i]` to `buf[slot + i]`; the sprite
-     * stride, the field offset and its width are all handled internally.
+     * stride, the field offset and its width are rest handled internally.
      *
      * @param buf    OAM buffer to write into.
      * @param slot   First sprite index to write.
