@@ -1,5 +1,4 @@
-﻿#ifndef PLATFORM_NES_MAIN_H
-#define PLATFORM_NES_MAIN_H
+﻿#pragma once
 #include <platform-nes/platform-nes.hpp>
 
 #include "level/actor.hpp"
@@ -38,5 +37,3 @@ enum eLevelStreamCommands {
     STREAM_LEVEL_DONE  = 0x02,
     STREAM_LEVEL_SWAP  = 0x04,
 };
-
-#endif //PLATFORM_NES_MAIN_H

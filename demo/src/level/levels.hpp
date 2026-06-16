@@ -1,5 +1,4 @@
-﻿#ifndef LEVELS_H
-#define LEVELS_H
+﻿#pragma once
 
 #include "types.hpp"
 #include "cursor.hpp"
@@ -36,4 +35,3 @@ namespace demo::level {
     MINSIZE bool BuildLevelSize();
     bool LoadLevel(u16 n);
 }
-#endif

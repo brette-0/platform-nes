@@ -1,8 +1,15 @@
 ﻿#include "metatiles.hpp"
+#include "graphics.hpp"        // CHR tile ids + (folded once) the CHR ROM image
 
 #include <intsh>
 #include <array>
 using namespace br0::intsh;
+
+// Expand a single base CHR-tile id into the four consecutive corner ids that
+// make up a 2x2 metatile: base (UL), base+1 (UR), base+2 (BL), base+3 (BR).
+// Drop it into the four tile slots of a row and append the AT byte yourself,
+// e.g.  MT_SPLIT(0x60), 0x00,   // -> 0x60, 0x61, 0x62, 0x63, 0x00
+#define MT_SPLIT(base) (base), (base) + 1, (base) + 2, (base) + 3
 
 // Single editable source of truth: one row per metatile id =
 // { UL, UR, BL, BR, AT } -- four CHR-tile ids plus the 2-bit palette index.
@@ -10,7 +17,7 @@ using namespace br0::intsh;
 // constexpr-only and is NOT emitted to ROM -- only the five derived planes are.
 namespace {
 constexpr u8 MetatilesSrc[256 * 5] = {
-    0xde, 0xde, 0xde, 0xde, 0x00,          // $00 (air)
+    chrAir_tile, chrAir_tile, chrAir_tile, chrAir_tile, 0x00,          // $00 (air)
     0x00, 0x00, 0x00, 0x00, 0x00,          // $01
     0x00, 0x00, 0x00, 0x00, 0x00,          // $02
     0xfe, 0xfe, 0xfe, 0x35, 0x00,          // 03  (bush left)
@@ -70,7 +77,7 @@ constexpr u8 MetatilesSrc[256 * 5] = {
     0x00, 0x00, 0x00, 0x00, 0x00,          // $39
     0x00, 0x00, 0x00, 0x00, 0x00,          // $3a
     0x00, 0x00, 0x00, 0x00, 0x00,          // $3b
-    0x02, 0x12, 0x03, 0x13, 0x01,          // $3c (terrain)
+    MT_SPLIT(chrPipe_tile), 0x01,          // $3c (terrain)
     0x00, 0x00, 0x00, 0x00, 0x00,          // $3d
     0x00, 0x00, 0x00, 0x00, 0x00,          // $3e
     0x00, 0x00, 0x00, 0x00, 0x00,          // $3f
@@ -108,7 +115,7 @@ constexpr u8 MetatilesSrc[256 * 5] = {
     0x00, 0x00, 0x00, 0x00, 0x00,          // $5f
     0x00, 0x00, 0x00, 0x00, 0x00,          // $60
     0x00, 0x00, 0x00, 0x00, 0x00,          // $61
-    0x20, 0x30, 0x21, 0x31, 0x00,          // $62 (coin)
+    MT_SPLIT(chrCoin_tile), 0x00,          // $62 (coin)
     0x00, 0x00, 0x00, 0x00, 0x00,          // $63
     0x00, 0x00, 0x00, 0x00, 0x00,          // $64
     0x00, 0x00, 0x00, 0x00, 0x00,          // $65

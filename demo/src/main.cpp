@@ -1,9 +1,10 @@
 ﻿#include <platform-nes>
 #include "main.hpp"
-#include "graphics.hpp"
+#include "graphics/colours.hpp"
+#include "graphics/strings.hpp"
+#include "graphics/graphics.hpp"
 #include "level/levels.hpp"
 #include "graphics/metasprites.hpp"
-#include "colors.hpp"
 #include "level/actor.hpp"
 #include "level/collision.hpp"
 
@@ -17,8 +18,27 @@ u8 lastPort2;
 
 Actor player;
 
-constexpr u8 playerInitialJumpForce = 40;
-u8    playerJumpForce;
+// Horizontal velocity caps (subpixel/frame; 8 subpx = 1px).
+constexpr i8  kMaxWalk     = 12;   // 1.5 px/frame
+constexpr i8  kMaxRun      = 20;   // 2.5 px/frame
+// Per-frame acceleration, accumulated in 1/256-subpixel so the ramp is gradual.
+constexpr i16 kWalkAccel   = 76;
+constexpr i16 kRunAccel    = 112;
+constexpr i16 kFriction    = 76;   // coast-down when grounded with no input
+constexpr i16 kSkid        = 152;  // turnaround deceleration when grounded
+constexpr i16 kAirAccel    = 76;   // limited control while airborne, no friction
+constexpr u8  kRunRetain   = 10;   // frames the run cap persists after releasing B
+
+// Vertical velocity (subpixel/frame) and gravity (1/256-subpixel/frame).
+constexpr i8  kJumpInit    = 32;   // launch speed off the ground
+constexpr i8  kRunJumpInit = 36;   // taller launch at running speed
+constexpr i16 kRiseGravity = 256;  // ascending with A held -> floaty
+constexpr i16 kFallGravity = 896;  // descending or A released -> heavier
+constexpr i8  kMaxFall     = 36;   // 4.5 px/frame terminal
+
+i16 playerXForce;   // horizontal acceleration remainder (1/256-subpixel/frame)
+i16 playerYForce;   // gravity remainder (1/256-subpixel/frame)
+u8  playerRunTimer;
 
 i8 lastDeltaScroll;
 
@@ -67,7 +87,7 @@ RESET {
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
     // fill in with mario metatiles
-    oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile, msMary, 8);
+    oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary, 8);
     oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, 8);
     oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, 8);
 
@@ -75,9 +95,9 @@ RESET {
     ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
     ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
 
-    OAMBuffer[0] = ( oam::sprite_t){
+    OAMBuffer[0] = (oam::sprite_t) {
         .y = 8,
-        .tile = 0xff,
+        .tile = chrSprite0_tile,
         .attributes = 0,
         .x = 0
     };
@@ -184,6 +204,8 @@ static u16 PlayerWorldX(const Actor* self) {
     return static_cast<u16>(self->worldSpace.x >> 3);
 }
 
+static i8 AbsI8(const i8 v) { return v < 0 ? static_cast<i8>(-v) : v; }
+
 // Map a pixel-Y (possibly off-field) to a valid metatile row: above-screen
 // underflow -> top row; below the floor -> bottom row.
 static i16 ClampRow(const u16 y) {
@@ -213,19 +235,66 @@ void SpriteZeroHandler() {
 }
 
 void PlayerUpdate(Actor* self) {
-    if (port1 & ~lastPort1 & A) {   // strobe for A
-        playerJumpForce = playerInitialJumpForce;
+    // Grounded if a solid sits one pixel under the AABB's feet.
+    const i16 col = static_cast<i16>(PlayerWorldX(self) >> 4);
+    const i16 row = ClampRow(self->screen.y);
+    bool grounded = PlayerBlocked(self, col, row, PlayerWorldX(self),
+                                  static_cast<u16>(self->screen.y + 1));
+
+    const bool left  = port1 & LEFT;
+    const bool right = port1 & RIGHT;
+    const i8   dir   = (right && !left) ? 1 : ((left && !right) ? -1 : 0);
+
+    // -- horizontal: build speed toward a cap, shed it via friction/skid --
+    const i8 vx0 = self->moveForce.x;
+    i8       vx  = vx0;
+
+    if ((port1 & B) && grounded && dir != 0 && (vx == 0 || (vx > 0) == (dir > 0)))
+        playerRunTimer = kRunRetain;
+    else if (playerRunTimer)
+        playerRunTimer--;
+    const i8 maxSpeed = playerRunTimer ? kMaxRun : kMaxWalk;
+
+    if (dir != 0) {
+        const bool sameDir = vx == 0 || (vx > 0) == (dir > 0);
+        if (!sameDir)
+            playerXForce += dir * (grounded ? kSkid : kAirAccel);
+        else if (AbsI8(vx) < maxSpeed)
+            playerXForce += dir * (grounded ? (playerRunTimer ? kRunAccel : kWalkAccel) : kAirAccel);
+        else if (AbsI8(vx) > maxSpeed && grounded)
+            playerXForce -= dir * kFriction;
+    } else if (grounded && vx != 0) {
+        playerXForce += vx > 0 ? -kFriction : kFriction;
     }
 
-    if (playerJumpForce > 0) playerJumpForce--;
+    while (playerXForce >= 256)  { playerXForce -= 256; if (vx < kMaxRun)  vx++; }
+    while (playerXForce <= -256) { playerXForce += 256; if (vx > -kMaxRun) vx--; }
 
-    if (self->gravity < 127) self->gravity++;
-    const auto inputForce = vec2 {
-        static_cast<i8>(!!(port1 & LEFT) * -128 + !!(port1 & RIGHT) * 127),
-        static_cast<i8>(self->gravity - playerJumpForce)
-    };
+    // Friction must settle to rest, not creep into the opposite direction.
+    if (dir == 0 && grounded && vx0 != 0 && (vx0 > 0) != (vx > 0)) {
+        vx = 0;
+        playerXForce = 0;
+    }
+    self->moveForce.x = vx;
 
-    ProcessPlayerMovement(self, self->moveForce + inputForce);
+    // -- vertical: launch on A, then variable gravity until something stops us --
+    if (grounded && (port1 & ~lastPort1 & A)) {
+        self->moveForce.y = static_cast<i8>(-(AbsI8(vx) >= kMaxWalk ? kRunJumpInit : kJumpInit));
+        playerYForce = 0;
+        grounded = false;
+    }
+    if (grounded) {
+        self->moveForce.y = 0;
+        playerYForce = 0;
+    }
+
+    const bool rising = self->moveForce.y < 0;
+    playerYForce += (rising && (port1 & A)) ? kRiseGravity : kFallGravity;
+    i8 vy = self->moveForce.y;
+    while (playerYForce >= 256) { playerYForce -= 256; if (vy < kMaxFall) vy++; }
+    self->moveForce.y = vy;
+
+    ProcessPlayerMovement(self, self->moveForce);
 }
 
 void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
@@ -260,7 +329,7 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, 8);
             } else {
                 self->worldSpace.y &= ~0x7;       // bonk: rest on the pixel, drop sub-px carry
-                if (dy > 0) self->gravity = 0;    // landed on ground: clear accumulated fall
+                self->moveForce.y = 0;            // land or head-bonk both kill vertical speed
             }
         } else {
             self->worldSpace.y = static_cast<u16>(rawY) & 0x7ff;       // sub-pixel only, no pixel move
@@ -280,11 +349,13 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     // Left world edge: nothing exists left of column 0, so it's a hard wall.
     // (Also keeps the next line's world X from underflowing u16 -> a wild
     // collision probe that walks thousands of runs off the level data.)
-    if (dx < 0 && PlayerWorldX(self) == 0) return;
+    if (dx < 0 && PlayerWorldX(self) == 0) { self->moveForce.x = 0; return; }
     // Horizontal: bonk (move nothing -- neither scroll nor walk) if the next
-    // pixel is solid.
-    if (PlayerBlocked(self, col, row, PlayerWorldX(self) + dx, self->screen.y))
+    // pixel is solid.  Kill the speed so it must rebuild after the wall clears.
+    if (PlayerBlocked(self, col, row, PlayerWorldX(self) + dx, self->screen.y)) {
+        self->moveForce.x = 0;
         return;
+    }
 
     // Pin the player to the viewport midpoint by absorbing off-centre motion into
     // camera scroll; the player only leaves the midpoint when the camera is
@@ -388,6 +459,10 @@ void PlayerReset(Actor* self) {
     self->cursor.offset   = 0;
     self->cursor.progress = 0;
     self->gravity         = 0;
+    self->moveForce       = vec2<i8>{0, 0};
+    playerXForce          = 0;
+    playerYForce          = 0;
+    playerRunTimer        = 0;
 
     const i16 col = static_cast<i16>(PlayerWorldX(self) >> 4);
     const i16 row = ClampRow(self->screen.y);

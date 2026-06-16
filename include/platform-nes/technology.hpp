@@ -10,9 +10,9 @@
  * - ::atomic — maps to `volatile` on NES and `_Atomic` elsewhere.
  * - ::MINSIZE — Clang-only size-optimisation hint (silently dropped
  *   under GCC).
- * - ::CHARMAP, ::MAPPED_STRING, ::NULL_TERMINATED_MAPPED_STRING — define
- *   per-project character maps and emit translated strings into
- *   `.rodata` from inline assembly.
+ * - ::CHARMAP, ::STRING, ::STRING_NT — define per-project character maps and
+ *   emit compile-time-translated strings as header-only `inline constexpr`
+ *   `std::array`s in `.rodata`.
  * - ::PopulateFromBuffer / ::PopulateFromProvider — generic strided
  *   byte copies used by the video and audio subsystems.
  */
@@ -22,6 +22,8 @@
 #include <intsh>
 using namespace br0::intsh;
 #include <type_traits>
+#include <array>
+#include <cstddef>
 
 #ifdef __cplusplus
 /**
@@ -225,125 +227,126 @@ shadow_scope(Ts&...) -> shadow_scope<Ts...>;
 #endif
 
 /**
- * @brief Internal building block used inside ::CHARMAP.
- *
- * Expands to an assembler `.ifc` arm matching the character token
- * @p ch, emitting @p val as a single byte and terminating the macro.
- * Not intended to be used directly.
- *
- * @param ch  Bareword character token.
- * @param val Byte value to emit when @p ch is matched.
+ * @brief Compile-time support for ::CHARMAP / ::STRING.
  */
-#define CM(ch, val) \
-"  .ifc \\c, " #ch "\n" \
-"    .byte " #val "\n" \
-"    .exitm\n" \
-"  .endif\n"
+namespace nes_str {
+    /**
+     * @brief Fallback for a character with no ::CM entry.
+     *
+     * Declared but never defined, and not @c constexpr: naming it during the
+     * constant evaluation of a ::STRING makes that evaluation non-constant,
+     * so an unmapped character is a compile error pointing at the offending string.
+     * Because a charmap is only ever evaluated at compile time, this is never
+     * ODR-used at run time, so the missing definition never reaches the linker.
+     */
+    [[noreturn]] u8 unmapped(char c);
 
-#if defined(__NES__) || defined(TARGET_NES)
-  #define _RODATA_SECTION ".pushsection .rodata\n"
-  #define _SYM(name) #name
-#elif defined(__APPLE__)
-  #define _RODATA_SECTION ".pushsection __TEXT,__const\n"
-  #define _SYM(name) "_" #name
-#elif defined(_WIN32)
-  #define _RODATA_SECTION ".pushsection .rdata,\"dr\"\n"
-  #define _SYM(name) #name
-#else
-  #define _RODATA_SECTION ".pushsection .rodata\n"
-  #define _SYM(name) #name
-#endif
+    /** @brief Map @p s[0 .. N-2] through @p Map into bytes (drops the literal NUL). */
+    template <u8 (*Map)(char), std::size_t N>
+    constexpr std::array<u8, N - 1> encode(const char (&s)[N]) {
+        std::array<u8, N - 1> out{};
+        for (std::size_t i = 0; i + 1 < N; ++i) out[i] = Map(s[i]);
+        return out;
+    }
+
+    /** @brief As ::encode, but keeps a trailing 0x00 terminator. */
+    template <u8 (*Map)(char), std::size_t N>
+    constexpr std::array<u8, N> encode_nt(const char (&s)[N]) {
+        std::array<u8, N> out{};
+        for (std::size_t i = 0; i + 1 < N; ++i) out[i] = Map(s[i]);
+        return out;
+    }
+
+    /** @brief ::SIZED_OBJ plumbing: a pointer+count that works for both a raw C
+     *         array and a @c std::array (so existing call sites are unchanged). */
+    template <class T, std::size_t N> constexpr const T*      data(const T (&a)[N]) { return a; }
+    template <class T, std::size_t N> constexpr std::size_t   size(const T (&)[N])  { return N; }
+    template <class A> constexpr auto data(const A& a) -> decltype(a.data()) { return a.data(); }
+    template <class A> constexpr auto size(const A& a) -> decltype(a.size()) { return a.size(); }
+}
 
 /**
- * @brief Defines a named character map used by ::MAPPED_STRING.
+ * @brief Internal building block used inside ::CHARMAP.
  *
- * @p __VA_ARGS__ is a sequence of ::CM entries; the macro wraps them
- * in an assembler macro `emit_char_<mapname>` that maps each source
- * character to a raw byte. Any character not present triggers an
- * assembler error.
+ * Expands to one arm of the charmap's @c constexpr lookup: when the input
+ * character equals token @p ch, return byte @p val. ::CM entries are juxtaposed
+ * (no commas) inside ::CHARMAP, exactly as before -- each is now an @c if
+ * statement instead of a string-literal fragment.
  *
- * @note ::CM uses bareword tokens (e.g. `CM(M, 0x16)`), not character
- *       literals. This is deliberate: `'\c'` does not survive GAS's
- *       escape processing inside `.irpc`, so the value is passed
- *       unquoted and matched with `.ifc` against a bare token.
+ * @param ch  Bareword character token (e.g. `M`); taken as `(#ch)[0]`.
+ * @param val Byte value to return when @p ch is matched.
+ */
+#define CM(ch, val) if (_c == (#ch)[0]) return (u8)(val);
+
+/**
+ * @brief Defines a named character map used by ::STRING.
+ *
+ * Expands to a @c constexpr function `charmap_<mapname>(char)` whose body is the
+ * juxtaposed ::CM arms. A character with no ::CM entry falls through to
+ * ::nes_str::unmapped (see there) -- a compile error at the offending string.
+ *
+ * Being an ordinary @c constexpr (hence @c inline) function, a charmap can live
+ * in a header and be included by any number of translation units: no assembler
+ * macro, no per-TU re-emission, and no LTO "macro already defined" collision.
+ *
+ * @note ::CM still uses bareword tokens (`CM(M, 0xed)`); the token is stringized
+ *       and its first character taken, so the authoring syntax is unchanged from
+ *       the original assembler-based charmap.
  *
  * @param mapname Identifier for the character map.
  */
 #define CHARMAP(mapname, ...)                   \
-__asm__(                                        \
-".macro emit_char_" #mapname " c\n"             \
-__VA_ARGS__                                     \
-"  .error \"emit_char_" #mapname ": char not in charmap\"\n" \
-".endm\n"                                       \
-)
+constexpr u8 charmap_##mapname(char _c) {       \
+    __VA_ARGS__                                 \
+    return ::nes_str::unmapped(_c);             \
+}
 
 /**
- * @brief Emits a null-terminated string translated through a ::CHARMAP.
+ * @brief Defines a string translated through a ::CHARMAP (no terminator).
  *
- * The symbol is placed in the platform-appropriate read-only section
- * and made globally visible. The final byte is `0x00`.
+ * One header-only definition -- no separate `extern` declaration and no
+ * definition TU to keep in sync. Each character of @p chars is mapped through
+ * `charmap_<mapname>` at compile time, yielding an @c inline @c constexpr
+ * `std::array<u8, N>` of the *unterminated* source length. Being an inline
+ * variable, it can be defined in a header and included by any number of TUs;
+ * the linker folds the copies to a single object in rodata. `sizeof(name)` (and
+ * ::SIZED_OBJ) therefore yield the character count, and because it is @c
+ * constexpr the value is usable in constant expressions in every includer.
+ *
+ * An unmapped character is a compile error (see ::nes_str::unmapped).
+ *
+ * @note Requires `charmap_<mapname>` to be in scope at the point of use (include
+ *       the header that declares the ::CHARMAP).
  *
  * @param mapname Name of a previously declared ::CHARMAP.
- * @param name    Global symbol to define.
+ * @param name    Symbol to define.
  * @param chars   Source characters to translate (bareword, not a string).
  */
-#define NULL_TERMINATED_MAPPED_STRING(mapname, name, chars)     \
-__asm__(                                        \
-_RODATA_SECTION                                 \
-".globl " _SYM(name) "\n"                       \
-_SYM(name) ":\n"                                \
-".irpc c, " #chars "\n"                         \
-"  emit_char_" #mapname " \\c\n"                \
-".endr\n"                                       \
-".byte 0x00\n"                                  \
-".popsection\n"                                 \
-);                                              \
+#define STRING(mapname, name, chars)            \
+inline constexpr auto name = ::nes_str::encode<charmap_##mapname>(#chars)
 
 /**
- * @brief Emits a string translated through a ::CHARMAP, with a C-visible extern.
+ * @brief Defines a string translated through a ::CHARMAP, with a 0x00 terminator.
  *
- * Same semantics as ::NULL_TERMINATED_MAPPED_STRING, but also declares
- * `extern const u8 name[N]` where `N` is the unterminated source
- * length, so C code can index into the result with `sizeof(name)`.
+ * Identical to ::STRING but keeps a trailing 0x00, so the array is
+ * `sizeof(#chars)` bytes (the source length including the terminator).
  *
  * @param mapname Name of a previously declared ::CHARMAP.
- * @param name    Global symbol to define.
- * @param chars   Source characters to translate.
+ * @param name    Symbol to define.
+ * @param chars   Source characters to translate (bareword, not a string).
  */
-#define MAPPED_STRING(mapname, name, chars)     \
-__asm__(                                        \
-_RODATA_SECTION                                 \
-".globl " _SYM(name) "\n"                       \
-_SYM(name) ":\n"                                \
-".irpc c, " #chars "\n"                         \
-"  emit_char_" #mapname " \\c\n"                \
-".endr\n"                                       \
-".byte 0x00\n"                                  \
-".popsection\n"                                 \
-);                                              \
-ASM_LINKAGE const u8 name[sizeof(#chars) - 1]
+#define STRING_NT(mapname, name, chars)         \
+inline constexpr auto name = ::nes_str::encode_nt<charmap_##mapname>(#chars)
 
 /**
- * @brief Forward-declares a string without its terminator.
- * @param name  Global symbol to declare.
- * @param chars Source characters whose length determines the array size.
+ * @brief Expands to `pointer, count` for passing a buffer+length pair.
+ *
+ * Works for both a raw C array and a `std::array` (see ::nes_str::data /
+ * ::nes_str::size), so ::STRING results and plain arrays are accepted alike.
+ *
+ * @param obj A C array or `std::array`.
  */
-#define EXTERN_STRING(name, chars)              \
-ASM_LINKAGE const u8 name[sizeof(#chars) - 1]
-
-/**
- * @brief Forward-declares a null-terminated string, sized to include the terminator.
- * @param name  Global symbol to declare.
- * @param chars Source characters whose length determines the array size.
- */
-#define EXTERN_NULL_TERMINATED_STRING(name, chars)              \
-ASM_LINKAGE const u8 name[sizeof(#chars)]
-
-/**
- * @brief Expands to `obj, sizeof(obj)` for passing a buffer+length pair.
- * @param obj A C array or compound literal.
- */
-#define SIZED_OBJ(obj) obj, sizeof(obj)
+#define SIZED_OBJ(obj) ::nes_str::data(obj), ::nes_str::size(obj)
 
 /**
  * @brief General-purpose byte copy from @p buffer into @p target with stride.

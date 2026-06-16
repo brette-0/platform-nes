@@ -1,5 +1,4 @@
-﻿#ifndef METATILES_H
-#define METATILES_H
+﻿#pragma once
 #include <intsh>
 #include <array>
 using namespace br0::intsh;
@@ -13,7 +12,6 @@ extern const std::array<u8, 256> Metatiles_BL;   // bottom-left  CHR tile
 extern const std::array<u8, 256> Metatiles_BR;   // bottom-right CHR tile
 extern const std::array<u8, 256> Metatiles_ATTR; // 5th plane: 2-bit palette index per id
 extern const u8 MetatileCollisions[];
-#endif
 
 enum EMetatileCollisions {
     Clear,

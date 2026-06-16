@@ -206,10 +206,11 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
     add_custom_command(
             OUTPUT ${PASS1_ELF}
             COMMAND ${CMAKE_CXX_COMPILER}
-            # This hand-rolled invocation bypasses CMAKE_CXX_STANDARD, so the
-            # standard must be set explicitly to match the demo target. -x c++
+            # This hand-rolled invocation bypasses CMAKE_CXX_STANDARD and the
+            # demo target's options, so the standard and the #embed extension
+            # silencer must be set explicitly to match the demo target. -x c++
             # forces the C++ frontend for the source inputs.
-            -std=gnu++23 -x c++
+            -std=gnu++23 -Wno-c23-extensions -x c++
             -Os -DTARGET_NES -DLANDSCAPE
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
@@ -276,17 +277,21 @@ ${FAMISTUDIO_CFG}")
     # Final link
     # ------------------------------------------------------------------
 
-    # graphics.cpp embeds the demo/chr art files via .incbin inside inline asm,
-    # which the compiler's depfile cannot see. Declare them explicitly so editing
-    # the art retriggers a recompile.
+    # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
+    # (being the includer) emits the folded CHR ROM image. Declare the art as an
+    # explicit dependency so editing it retriggers a recompile.
     file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
-    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
             PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
 
     add_executable(demo ${DEMO_C_SOURCES})
     set_target_properties(demo PROPERTIES SUFFIX ".nes")
 
     target_link_libraries(demo PRIVATE platform-nes)
+
+    # CHR art is pulled in with #embed (C23), which Clang flags as an extension
+    # in C++ mode. It is the intended mechanism here, so silence the diagnostic.
+    target_compile_options(demo PRIVATE -Wno-c23-extensions)
 
     add_dependencies(demo demo_pass2_asm)
 
@@ -451,15 +456,21 @@ else()
 
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
 
-    # graphics.cpp embeds the demo/chr art files via .incbin inside inline asm,
-    # which the compiler's depfile cannot see. Declare them explicitly so editing
-    # the art retriggers a recompile.
+    # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
+    # (being the includer) emits the folded CHR ROM image. Declare the art as an
+    # explicit dependency so editing it retriggers a recompile.
     file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
-    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics.cpp
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
             PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
 
     add_executable(demo ${DEMO_SOURCES})
     target_link_libraries(demo PRIVATE platform-nes)
+
+    # CHR art is pulled in with #embed (C23), which Clang flags as an extension
+    # in C++ mode. It is the intended mechanism here, so silence the diagnostic.
+    # Clang-only: GCC doesn't know this flag and would emit an "unrecognized
+    # option" note, and its own #embed support doesn't warn here anyway.
+    target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
 
     # Enable LTO for release-type configs on desktop targets. CMake routes
     # archive/link through gcc-ar/gcc-ranlib (GCC) or lld (Clang) automatically
