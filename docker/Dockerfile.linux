@@ -1,11 +1,12 @@
 # Cross-platform Linux build image for platform-nes.
 #
-# Debian Bullseye gives glibc 2.31, which runs on essentially every
-# currently supported desktop Linux distribution. SDL3 is linked
-# statically, so the resulting binary only needs the system X11/
-# Wayland/ALSA/PulseAudio libraries at runtime, not their -dev
-# packages.
-FROM debian:bullseye
+# Debian Trixie ships Clang 19 / GCC 14, needed to compile the engine as
+# gnu++23 (Bullseye's Clang 11 predates C++23). The trade-off is a higher
+# runtime floor: Trixie's glibc (~2.41) means the AppImage targets reasonably
+# recent distros rather than everything back to ~Ubuntu 20.04. SDL3 is linked
+# statically, so the resulting binary only needs the system X11/Wayland/ALSA/
+# PulseAudio libraries at runtime, not their -dev packages.
+FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
 
