@@ -26,6 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         file \
         pkg-config \
+        squashfs-tools \
         libudev-dev \
         libasound2-dev \
         libpulse-dev \
@@ -61,6 +62,11 @@ RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSIO
 # linuxdeploy + appimage plugin for producing portable AppImage bundles.
 # Both are AppImages themselves; APPIMAGE_EXTRACT_AND_RUN lets them run
 # inside the container without FUSE (which isn't available in Docker).
+#
+# The appimage plugin's bundled appimagetool resolves `mksquashfs` off PATH
+# (execvp) rather than shipping its own, so the squashfs-tools package above
+# is what actually builds the AppImage's squashfs filesystem. Without it the
+# packaging step dies with mksquashfs's usage text instead of a bundle.
 ENV APPIMAGE_EXTRACT_AND_RUN=1
 RUN wget -qO /usr/local/bin/linuxdeploy \
         https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
