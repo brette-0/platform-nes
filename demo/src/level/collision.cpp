@@ -28,7 +28,7 @@ bool demo::level::CollidesSolid(const Cursor& origin, u16 px, u16 py, u8 w, u8 h
         for (u8 r = 0; r <= rows; r++) {
             Cursor probe = origin;
             probe.Move(c * levelHeight + r);   // column-major: dCol*H + dRow
-            if (GetMetatileCollisions(probe.Fetch()) == Solid)
+            if (GetMetatileCollisions(probe.Fetch()) == EMetatileCollisions::Solid)
                 return true;
         }
     }

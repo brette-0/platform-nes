@@ -1,0 +1,25 @@
+{
+    "activeFile": "tilesheets/metatiles.tsx",
+    "expandedProjectPaths": [
+        "tilesheets",
+        "."
+    ],
+    "fileStates": {
+        "metatiles.tsx": {
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        },
+        "tilesheets/metatiles.tsx": {
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        }
+    },
+    "openFiles": [
+        "tilesheets/metatiles.tsx"
+    ],
+    "project": "demo.tiled-project",
+    "recentFiles": [
+        "tilesheets/metatiles.tsx",
+        "metatiles.tsx"
+    ]
+}

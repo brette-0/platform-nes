@@ -13,7 +13,14 @@ extern const std::array<u8, 256> Metatiles_BR;   // bottom-right CHR tile
 extern const std::array<u8, 256> Metatiles_ATTR; // 5th plane: 2-bit palette index per id
 extern const u8 MetatileCollisions[];
 
-enum EMetatileCollisions {
+enum eMetatiles : u8 {
+    mtTerrain       = 0x3c,
+    mtCoin          = 0x62,
+    mtAir           = 0xfe,
+    mtHUDWhiteSpace = 0xff
+};
+
+enum class EMetatileCollisions : u8 {
     Clear,
     Solid
 };

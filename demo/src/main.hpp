@@ -3,7 +3,7 @@
 
 #include "level/actor.hpp"
 
-enum spriteZeroStatus {
+enum class spriteZeroStatus : u8 {
     S0_DO_CALCULATE,
     S0_DO_CHECK_PERFORM,
     S0_BEING_PERFORMED
@@ -26,14 +26,15 @@ extern atomic u8 spriteZeroHandled;
 extern oam::sprite_t OAMBuffer[64];
 
 void SpriteZeroHandler();
-extern atomic u8 levelStreamCommand;;
 extern u8 TileBuffer[56];
 
 extern Actor player;
 
-enum eLevelStreamCommands {
+enum class eLevelStreamCommands : u8 {
     STREAM_LEVEL_LEFT  = 0x00,
     STREAM_LEVEL_RIGHT = 0x01,
     STREAM_LEVEL_DONE  = 0x02,
     STREAM_LEVEL_SWAP  = 0x04,
 };
+
+extern atomic enum_flags<eLevelStreamCommands> levelStreamCommand;

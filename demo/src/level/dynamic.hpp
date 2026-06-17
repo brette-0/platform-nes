@@ -1,0 +1,91 @@
+#pragma once
+
+#include "cursor.hpp"
+#include <intsh>
+
+using namespace br0::intsh;
+
+namespace demo::level {
+
+// ---------------------------------------------------------------------------
+// Dynamic tile layer (prototype scaffolding)
+//
+// A second RLE plane authored as a separate Tiled layer, compressed with the
+// same {length, data} scheme and covering the same WxH metatile grid as the
+// static plane. It holds the interactive / animated tiles -- coins, blocks,
+// ... -- that the game mutates at runtime. It has no terminator of its own: it
+// spans the same number of cells as the static plane, whose 0x00 terminator
+// already bounds the walk.
+//
+// Unlike the static plane (run-data lives in ROM and is fetched in place), the
+// dynamic plane's run DATA is copied once into a fixed RAM array so individual
+// runs can be blanked when their tile is consumed. The run LENGTHS stay in ROM
+// (they never change). So a DynamicCursor streams lengths from ROM but peeks
+// data from RAM.
+//
+// STATUS: no level ships a dynamic layer yet, so the ROM sources are null and
+// three integration points are deliberately stubbed / left uncalled:
+//   (a) LoadDynamicLayer  -- ROM->RAM copy, called from LoadLevel once data exists
+//   (b) render compositing -- dynamic-over-static inside the column builders
+//   (c) the actor double-probe -- needs real actor collision response
+// The data structures, cursor, collision query and removal jump table are real.
+// ---------------------------------------------------------------------------
+
+// Max dynamic RUNS held in RAM. The dynamic plane is sparse (mostly air), so a
+// long level still compresses to well under this. Overflow becomes a build-time
+// check once real export exists.
+constexpr u8 DynRunCapacity = 128;
+
+// Mutable, RAM-resident copy of the dynamic plane's run-data bytes (metatile
+// ids; 0 = air = "no dynamic tile here"). Indexed by run, exactly like the
+// static TileData / Cursor.offset relationship.
+extern u8 DynData[DynRunCapacity];
+
+// ROM sources for the active level's dynamic plane. Null until a level provides
+// one. DynLengths mirrors HunkLengths (run lengths); DynDataROM is the run-data
+// copied into DynData at load.
+extern const u8* DynLengths;
+extern const u8* DynDataROM;
+
+// RLE walker over the dynamic plane: lengths from ROM (DynLengths), data from
+// RAM (DynData). Mirrors Cursor, but Fetch() peeks the mutable RAM copy so a
+// removal can blank a run in place. (Walk logic is duplicated from Cursor for
+// the prototype; unify behind a shared walker once the dynamic path is proven.)
+class DynamicCursor {
+public:
+    u16 offset;
+    u8  progress;
+
+    void Move(i16 amt);
+    void Seek(i16 amt) { Move(amt); }
+    u8   Fetch() const { return DynData[offset]; }   // RAM peek (mutable)
+    u16  Run()   const { return offset; }            // run index to blank on removal
+};
+
+// Result of a dynamic-plane collision probe: whether a non-air dynamic tile was
+// overlapped, its id (for rule dispatch) and the run that owns it (to blank).
+struct DynHit {
+    bool hit;
+    u8   id;
+    u16  run;
+};
+
+// Probe an AABB against the dynamic plane. Mirrors CollidesSolid, but instead of
+// a bool it returns the first overlapped non-air dynamic tile (id + owning run)
+// so the caller can dispatch its removal rule. `origin` must already sit on the
+// metatile containing the AABB's top-left corner (px, py) -- same contract as
+// CollidesSolid.
+DynHit CollidesDynamic(const DynamicCursor& origin, u16 px, u16 py, u8 w, u8 h);
+
+// Dispatch the removal rule for a hit through the jump table (see dynamic.cpp).
+// `under` is a static cursor already positioned on the SAME cell, so the rule
+// can read the metatile underneath and reveal it -- avoiding the SMB1 "coin on a
+// wall turns to air" artefact.
+void RemoveDynamic(const DynHit& h, Cursor under);
+
+// Copy the active level's dynamic ROM run-data into DynData and point DynLengths
+// at the level's dynamic lengths. STUB: call from LoadLevel once a level ships a
+// dynamic layer (pass nullptrs / 0 for a level that has none).
+void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u8 runCount);
+
+}   // namespace demo::level

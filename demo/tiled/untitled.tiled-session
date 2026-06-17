@@ -1,0 +1,35 @@
+{
+    "activeFile": "1-1.tmx",
+    "expandedProjectPaths": [
+        "tilesheets",
+        "."
+    ],
+    "fileStates": {
+        "1-1.tmx": {
+            "scale": 2.1355208333333335,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 240.22242817423538,
+                "y": 112.15062679869273
+            }
+        },
+        "tilesheets/metatiles.tsx": {
+            "scaleInDock": 1,
+            "scaleInEditor": 1
+        }
+    },
+    "last.externalTilesetPath": "/home/brette/repos/platform-nes/demo/tiled/tilesheets",
+    "map.height": 14,
+    "map.lastUsedFormat": "tmx",
+    "map.tileHeight": 16,
+    "map.tileWidth": 16,
+    "openFiles": [
+        "1-1.tmx"
+    ],
+    "project": "untitled.tiled-project",
+    "recentFiles": [
+        "tilesheets/metatiles.tsx",
+        "1-1.tmx"
+    ],
+    "tileset.lastUsedFilter": "Tiled tileset files (*.tsx *.xml)"
+}

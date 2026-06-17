@@ -143,6 +143,79 @@ public:
 };
 
 /**
+ * @brief Zero-overhead bitmask wrapper for a scoped enum.
+ *
+ * A scoped enum (`enum class`) is the right tool for a set of flag bits: the
+ * enumerators stay out of the surrounding namespace, so a common name like
+ * `Clear` or `DONE` can't collide with anything. The cost is that a scoped enum
+ * deliberately does *not* implicitly convert to its underlying integer, so
+ * `a | b`, `mask & flag`, and `if (flags)` no longer compile -- you would have
+ * to `static_cast` at every use, which is exactly the casting bloat we want to
+ * avoid.
+ *
+ * `enum_flags<E>` is the storage type for such a flag register. It holds one
+ * `std::underlying_type_t<E>` (a single byte for a `: u8` enum) and supplies the
+ * bitwise operators plus a contextual `bool` test, so flag code reads like plain
+ * integer code while every value remains type-checked against `E`. Because an
+ * enumerator converts implicitly *into* an `enum_flags<E>` (but not the other
+ * way), you still cannot accidentally mix two unrelated enums or leak a flag set
+ * into arithmetic.
+ *
+ * It is a pure compile-time abstraction: no member is `virtual`, so there is no
+ * vtable and no per-object vptr; `sizeof(enum_flags<E>) == sizeof(underlying)`.
+ * Every operation is `constexpr` (hence inline), lowering to the identical 6502
+ * `and`/`ora`/`eor` the raw byte math would emit. The default constructor is
+ * trivial/zero, so an instance lives in zero-initialised `.bss` with no startup
+ * constructor -- the same placement as the bare `atomic u8` it replaces.
+ *
+ * @note For an `atomic` (volatile) flag register, keep read-modify-write as a
+ *       single `reg = reg | E::FLAG;` statement: the by-value operators read the
+ *       register exactly once and the assignment writes it once, side-stepping
+ *       the `-Wdeprecated-volatile` (P1152) compound-assignment pitfall.
+ *
+ * @tparam E A scoped enumeration whose enumerators are single-bit flag values.
+ */
+template <class E>
+class enum_flags {
+    using U = std::underlying_type_t<E>;
+    U bits_{};
+public:
+    constexpr enum_flags() = default;                                  ///< trivial: lives in .bss
+    constexpr enum_flags(E e) : bits_(static_cast<U>(e)) {}            ///< enumerator -> flag set
+    constexpr explicit enum_flags(U raw) : bits_(raw) {}              ///< from a raw underlying value
+
+    // Volatile interop: an `atomic enum_flags<E>` register is read once when
+    // copied by value into the operators below, and written once on assignment.
+    // Both stay single-access (no read-modify-write on the volatile object) so
+    // the `-Wdeprecated-volatile` (P1152) pitfall never arises; the volatile
+    // operator= returns void for the same reason (its result is never read back).
+    // The volatile-source ctor / volatile operator= match copy signatures, so the
+    // ordinary (non-volatile) copy ops are re-defaulted alongside them.
+    constexpr enum_flags(const enum_flags &) = default;
+    constexpr enum_flags &operator=(const enum_flags &) = default;
+    enum_flags(const volatile enum_flags &o) : bits_(o.bits_) {}        ///< read a volatile register
+    void operator=(const enum_flags &o) volatile { bits_ = o.bits_; }   ///< write a volatile register
+
+    constexpr explicit operator bool() const { return bits_ != 0; }   ///< `if (flags & mask)`
+    constexpr U raw()   const { return bits_; }                       ///< underlying integer
+    constexpr E value() const { return static_cast<E>(bits_); }       ///< back to the enum type
+
+    /// True iff every bit in @p m is set (membership test for a multi-bit mask).
+    constexpr bool has(enum_flags m) const { return (bits_ & m.bits_) == m.bits_; }
+
+    friend constexpr enum_flags operator|(enum_flags a, enum_flags b) { return enum_flags(static_cast<U>(a.bits_ | b.bits_)); }
+    friend constexpr enum_flags operator&(enum_flags a, enum_flags b) { return enum_flags(static_cast<U>(a.bits_ & b.bits_)); }
+    friend constexpr enum_flags operator^(enum_flags a, enum_flags b) { return enum_flags(static_cast<U>(a.bits_ ^ b.bits_)); }
+    friend constexpr enum_flags operator~(enum_flags a)               { return enum_flags(static_cast<U>(~a.bits_)); }
+
+    constexpr enum_flags &operator|=(enum_flags o) { bits_ = static_cast<U>(bits_ | o.bits_); return *this; }
+    constexpr enum_flags &operator&=(enum_flags o) { bits_ = static_cast<U>(bits_ & o.bits_); return *this; }
+    constexpr enum_flags &operator^=(enum_flags o) { bits_ = static_cast<U>(bits_ ^ o.bits_); return *this; }
+
+    friend constexpr bool operator==(enum_flags, enum_flags) = default;   ///< also yields !=
+};
+
+/**
  * @brief Scoped save/restore of N variables — truly variadic.
  *
  * `SHADOW(a, b, ...) { body }` snapshots each listed lvalue, runs the body

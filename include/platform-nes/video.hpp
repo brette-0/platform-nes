@@ -222,6 +222,10 @@ constexpr u8 CHR_ORIGIN_tile   = 0;
 constexpr u8 CHR_ORIGIN_ntiles = 0;
 constexpr std::array<u8, 0> CHR_ORIGIN_accum{};
 
+/** @brief CHR tiles per 4 KB PPU pattern table ($1000 bytes / 16). The boundary
+ *         between the sprite table ($0000) and the background table ($1000). */
+constexpr unsigned CHR_TILES_PER_TABLE = 256;
+
 // The running placement-concat feeds the final padded image. It is built in
 // every TU that includes the list, but is internal-linkage constexpr (consumed
 // purely at compile time), so it never reaches any object file.
@@ -241,6 +245,46 @@ constexpr std::array<u8, 0> CHR_ORIGIN_accum{};
   constexpr u8 name##_tile   = (u8)(prev##_tile + prev##_ntiles);      \
   constexpr u8 name##_ntiles = (u8)(sizeof(name##_raw) / 16);          \
   _CHR_PLACE(name, prev)
+
+/**
+ * @brief Insert zero-fill into the CHR chain so the *next* blob begins at tile
+ *        index @p to_tile -- e.g. align background graphics to the $1000
+ *        pattern-table boundary while sprites stay in pattern table 0.
+ *
+ * The PPU addresses background and sprite graphics through two independent 4 KB
+ * pattern tables ($0000 and $1000, ::CHR_TILES_PER_TABLE tiles each), selected
+ * separately by PPUCTRL (::ppu::ctrl::BG_ADDR / ::ppu::ctrl::SPRITE_ADDR). A blob
+ * physically placed at tile 256 lives at $1000 and is addressed as PT-relative
+ * tile 0 once BG_ADDR selects $1000 -- which is exactly the value its
+ * `<name>_tile` takes, because these ids are `u8` and wrap mod 256 at the table
+ * boundary. So a pad here keeps every downstream `_tile` correct for free.
+ *
+ * Like every link in the chain it defines `<name>_tile`, `<name>_ntiles`, and
+ * `<name>_accum`, so the following blob simply names this pad as its @p prev:
+ *
+ *      CHARACTER_ROM_END(chrMushletStanding, chrWand);   // last sprite
+ *      CHARACTER_ROM_PAD_TO(chrBgGap, chrMushletStanding, CHR_TILES_PER_TABLE);
+ *      CHARACTER_ROM_BEGIN(chrBush)                       // first BG tile
+ *      #embed "..."
+ *      CHARACTER_ROM_END(chrBush, chrBgGap);
+ *
+ * @param name    Identifier for this padding link (any unused name).
+ * @param prev    The blob declared immediately before.
+ * @param to_tile Tile index the next blob should start at. Must be within one
+ *                table (<= 256 tiles) of the current position.
+ */
+#define CHARACTER_ROM_PAD_TO(name, prev, to_tile)                      \
+  constexpr u8  name##_tile      = (u8)(prev##_tile + prev##_ntiles);  \
+  constexpr int name##_pad_tiles = (int)(to_tile)                      \
+                                 - (int)(prev##_tile + prev##_ntiles); \
+  static_assert(name##_pad_tiles >= 0,                                 \
+      "CHARACTER_ROM_PAD: data before the pad already passes to_tile");\
+  static_assert(name##_pad_tiles <= (int)CHR_TILES_PER_TABLE,          \
+      "CHARACTER_ROM_PAD: gap exceeds one pattern table");             \
+  constexpr u8  name##_ntiles    = (u8)name##_pad_tiles;               \
+  constexpr auto name##_accum    =                                     \
+      nes_chr::cat(prev##_accum,                                       \
+                   std::array<u8, (size_t)name##_pad_tiles * 16>{});
 
 /* Materialize the padded CHR ROM image from a blob's accumulation (the whole
  * chain) and place it in the CHR section. Internal helper for

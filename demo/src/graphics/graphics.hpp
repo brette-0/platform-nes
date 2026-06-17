@@ -41,10 +41,15 @@ CHARACTER_ROM_BEGIN(chrMushletStanding)
 #embed "../../chr/sprites/enemies/mushlet/standing.chr"
 CHARACTER_ROM_END(chrMushletStanding, chrWand);
 
+// Pattern-table boundary: sprites above live in table 0 ($0000); the background
+// tiles below must live in table 1 ($1000) to match PPUCTRL's BG_ADDR. Padding
+// to tile 256 makes each BG `_tile` wrap to its $1000-relative index for free.
+CHARACTER_ROM_PAD_TO(chrTableGap, chrMushletStanding, CHR_TILES_PER_TABLE);
+
 // world static tiles
 CHARACTER_ROM_BEGIN(chrBush)
 #embed "../../chr/tiles/static/bush.chr"
-CHARACTER_ROM_END(chrBush, chrMushletStanding);
+CHARACTER_ROM_END(chrBush, chrTableGap);
 
 CHARACTER_ROM_BEGIN(chrLiquid)
 #embed "../../chr/tiles/static/liquid.chr"

@@ -1,10 +1,13 @@
 ﻿#include <platform-nes>
 #include "main.hpp"
+
 #include "graphics/colours.hpp"
 #include "graphics/strings.hpp"
 #include "graphics/graphics.hpp"
-#include "level/levels.hpp"
 #include "graphics/metasprites.hpp"
+#include "graphics/metatiles.hpp"
+
+#include "level/levels.hpp"
 #include "level/actor.hpp"
 #include "level/collision.hpp"
 
@@ -36,6 +39,12 @@ constexpr i16 kRiseGravity = 256;  // ascending with A held -> floaty
 constexpr i16 kFallGravity = 896;  // descending or A released -> heavier
 constexpr i8  kMaxFall     = 36;   // 4.5 px/frame terminal
 
+// The sprite-0 split scrolls the playfield down one metatile (SetScroll(.,16))
+// and level columns are written one metatile below the top (nametable row 2),
+// so on screen level-data row 0 sits a HUD row below worldSpace.y 0. World-row 0
+// is the HUD strip itself -- a real part of world space, just with no level data.
+constexpr i16 kHudRows     = 1;    // metatile rows of HUD above level-data row 0
+
 i16 playerXForce;   // horizontal acceleration remainder (1/256-subpixel/frame)
 i16 playerYForce;   // gravity remainder (1/256-subpixel/frame)
 u8  playerRunTimer;
@@ -65,7 +74,7 @@ atomic u8 spriteZeroHandled;
 
 oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
-atomic u8 levelStreamCommand;
+atomic enum_flags<eLevelStreamCommands> levelStreamCommand;
 u8 TileBuffer[56];
 
 static oam::oam_t Clear(u16 _);
@@ -82,14 +91,14 @@ RESET {
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3
     }
-    ppu::Flush(0xdf, 0x00);
+    ppu::Flush(chrHUDWhitespace_tile, 0x11);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
     // fill in with mario metatiles
-    oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary, 8);
-    oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, 8);
-    oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, 8);
+    oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary, kMarySprites);
+    oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, kMarySprites);
+    oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, kMarySprites);
 
     ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
     ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
@@ -166,24 +175,25 @@ NMI {
 
     spriteZeroHandled = 0;
 
-    if (levelStreamCommand & STREAM_LEVEL_DONE) SHADOW(ppu::PPUMASK) {
+    using enum eLevelStreamCommands;
+    if (levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_DONE) SHADOW(ppu::PPUMASK) {
         ppu::PPUMASK = 0;
-        if (levelStreamCommand & STREAM_LEVEL_RIGHT) {
+        if (levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_RIGHT) {
             ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 0, 2, TileBuffer, 28, 1);
             ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 1, 2, TileBuffer + 28, 28, 1);
-            if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
+            if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
                 ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) + video::viewport_tx() & ~3, 2, level::AttributeBuffer, 8, 1);
         } else {
             ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
             ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
-            if (!(levelStreamCommand & STREAM_LEVEL_SWAP))
+            if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
                 ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, level::AttributeBuffer, 8, 1);
         }
     }
 
     ppu::SetScroll(0, 0);
     if (levelStreamCommand & STREAM_LEVEL_DONE) {
-        levelStreamCommand = 0;
+        levelStreamCommand = {};
     }
 
     ppu::SetColorPriority(0);
@@ -206,11 +216,18 @@ static u16 PlayerWorldX(const Actor* self) {
 
 static i8 AbsI8(const i8 v) { return v < 0 ? static_cast<i8>(-v) : v; }
 
-// Map a pixel-Y (possibly off-field) to a valid metatile row: above-screen
-// underflow -> top row; below the floor -> bottom row.
+// Map a pixel-Y to the LEVEL-DATA metatile row it overlaps. World-row 0 is the
+// HUD strip (kHudRows tall, scrolled in by the sprite-0 split), so level-data
+// row 0 starts kHudRows below the top. Subtracting it here -- where the row
+// projection lives -- keeps every caller (seed, grounded check, vertical move)
+// indexing the scrolled background consistently, and unlike a one-shot cursor
+// seed it can't be swallowed at the level start: the offset simply develops as
+// the actor descends into the field. Above the field (underflow) or inside the
+// HUD clamps to the top row; below the floor clamps to the bottom.
 static i16 ClampRow(const u16 y) {
     if (y & 0x8000) return 0;
-    const i16 r = static_cast<i16>(y >> 4);
+    const i16 r = static_cast<i16>(y >> 4) - kHudRows;
+    if (r < 0) return 0;
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
@@ -298,6 +315,7 @@ void PlayerUpdate(Actor* self) {
 }
 
 void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
+    using enum eLevelStreamCommands;
     // Recomputed per call: on NES these fold to literals (-O3); on desktop the
     // viewport is a runtime value, so they must be read after video init, not
     // bound to a constexpr / static-init global.
@@ -326,7 +344,7 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 const i16 nrow = ClampRow(self->screen.y);
                 self->cursor.Move(nrow - row);   // same column, row delta only
                 row = nrow;
-                oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, 8);
+                oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, kMarySprites);
             } else {
                 self->worldSpace.y &= ~0x7;       // bonk: rest on the pixel, drop sub-px carry
                 self->moveForce.y = 0;            // land or head-bonk both kill vertical speed
@@ -439,7 +457,7 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     else if (sx > static_cast<i16>(playerMaxXPos)) sx = static_cast<i16>(playerMaxXPos);
     if (static_cast<oam::oam_t>(sx) != self->screen.x) {
         self->screen.x = static_cast<oam::oam_t>(sx);
-        oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, 8);
+        oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX, kMarySprites);
     }
 
     // Recompose the canonical sub-pixel X from the (possibly clamped) camera +

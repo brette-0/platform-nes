@@ -115,7 +115,7 @@ constexpr u8 MetatilesSrc[256 * 5] = {
     0x00, 0x00, 0x00, 0x00, 0x00,          // $5f
     0x00, 0x00, 0x00, 0x00, 0x00,          // $60
     0x00, 0x00, 0x00, 0x00, 0x00,          // $61
-    MT_SPLIT(chrCoin_tile), 0x00,          // $62 (coin)
+    MT_SPLIT(chrCoin_tile), 0x01,          // $62 (coin)
     0x00, 0x00, 0x00, 0x00, 0x00,          // $63
     0x00, 0x00, 0x00, 0x00, 0x00,          // $64
     0x00, 0x00, 0x00, 0x00, 0x00,          // $65
@@ -271,8 +271,10 @@ constexpr u8 MetatilesSrc[256 * 5] = {
     0x00, 0x00, 0x00, 0x00, 0x00,          // $fb
     0x00, 0x00, 0x00, 0x00, 0x00,          // $fc
     0x00, 0x00, 0x00, 0x00, 0x00,          // $fd
-    0x00, 0x00, 0x00, 0x00, 0x00,          // $fe
-    0xdf, 0xdf, 0xdf, 0xdf, 0x00           // $ff (hud whitespace)
+    chrAir_tile, chrAir_tile, chrAir_tile, chrAir_tile, 0x01,
+        // $fe (air)
+    chrHUDWhitespace_tile, chrHUDWhitespace_tile, chrHUDWhitespace_tile, chrHUDWhitespace_tile, 0x01
+        // $ff (hud whitespace)
 };
 
 // Pull one column out of every { UL, UR, BL, BR, AT } row into a flat 256-byte
@@ -288,8 +290,8 @@ constexpr std::array<u8, 256> MetatilePlane(const int plane_col) {
 // directly by metatile id, so a CHR-tile fetch is a single `lda Metatiles_xx,x`
 // instead of the old 16-bit `Metatiles[id << 2 | corner]` index.
 extern constexpr std::array<u8, 256> Metatiles_UL = MetatilePlane(0);   // top-left
-extern constexpr std::array<u8, 256> Metatiles_UR = MetatilePlane(1);   // top-right
-extern constexpr std::array<u8, 256> Metatiles_BL = MetatilePlane(2);   // bottom-left
+extern constexpr std::array<u8, 256> Metatiles_BL = MetatilePlane(1);   // bottom-left
+extern constexpr std::array<u8, 256> Metatiles_UR = MetatilePlane(2);   // top-right
 extern constexpr std::array<u8, 256> Metatiles_BR = MetatilePlane(3);   // bottom-right
 extern constexpr std::array<u8, 256> Metatiles_ATTR = MetatilePlane(4); // 2-bit palette index per id
 

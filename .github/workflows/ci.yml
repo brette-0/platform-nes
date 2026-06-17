@@ -101,7 +101,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset win-release -DCMAKE_C_COMPILER=clang-cl
+        run: cmake --preset win-release -DCMAKE_CXX_COMPILER=clang-cl
 
       - name: Build
         run: cmake --build cmake-build-win-release
