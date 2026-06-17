@@ -191,11 +191,19 @@ _CHR_POP                                         \
 #endif
 
 namespace nes_chr {
-  /** @brief Copy a C array of bytes into a sized, constexpr-friendly array. */
+  /** @brief Copy a `#embed` staging buffer into a sized, constexpr-friendly
+   *  array of bytes. The source is `int` because the two compilers disagree on
+   *  the element type a `#embed` expands to: GCC yields ints in [0,255], while
+   *  Clang yields char-typed values (0xFF -> -1 on a signed-char target). No
+   *  8-bit type holds that combined [-128,255] range without a braced-init
+   *  narrowing error, so the staging buffer is `int`; the byte value is recovered
+   *  here with an explicit cast and every downstream type (accum, the CHR image,
+   *  the `_tile` ids) stays `u8`. The buffer is internal-linkage constexpr,
+   *  consumed purely at compile time, so its width carries no runtime cost. */
   template <size_t N>
-  constexpr std::array<u8, N> make(const u8 (&a)[N]) {
+  constexpr std::array<u8, N> make(const int (&a)[N]) {
     std::array<u8, N> r{};
-    for (size_t i = 0; i < N; ++i) r[i] = a[i];
+    for (size_t i = 0; i < N; ++i) r[i] = static_cast<u8>(a[i]);
     return r;
   }
   /** @brief Concatenate two byte blocks at compile time (order preserved). */
@@ -235,7 +243,7 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
 
 /** @brief Opens a `#embed` CHR blob named @p name (followed by a literal
  *         `#embed "path"` line, then ::CHARACTER_ROM_END). */
-#define CHARACTER_ROM_BEGIN(name) constexpr u8 name##_raw[] = {
+#define CHARACTER_ROM_BEGIN(name) constexpr int name##_raw[] = {
 
 /** @brief Closes a `#embed` CHR blob and derives `<name>_tile` /
  *         `<name>_ntiles`. @p prev is the blob declared immediately before
@@ -243,7 +251,8 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
 #define CHARACTER_ROM_END(name, prev)                                  \
   };                                                                   \
   constexpr u8 name##_tile   = (u8)(prev##_tile + prev##_ntiles);      \
-  constexpr u8 name##_ntiles = (u8)(sizeof(name##_raw) / 16);          \
+  constexpr u8 name##_ntiles =                                         \
+      (u8)(sizeof(name##_raw) / sizeof(name##_raw[0]) / 16);           \
   _CHR_PLACE(name, prev)
 
 /**
