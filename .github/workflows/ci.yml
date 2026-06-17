@@ -88,8 +88,11 @@ jobs:
   # Windows — clang-cl + Ninja, static SDL3 built from source via FetchContent.
   # The MSVC environment action still runs because clang-cl consumes MSVC's
   # Windows SDK headers and import libraries; only the compiler frontend is
-  # swapped. Demo binary is bundled alongside tracks/ and sfx/ so the zip
-  # runs from any extraction location.
+  # swapped. Both CMAKE_C_COMPILER and CMAKE_CXX_COMPILER are pinned to clang-cl:
+  # our engine is CXX-only (C++23), but the SDL3 dependency enables the C
+  # language, and an unset CMAKE_C_COMPILER auto-resolves to GNU-like clang.exe,
+  # which then rejects the MSVC-style /flags. Demo binary is bundled alongside
+  # tracks/ and sfx/ so the zip runs from any extraction location.
   # --------------------------------------------------------------------------
   windows:
     name: Windows
@@ -101,7 +104,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset win-release -DCMAKE_CXX_COMPILER=clang-cl
+        run: cmake --preset win-release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
 
       - name: Build
         run: cmake --build cmake-build-win-release
