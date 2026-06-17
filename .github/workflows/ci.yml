@@ -14,6 +14,10 @@ on:
 # Pin llvm-mos-sdk centrally so the NES ROM is bit-reproducible across runs.
 env:
   LLVM_MOS_SDK_VERSION: v19.1.0
+  # Pin a modern CMake centrally. The intsh/tuple dependencies declare
+  # cmake_minimum_required(VERSION 4.2), newer than what the GitHub runners
+  # (3.31.x) and Debian Bullseye ship, so every job provisions this instead.
+  CMAKE_VERSION: 4.3.3
 
 jobs:
   # --------------------------------------------------------------------------
@@ -25,6 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
 
       - name: Install ca65, ninja
         run: |
@@ -64,7 +73,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build toolchain image
-        run: docker build -t platform-nes-linux:ci -f docker/Dockerfile.linux docker
+        run: docker build --build-arg CMAKE_VERSION=${{ env.CMAKE_VERSION }} -t platform-nes-linux:ci -f docker/Dockerfile.linux docker
 
       - name: Build AppImage
         run: |
@@ -100,6 +109,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
+
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -131,6 +145,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up CMake
+        uses: jwlawson/actions-setup-cmake@v2
+        with:
+          cmake-version: ${{ env.CMAKE_VERSION }}
 
       - name: Install ninja
         run: brew install ninja

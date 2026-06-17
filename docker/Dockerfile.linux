@@ -45,10 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libibus-1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Debian Bullseye ships CMake 3.18, but CMakePresets.json uses features
-# that require 3.21+. Install a current CMake from Kitware's official
-# Linux binary release.
-ARG CMAKE_VERSION=3.28.3
+# Debian Bullseye ships CMake 3.18, but the intsh/tuple dependencies declare
+# cmake_minimum_required(VERSION 4.2) (and CMakePresets.json needs 3.21+).
+# Install a current CMake from Kitware's official Linux binary release. The CI
+# overrides this via --build-arg to stay in lockstep with the workflow's pin.
+ARG CMAKE_VERSION=4.3.3
 RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
         | tar -xz -C /opt \
     && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
