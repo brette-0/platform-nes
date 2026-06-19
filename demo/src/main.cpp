@@ -9,7 +9,8 @@
 
 #include "level/levels.hpp"
 #include "level/actor.hpp"
-#include "level/collision.hpp"
+#include "level/collision_map.hpp"
+#include "level/dynamic.hpp"
 
 using namespace demo;
 
@@ -20,6 +21,32 @@ u8 lastPort1;
 u8 lastPort2;
 
 Actor player;
+
+// ---------------------------------------------------------------------------
+// Deferred VRAM tile-write stack (coin pickups)
+//
+// Collection runs in the UPDATE (mid-frame, rendering on), but nametable writes are
+// only legal in vblank -- so a pickup pushes its tile writes here and NMI drains them.
+// Each entry is {addrHi, addrLo, value}: a PRECOMPUTED VRAM address (ppu::Cartesian
+// ToAddress, the (x,y)->address projection -- a /30 + %30 for the row -- paid once HERE,
+// off the hot path) plus the CHR tile.  The NMI then replays each write as three register
+// pokes with NO arithmetic, through the address overload of WriteSingleToNameTable (still
+// the library, so SDL3 -- which has no raw PPUADDR port -- works too).  Drained by the
+// CoinVramLen byte count, NOT an in-band terminator: CartesianToAddress is $2000-based on
+// NES but 0-based on SDL3, where a top-of-playfield cell's high byte is legitimately 0, so
+// a "high byte == 0 terminates" sentinel would falsely stop the desktop drain.
+constexpr u8 kCoinVramCap = 48;            // 16 tile writes = 4 coins (2x2 each)
+static u8 CoinVram[kCoinVramCap];
+static u8 CoinVramLen;                      // bytes used
+
+static void CoinVramReset() { CoinVramLen = 0; }
+
+static void CoinVramPush(const int address, const u8 value) {
+    if (CoinVramLen + 3 > kCoinVramCap) return;        // full: drop (next frame retries)
+    CoinVram[CoinVramLen++] = static_cast<u8>(address >> 8);
+    CoinVram[CoinVramLen++] = static_cast<u8>(address & 0xFF);
+    CoinVram[CoinVramLen++] = value;
+}
 
 // Horizontal velocity caps (subpixel/frame; 8 subpx = 1px).
 constexpr i8  kMaxWalk     = 12;   // 1.5 px/frame
@@ -43,7 +70,9 @@ constexpr i8  kMaxFall     = 36;   // 4.5 px/frame terminal
 // and level columns are written one metatile below the top (nametable row 2),
 // so on screen level-data row 0 sits a HUD row below worldSpace.y 0. World-row 0
 // is the HUD strip itself -- a real part of world space, just with no level data.
-constexpr i16 kHudRows     = 1;    // metatile rows of HUD above level-data row 0
+// kHudRows lives in levels.hpp now so the collision bitmap (producer) and this
+// actor row projection (consumer) share one origin; reach it via level::kHudRows.
+using level::kHudRows;
 
 i16 playerXForce;   // horizontal acceleration remainder (1/256-subpixel/frame)
 i16 playerYForce;   // gravity remainder (1/256-subpixel/frame)
@@ -84,7 +113,7 @@ static oam::oam_t SpriteY(u16 i);
 static oam::oam_t SpriteX(u16 i);
 static u16  PlayerWorldX(const Actor* self);
 static i16  ClampRow(u16 y);
-static bool PlayerBlocked(const Actor* self, i16 col, i16 row, u16 wx, u16 wy);
+static bool PlayerBlocked(Actor* self, u16 wx, u16 wy);
 static void ProcessPlayerMovement(Actor* self, vec2<i8> moveForce);
 
 RESET {
@@ -104,14 +133,18 @@ RESET {
     ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
     ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
 
+    constexpr u8 coinUI[] = {chrHUDCoin_tile, chrFont_tile + 0, chrFont_tile + 0};
+    ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(coinUI), 1, SIZED_OBJ(coinUI), 0);
+
     OAMBuffer[0] = (oam::sprite_t) {
-        .y = 8,
+        .y = 7,                     // accommodates for sprite rendering one scanline down.
         .tile = chrSprite0_tile,
         .attributes = 0,
         .x = 0
     };
 
     level::edgeR = { 0, 0, level::TileData };   // right edge walks from column 0
+    level::dynEdgeR = { 0, 0 };                 // dyn forward edge, lockstep w/ edgeR
     for (auto i = 0; i < 2 + video::viewport_tx(); i += 2) {
         ppu::WriteFromProviderToNameTable(
             i, 2,
@@ -134,15 +167,18 @@ RESET {
     // it always does, so there is no extra cost and never an O(n) walk.
     edgeRAbs     = (1 + viewport_mx()) * level::levelHeight;
     level::edgeL = { 0, 0, level::TileData };
+    level::dynEdgeL = { 0, 0 };                 // dyn backward edge, lockstep w/ edgeL
 
     ppu::SetScroll(0, 0);
 
     AudioInit();
     TrackPlay(0);
 
-    player.cursor.base     = TileData;
-    player.cursor.offset   = 0;
-    player.cursor.progress = 0;
+    // Seed the shared composite-metatile window over columns [0..kColMapWidth-1]
+    // from the level start: a static Cursor and a dynamic Cursor both parked on
+    // (col 0, row 0), composited per cell.  cameraX is 0 here, so the window is
+    // already centred; ColMapTrack slides it as the camera scrolls.
+    level::ColMapSeed(0, { 0, 0, level::TileData }, { 0, 0 });
 
     player.size = {
         16, 16
@@ -170,7 +206,6 @@ RESET {
 }
 
 NMI {
-    ppu::SetColorPriority(ppu::mask::BLUE);
     oam::RefreshSprites(OAMBuffer);
 
     spriteZeroHandled = 0;
@@ -190,6 +225,19 @@ NMI {
                 ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, level::AttributeBuffer, 8, 1);
         }
     }
+
+    // Drain coin pickups collected this frame into the nametable.  Like the level-stream
+    // block above, the writes touch VRAM, so disable rendering across them via SHADOW
+    // (PPUMASK snapshot/restore) -- without it, a write that slips past the vblank window
+    // lands mid-scanline and tears the screen.  Addresses were projected at pickup time,
+    // so the body is pure register pokes ({addrHi,addrLo,value} triples).  BEFORE SetScroll:
+    // these share the PPUADDR latch, which would otherwise clobber the scroll set next.
+    if (CoinVramLen) SHADOW(ppu::PPUMASK) {
+        ppu::PPUMASK = 0;
+        for (u8 i = 0; i < CoinVramLen; i += 3)
+            ppu::WriteSingleToNameTable((CoinVram[i] << 8) | CoinVram[i + 1], CoinVram[i + 2]);
+    }
+    CoinVramReset();
 
     ppu::SetScroll(0, 0);
     if (levelStreamCommand & STREAM_LEVEL_DONE) {
@@ -231,15 +279,42 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-// Would the player's AABB overlap a solid metatile at world pixel (wx, wy)?
-// (col,row) is the metatile the live cursor currently sits on; we probe from a
-// copy moved to the prospective cell so the actor's own cursor is left alone.
-static bool PlayerBlocked(const Actor* self, const i16 col, const i16 row, const u16 wx, const u16 wy) {
-    const i16 tCol = static_cast<i16>(wx >> 4);
-    const i16 tRow = ClampRow(wy);
-    level::Cursor probe = self->cursor;
-    probe.Move((tCol - col) * level::levelHeight + (tRow - row));
-    return level::CollidesSolid(probe, wx, wy, self->size.x, self->size.y);
+// Would the player's AABB at world pixel (wx, wy) be blocked?  One read of the shared
+// composite-metatile window.  collectBlocks=false: coins (Collect) are pass-through
+// now -- they no longer stop the player; CollectPlayerCoins picks them up on the
+// committed position instead.  Only walls (Solid) block.  No RLE walk -- the cell is
+// already composited in the window.  Kept under the RED profiler tint so the raster
+// dump shows the per-actor collision cost (the thing that scales with actor count).
+static bool PlayerBlocked(Actor* self, const u16 wx, const u16 wy) {
+    ppu::SetColorPriority(ppu::mask::RED);   // TEMP profiler: the collision query
+    const bool blocked = level::Blocked(wx, wy, self->size.x, self->size.y,
+                                        /*collectBlocks=*/false);
+    ppu::SetColorPriority(0);                // TEMP profiler: untinted everywhere else
+    return blocked;
+}
+
+// Pick up any coins the player's COMMITTED AABB overlaps this frame.  CollectCoins
+// does the data side (blank the run so it never returns + reveal the static cell in
+// the window); here we turn each pick into its four nametable tile writes (the 2x2
+// metatile, revealing the static-under tiles) and queue them for the NMI drain.  The
+// nametable cell is a pure function of the world column (mod 64) + row, so no scroll
+// state is needed.  STUB: score / SFX hang off here later.
+static void CollectPlayerCoins(const Actor* self) {
+    level::CoinPick picks[4];
+    const u8 n = level::CollectCoins(PlayerWorldX(self), self->screen.y,
+                                     self->size.x, self->size.y, picks, 4);
+    for (u8 i = 0; i < n && i < 4; i++) {
+        const u8  m  = picks[i].reveal;                  // static metatile now exposed
+        const u16 tx = static_cast<u16>(picks[i].col) << 1;       // left tile column
+        const u16 ty = static_cast<u16>(2 + (picks[i].row << 1)); // top tile row (HUD=2)
+        // Project each of the 2x2 tiles to its VRAM address HERE (mid-frame, off the
+        // vblank path).  CartesianToAddress masks X to the two-nametable window itself
+        // (same mod-64 wrap the column streamer relies on), so no scroll state is needed.
+        CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx + 1, ty + 1), Metatiles_BR[m]);
+    }
 }
 
 void SpriteZeroHandler() {
@@ -247,15 +322,30 @@ void SpriteZeroHandler() {
     spriteZeroHandled = 1;
     lastPort1 = port1; lastPort2 = port2;
     PollControllers(&port1, &port2);
+    // --- TEMP raster profiler: COLLISION ONLY.  The screen is left untinted
+    // (white) for everything -- audio, physics, scroll, level build, the bitmap
+    // producer -- and tinted RED only across the per-actor collision queries
+    // (PlayerBlocked).  So the height of the red band IS the collision cost, in
+    // isolation, which is the thing that scales with actor count; level/build
+    // cost is fixed and deliberately not shown.  Remove once measured.
+    ppu::SetColorPriority(ppu::mask::RED | ppu::mask::GREEN);   // TEMP profiler: AudioUpdate (yellow)
     AudioUpdate();
+    ppu::SetColorPriority(0);
     player.Update();
+    // Keep the shared static-collision bitmap centred on the (now settled) camera.
+    // Called here as a SIBLING of player.Update() -- not nested inside it -- so its
+    // ZP frame reuses PlayerUpdate's freed page-zero rather than stacking on it
+    // (page zero is at the cliff over the FamiStudio enclave).  Decoupled from the
+    // render edge stream: it tracks cameraX directly, leaving lastXWorldSpace/edgeR
+    // hysteresis untouched.
+    ppu::SetColorPriority(ppu::mask::BLUE);   // TEMP profiler: window slide + ColMapStamp
+    level::ColMapTrack(cameraX >> 4);
+    ppu::SetColorPriority(0);
 }
 
 void PlayerUpdate(Actor* self) {
     // Grounded if a solid sits one pixel under the AABB's feet.
-    const i16 col = static_cast<i16>(PlayerWorldX(self) >> 4);
-    const i16 row = ClampRow(self->screen.y);
-    bool grounded = PlayerBlocked(self, col, row, PlayerWorldX(self),
+    bool grounded = PlayerBlocked(self, PlayerWorldX(self),
                                   static_cast<u16>(self->screen.y + 1));
 
     const bool left  = port1 & LEFT;
@@ -312,6 +402,11 @@ void PlayerUpdate(Actor* self) {
     self->moveForce.y = vy;
 
     ProcessPlayerMovement(self, self->moveForce);
+
+    // Pickup runs on the now-committed position (after the move/scroll resolve), so a
+    // coin is collected exactly where the player ends the frame -- not on a rejected
+    // hypothetical probe.  Queues nametable writes for the NMI drain.
+    CollectPlayerCoins(self);
 }
 
 void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
@@ -325,11 +420,6 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     // ReSharper disable once CppVariableCanBeMadeConstexpr
     const auto playerMaxXPos   = (video::viewport_px() - 16);
 
-    // The cursor sits on the metatile under the actor's top-left corner; (col,
-    // row) mirror that cell so we can probe and re-sync it as the actor moves.
-    i16 col = static_cast<i16>(PlayerWorldX(self) >> 4);
-    i16 row = ClampRow(self->screen.y);
-
     // Vertical: accumulate the sub-pixel force into worldSpace.y; only the
     // whole-pixel carry (dy) moves the sprite / triggers collision.  This is how
     // gravity & jump keep sub-pixel precision instead of truncating each frame.
@@ -338,12 +428,9 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
         const i16 dy   = static_cast<i16>(rawY >> 3) - static_cast<i16>(self->worldSpace.y >> 3);
         if (dy) {
             const u16 ny = static_cast<u16>(self->screen.y) + dy;
-            if (!PlayerBlocked(self, col, row, PlayerWorldX(self), ny)) {
+            if (!PlayerBlocked(self, PlayerWorldX(self), ny)) {
                 self->worldSpace.y = static_cast<u16>(rawY) & 0x7ff;   // 8 sub-px/px, wrap at 256px like the old u8 screen.y
                 self->screen.y     = static_cast<oam::oam_t>(self->worldSpace.y >> 3);
-                const i16 nrow = ClampRow(self->screen.y);
-                self->cursor.Move(nrow - row);   // same column, row delta only
-                row = nrow;
                 oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY, kMarySprites);
             } else {
                 self->worldSpace.y &= ~0x7;       // bonk: rest on the pixel, drop sub-px carry
@@ -370,7 +457,7 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     if (dx < 0 && PlayerWorldX(self) == 0) { self->moveForce.x = 0; return; }
     // Horizontal: bonk (move nothing -- neither scroll nor walk) if the next
     // pixel is solid.  Kill the speed so it must rebuild after the wall clears.
-    if (PlayerBlocked(self, col, row, PlayerWorldX(self) + dx, self->screen.y)) {
+    if (PlayerBlocked(self, PlayerWorldX(self) + dx, self->screen.y)) {
         self->moveForce.x = 0;
         return;
     }
@@ -415,16 +502,16 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 if (lastDeltaScroll < 0)
                     levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
-                level::BuildNextColumn(TileBuffer);
-                // Keep the left edge parked kEdgeGap metatiles behind the right
-                // edge.  Past the startup gap both advance one full column per
-                // right-stream; before then the clamp holds edgeL at the level
-                // start and it closes the gap by 13 then 14 over two streams.
-                const u16 kEdgeGap   = (viewport_mx() + 2) * level::levelHeight + 1;
-                const u16 oldTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
-                edgeRAbs += level::levelHeight;
-                const u16 newTarget  = edgeRAbs > kEdgeGap ? edgeRAbs - kEdgeGap : 0;
-                level::edgeL.Move(static_cast<i16>(newTarget - oldTarget));
+                ppu::SetColorPriority(ppu::mask::GREEN | ppu::mask::BLUE);   // TEMP profiler: render column build (cyan)
+                // World metatile column the NMI will display at the right edge.
+                // lastXWorldSpace is still the PRE-increment boundary here (the +=16
+                // is below), so add the column we are about to advance into; this
+                // matches the NMI's nametable placement (lastXWorldSpace>>4 +
+                // viewport_mx after its own +=16) exactly.  The collision window
+                // already holds this column, so BuildNextColumn just reads it.
+                const u16 colBuiltR = ((lastXWorldSpace + 16) >> 4) + viewport_mx();
+                level::BuildNextColumn(TileBuffer, colBuiltR);
+                ppu::SetColorPriority(0);                                    // TEMP profiler: end render build
                 lastDeltaScroll = static_cast<i8>(scroll);
                 lastXWorldSpace += 16;
                 levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
@@ -442,10 +529,14 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
             lastDeltaScroll = static_cast<i8>(scroll);
-            level::BuildPrevColumn(TileBuffer);   // walks edgeL back one column
-            // The right edge retreated one column too; keep edgeR parked there.
-            level::edgeR.Move(-level::levelHeight);
-            edgeRAbs -= level::levelHeight;
+            ppu::SetColorPriority(ppu::mask::GREEN | ppu::mask::BLUE);   // TEMP profiler: render column build (cyan)
+            // World metatile column entering on the left.  lastXWorldSpace is still
+            // pre-decrement (the -=16 is below), so subtract the column we retreat
+            // into, then -1 for the entering metatile (matches the NMI's (>>4)-1
+            // placement after its own -=16).  Read straight from the window.
+            const u16 colBuiltL = ((lastXWorldSpace - 16) >> 4) - 1;
+            level::BuildPrevColumn(TileBuffer, colBuiltL);   // reads window column
+            ppu::SetColorPriority(0);                                    // TEMP profiler: end render build
             lastXWorldSpace -= 16;
             levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
         }
@@ -463,27 +554,12 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
     // Recompose the canonical sub-pixel X from the (possibly clamped) camera +
     // screen pixel position, keeping the freshly accumulated sub-pixel remainder.
     self->worldSpace.x = static_cast<u16>(((cameraX + self->screen.x) << 3) | (static_cast<u16>(rawX) & 7));
-
-    // Re-sync the cursor's column to the actor's new world column (a screen-edge
-    // clamp can leave the column unchanged even when deltaX was non-zero).
-    const i16 ncol = static_cast<i16>(PlayerWorldX(self) >> 4);
-    if (ncol != col) self->cursor.Move((ncol - col) * level::levelHeight);
 }
 
 void PlayerReset(Actor* self) {
-    // Stream the cursor from the level start, then walk it to the actor's
-    // current metatile.  Column-major: index = col*levelHeight + row.
-    self->cursor.base     = TileData;
-    self->cursor.offset   = 0;
-    self->cursor.progress = 0;
-    self->gravity         = 0;
-    self->moveForce       = vec2<i8>{0, 0};
-    playerXForce          = 0;
-    playerYForce          = 0;
-    playerRunTimer        = 0;
-
-    const i16 col = static_cast<i16>(PlayerWorldX(self) >> 4);
-    const i16 row = ClampRow(self->screen.y);
-
-    if (const i16 amt = col * level::levelHeight + row) self->cursor.Move(amt);
+    self->gravity   = 0;
+    self->moveForce = vec2<i8>{0, 0};
+    playerXForce    = 0;
+    playerYForce    = 0;
+    playerRunTimer  = 0;
 }

@@ -10,9 +10,13 @@ WHAT THIS DOES
     with no manual tile-size fiddling.
 
 WHERE THE DATA COMES FROM
-    Everything NES-side is read straight out of a *debug* build's pass-1 ELF
-    (demo_pass1.elf) by symbol name -- contents only, so the provisional pass-1
-    offsets are irrelevant:
+    Everything is read straight out of an unstripped *debug* build by symbol
+    name -- contents only, so the build's section offsets are irrelevant.  Two
+    sources are auto-discovered and the newest-built one wins: the NES pass-1
+    ELF (demo_pass1.elf, ELF32) or the Linux desktop debug build
+    (cmake-build-linux-debug/demo, ELF64).  The metatile/CHR bytes are identical
+    in either, so the desktop build is the practical source while the nes-debug
+    ROM link is unbuildable.  The symbols read are:
         Metatiles_UL/UR/BL/BR  four 256-byte planes: the corner CHR-tile ids
         Metatiles_ATTR         256-byte plane: 2-bit BG sub-palette per id
         BGColours              16 bytes: 4 sub-palettes x 4 NES colour indices
@@ -50,7 +54,10 @@ REPO_ROOT = SCRIPT_DIR.parents[1]
 
 # Symbols pulled from the ELF, with the size we expect each to be.  Size is a
 # sanity check / fallback only -- the real size comes from the symbol table.
-METATILE_PLANES = ("Metatiles_UL", "Metatiles_UR", "Metatiles_BL", "Metatiles_BR")
+# Read order maps positionally onto `corners` (UL, UR, BL, BR) in build_image.
+# UR and BL are swapped here to match the metatiles source asm, where those two
+# planes' data are wired in the opposite order.
+METATILE_PLANES = ("Metatiles_UL", "Metatiles_BL", "Metatiles_UR", "Metatiles_BR")
 ATTR_PLANE = "Metatiles_ATTR"
 BGCOLOURS_SYM = "BGColours"
 CHR_SYM = "chr_rom_image"
@@ -73,8 +80,12 @@ FALLBACK_NES_RGB = [
 
 
 # --------------------------------------------------------------------------- #
-# Minimal ELF32 (little-endian) reader: just enough to map a global symbol to
-# its bytes.  Avoids a pyelftools dependency; the mos ELF is always ELF32-LE.
+# Minimal little-endian ELF reader: just enough to map a global symbol to its
+# bytes.  Avoids a pyelftools dependency.  Handles both ELF32 (the mos NES
+# pass-1 ELF) and ELF64 (the x86-64 Linux desktop debug build) -- the metatile
+# and CHR symbols are byte-identical in either, so whichever was built latest is
+# a valid source.  Only the container differs (header offsets, section/symbol
+# entry layouts), which is selected from EI_CLASS below.
 # --------------------------------------------------------------------------- #
 class Elf:
     def __init__(self, path: Path):
@@ -82,24 +93,35 @@ class Elf:
         self.path = path
         if self.data[:4] != b"\x7fELF":
             raise ValueError(f"{path}: not an ELF file")
-        if self.data[4] != 1 or self.data[5] != 1:
-            raise ValueError(f"{path}: expected 32-bit little-endian ELF")
+        ei_class, ei_data = self.data[4], self.data[5]
+        if ei_class not in (1, 2) or ei_data != 1:
+            raise ValueError(f"{path}: expected a little-endian ELF (32- or 64-bit)")
+        self.is64 = ei_class == 2
 
-        # ELF32 header fields we need.
-        (e_shoff,) = struct.unpack_from("<I", self.data, 0x20)
-        (e_shentsize, e_shnum, e_shstrndx) = struct.unpack_from("<HHH", self.data, 0x2E)
+        # Header field offsets and the section/symbol entry layouts differ by
+        # class.  Section unpack yields (name, type, flags, addr, offset, size)
+        # in both; only the field widths change.  Symbol field *order* differs,
+        # so it is unpacked per-class below.
+        if self.is64:
+            (e_shoff,) = struct.unpack_from("<Q", self.data, 0x28)
+            (e_shentsize, e_shnum, e_shstrndx) = struct.unpack_from("<HHH", self.data, 0x3A)
+            sec_fmt, sym_fmt, sym_sz = "<IIQQQQ", "<IBBHQQ", 24
+        else:
+            (e_shoff,) = struct.unpack_from("<I", self.data, 0x20)
+            (e_shentsize, e_shnum, e_shstrndx) = struct.unpack_from("<HHH", self.data, 0x2E)
+            sec_fmt, sym_fmt, sym_sz = "<IIIIII", "<IIIBBH", 16
 
-        # Parse the section header table.
-        self.sections = []  # (name, sh_type, sh_addr, sh_offset, sh_size)
+        # Parse the section header table -> raw (name, type, addr, offset, size).
         raw_sections = []
         for i in range(e_shnum):
             base = e_shoff + i * e_shentsize
             (sh_name, sh_type, _flags, sh_addr, sh_offset, sh_size) = struct.unpack_from(
-                "<IIIIII", self.data, base
+                sec_fmt, self.data, base
             )
             raw_sections.append((sh_name, sh_type, sh_addr, sh_offset, sh_size))
 
         # Resolve section names via the section-header string table.
+        self.sections = []  # (name, sh_type, sh_addr, sh_offset, sh_size)
         shstr_off = raw_sections[e_shstrndx][3]
         for (sh_name, sh_type, sh_addr, sh_offset, sh_size) in raw_sections:
             self.sections.append(
@@ -118,10 +140,12 @@ class Elf:
         self.symbols = {}
         sym_off, sym_size = symtab[3], symtab[4]
         str_off = strtab[3]
-        for off in range(sym_off, sym_off + sym_size, 16):
-            (st_name, st_value, st_size, _info, _other, st_shndx) = struct.unpack_from(
-                "<IIIBBH", self.data, off
-            )
+        for off in range(sym_off, sym_off + sym_size, sym_sz):
+            f = struct.unpack_from(sym_fmt, self.data, off)
+            if self.is64:
+                st_name, _info, _other, st_shndx, st_value, st_size = f
+            else:
+                st_name, st_value, st_size, _info, _other, st_shndx = f
             name = self._cstr(str_off + st_name)
             if name:
                 self.symbols[name] = (st_value, st_size, st_shndx)
@@ -170,14 +194,26 @@ def parse_nes_rgb(video_cpp: Path) -> list[int]:
 
 
 def discover_elf() -> Path | None:
-    """Prefer a debug pass-1 ELF; fall back to any *pass1.elf or *.elf."""
+    """Return the most recently built ELF that carries the metatile/CHR symbols.
+
+    Candidates (newest mtime wins, so the tool follows whatever you built last):
+        * the NES pass-1 ELF (cmake-build-nes-{debug,release}/demo_pass1.elf),
+          ELF32; the canonical source.
+        * the Linux desktop debug build (cmake-build-linux-debug/demo), ELF64 --
+          the same metatile/CHR bytes, and the practical source while the
+          nes-debug ROM link is unbuildable.
+    Release *desktop* builds are stripped (no .symtab), so they are not
+    candidates; the NES pass-1 ELF is an intermediate object and stays
+    unstripped regardless of config.
+    """
     candidates = [
         REPO_ROOT / "cmake-build-nes-debug" / "demo_pass1.elf",
         REPO_ROOT / "cmake-build-nes-release" / "demo_pass1.elf",
+        REPO_ROOT / "cmake-build-linux-debug" / "demo",
     ]
-    for c in candidates:
-        if c.is_file():
-            return c
+    existing = [c for c in candidates if c.is_file()]
+    if existing:
+        return max(existing, key=lambda p: p.stat().st_mtime)
     for pat in ("**/demo_pass1.elf", "**/demo*.elf"):
         found = sorted(REPO_ROOT.glob(pat))
         if found:
@@ -216,6 +252,12 @@ def choose_bg_base(chr_bytes: bytes, planes: list[bytes]) -> tuple[int, dict]:
     on non-empty CHR.  The demo sets PPUCTRL BG_ADDR ($1000), but if the CHR was
     authored into the low half this auto-detect keeps the tool honest.  Override
     with --bg-base.
+
+    Tie-break to the HIGH half ($1000): that is the demo's actual BG_ADDR, and a
+    tie only happens when the referenced tiles are sparse/blank (so the heuristic
+    has nothing to go on) -- in which case matching the hardware is the safe call.
+    Without this, sparse metatile data flips the export onto $0000, where tile 0
+    is sprite0 and every blank metatile renders garbage.
     """
     referenced = {planes[c][i] for i in range(256) for c in range(4)}
     referenced.discard(0)  # tile 0 is the shared air/blank tile
@@ -223,7 +265,7 @@ def choose_bg_base(chr_bytes: bytes, planes: list[bytes]) -> tuple[int, dict]:
     for base in (0x0000, 0x1000):
         hit = sum(1 for t in referenced if not tile_is_empty(chr_bytes, base, t))
         stats[base] = hit
-    best = max(stats, key=lambda b: (stats[b], -b))  # ties -> low half
+    best = max(stats, key=lambda b: (stats[b], b))  # ties -> high half ($1000)
     return best, {"referenced": len(referenced), "coverage": stats}
 
 
@@ -302,8 +344,8 @@ def main() -> int:
     ap.add_argument("--video-cpp", type=Path,
                     default=REPO_ROOT / "src" / "SDL3" / "video.cpp",
                     help="renderer source to read nes_rgb[] from")
-    ap.add_argument("--out-png", type=Path, default=SCRIPT_DIR / "metatiles.png")
-    ap.add_argument("--out-tsx", type=Path, default=SCRIPT_DIR / "metatiles.tsx")
+    ap.add_argument("--out-png", type=Path, default=SCRIPT_DIR / "tilesheets" / "metatiles.png")
+    ap.add_argument("--out-tsx", type=Path, default=SCRIPT_DIR / "tilesheets" / "metatiles.tsx")
     ap.add_argument("--no-tsx", action="store_true", help="skip the .tsx companion")
     ap.add_argument("--bg-base", choices=("auto", "0", "0x1000"), default="auto",
                     help="CHR pattern-table half for BG tiles (default: auto-detect)")
@@ -322,7 +364,9 @@ def main() -> int:
     elf_path = args.elf or discover_elf()
     if elf_path is None or not elf_path.is_file():
         print("error: no ELF found. Build a debug NES target (it produces "
-              "demo_pass1.elf) or pass --elf PATH.", file=sys.stderr)
+              "demo_pass1.elf) or the Linux desktop debug build "
+              "(cmake --preset linux-debug && cmake --build cmake-build-linux-debug), "
+              "or pass --elf PATH.", file=sys.stderr)
         return 2
 
     try:

@@ -398,6 +398,13 @@ void WriteSingleToNameTable(const u16 x, const u16 y, u8 value) {
     VideoRAM[offset] = value;
 }
 
+// Address overload: @p address is the 0-based VRAM offset CartesianToAddress returns
+// on this backend (xy_to_nt_addr is already 0-based here), so it indexes VideoRAM
+// directly -- the desktop mirror of the NES poke-by-address path.
+void WriteSingleToNameTable(const int address, u8 value) {
+    VideoRAM[address] = value;
+}
+
 void SetScroll(const u16 x, const u16 y) {
     xScroll = x; yScroll = y;
     yScroll_written = 1;

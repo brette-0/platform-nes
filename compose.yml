@@ -2,7 +2,8 @@
 #
 # Run from the repository root, in any shell (PowerShell, bash, zsh, cmd):
 #
-#   docker compose run --rm build-linux
+#   docker compose run --rm build-linux     # Linux desktop demo
+#   docker compose run --rm build-nes       # NES ROM (demo.nes)
 #
 # Override the preset by setting PRESET in the environment:
 #
@@ -10,8 +11,37 @@
 #   $env:PRESET="linux-debug"; docker compose run --rm build-linux  # PowerShell
 #
 # Output is written to ./cmake-build-<preset-name> in the repository root.
+# These are the same commands CI runs (.github/workflows/ci.yml), so the
+# Linux and NES jobs reproduce locally byte-for-byte (also via `act -j ...`).
 
 services:
+  build-nes:
+    build:
+      context: docker
+      dockerfile: Dockerfile.nes
+    image: platform-nes-nes:trixie
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-nes-release}
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        # Pass the toolchain + prefix explicitly from the image's SDK rather
+        # than letting CMakeLists derive them from LLVM_MOS_SDK: a developer's
+        # bind-mounted local.cmake FORCEs that variable to a host path that
+        # doesn't exist inside the container. Build into a dedicated dir so the
+        # container never clashes with an IDE-configured cmake-build-nes-* tree
+        # (their CMakeCache.txt records a different, host source path).
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET" \
+          -DCMAKE_TOOLCHAIN_FILE="$$LLVM_MOS_SDK/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake" \
+          -DCMAKE_PREFIX_PATH="$$LLVM_MOS_SDK"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.nes"
+
   build-linux:
     build:
       context: docker
@@ -27,6 +57,8 @@ services:
       - -c
       - |
         set -euo pipefail
-        cmake --preset "$$PRESET"
-        cmake --build "cmake-build-$$PRESET" -j"$$(nproc)"
-        echo "Built: cmake-build-$$PRESET/demo"
+        # Dedicated build dir (see build-nes) so the container never clashes
+        # with an IDE-configured cmake-build-linux-* tree on the host mount.
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo"

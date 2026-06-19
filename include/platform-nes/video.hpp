@@ -663,6 +663,22 @@ namespace ppu {
     void WriteSingleToNameTable(u16 x, u16 y, u8 value);
 
     /**
+     * @brief Writes a single byte into nametable memory at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteSingleToNameTable. The (x,y)->address projection
+     * is the costly part of the write (a divide+modulo by the 30-row nametable height);
+     * this lets a caller pay it ONCE, off the hot path, via ::ppu::CartesianToAddress,
+     * then replay the write -- e.g. inside the tight vblank window -- as three register
+     * pokes with no arithmetic. @p address must be what ::ppu::CartesianToAddress returns
+     * for the active backend (a \$2000-based PPU address on NES, a 0-based VRAM offset on
+     * desktop). It is `int` so it stays 16-bit on llvm-mos yet widens on hosts.
+     *
+     * @param address Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param value   Byte value to write.
+     */
+    void WriteSingleToNameTable(int address, u8 value);
+
+    /**
      * @brief Writes bytes produced by a provider callback into nametable memory.
      *
      * Equivalent to ::ppu::WriteFromBufferToNameTable but sources each byte

@@ -57,10 +57,18 @@ public:
     u8  progress;
 
     void Move(i16 amt);
-    void Seek(i16 amt) { Move(amt); }
-    u8   Fetch() const { return DynData[offset]; }   // RAM peek (mutable)
-    u16  Run()   const { return offset; }            // run index to blank on removal
+    void Seek(const i16 amt) { Move(amt); }
+    [[nodiscard]] u8   Fetch() const { return DynData[offset]; }   // RAM peek (mutable)
+    [[nodiscard]] u16  Run()   const { return offset; }            // run index to blank on removal
 };
+
+// Forward/backward dynamic-plane edge walkers, the dynamic analogue of
+// level::edgeR / edgeL.  Held in lockstep with those static cursors: every Move
+// applied to an edge cursor is mirrored here, so a dyn cursor always sits on the
+// SAME absolute metatile as its static partner.  The metatile fetch primitives
+// read these to composite the dynamic tile over the static one (non-zero wins).
+extern DynamicCursor dynEdgeR;   // lockstep with level::edgeR (forward/right edge)
+extern DynamicCursor dynEdgeL;   // lockstep with level::edgeL (backward/left edge)
 
 // Result of a dynamic-plane collision probe: whether a non-air dynamic tile was
 // overlapped, its id (for rule dispatch) and the run that owns it (to blank).

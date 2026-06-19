@@ -103,6 +103,39 @@ void poke(const u16 addr, const u8 data) {
 #define atomic _Atomic
 #endif
 
+#ifdef TARGET_NES
+/**
+ * @brief Pins a variable into 6502 zero page ("direct page").
+ *
+ * Forces the symbol into `.zp.bss`, which the linker routes to zero page, so
+ * every access is a 2-byte/3-cycle direct-page instruction instead of the
+ * 3-byte/4-cycle absolute form. Reserve it for the hottest mutable state
+ * (cursors, counters, per-frame scratch): zero page is only 256 bytes and is
+ * shared with the compiler's imaginary registers and the FamiStudio enclave,
+ * so spend it deliberately. For zero-initialised / runtime-assigned objects —
+ * an object with a static initialiser belongs in `.zp.data` instead.
+ *
+ * Expands to nothing off-NES (the desktop host has no zero page).
+ */
+#define direct __attribute__((section(".zp.bss")))
+/**
+ * @brief Forces a variable out of zero page, into absolute-addressed memory.
+ *
+ * llvm-mos's LTO zero-page allocator opportunistically hoists small globals
+ * into zero page; `absolute` opts a symbol out by pinning it to `.rodata`, so a
+ * read-only table that is merely walked can never evict hotter state or starve
+ * the FamiStudio enclave out of page zero. Use it for the level RLE tables and
+ * similar cold lookup data. Read-only data is always absolute-addressed, so
+ * there is no separate ROM qualifier.
+ *
+ * Expands to nothing off-NES.
+ */
+#define absolute __attribute__((section(".rodata")))
+#else
+#define direct
+#define absolute
+#endif
+
 #ifdef __cplusplus
 #include <br0/tuple>
 

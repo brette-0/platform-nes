@@ -135,6 +135,18 @@ void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
     poke(raw::PPUDATA, value);
 }
 
+// Address overload: the caller already projected (x,y) -> a $2000-based PPU address
+// (via CartesianToAddress), so this skips xy_to_nt_addr entirely -- just the latch
+// reset and three pokes. Meant for the vblank window, where the divide/modulo in the
+// (x,y) form is the cost worth hoisting out.
+__attribute__((hot))
+void WriteSingleToNameTable(const int address, const u8 value) {
+    peek(raw::PPUSTATUS);
+    poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
+    poke(raw::PPUDATA, value);
+}
+
 template <typename Idx>
 __attribute__((hot))
 void WriteFromProviderToNameTable(

@@ -24,34 +24,54 @@ u8 DynData[DynRunCapacity];
 const u8* DynLengths = nullptr;
 const u8* DynDataROM = nullptr;
 
+// Edge walkers, kept in lockstep with level::edgeR / edgeL (see dynamic.hpp).
+// Seeded to the level start alongside their static partners in RESET.
+DynamicCursor dynEdgeR;
+DynamicCursor dynEdgeL;
+
 // Walk the dynamic RLE by `amt` metatiles.  Byte-for-byte the same engine as
 // Cursor::Move (including the run-0 floor guard that stops offset underflowing
 // to 0xFFFF), but lengths come from DynLengths (this plane's ROM run-lengths)
 // rather than the global HunkLengths.  Duplicated rather than shared for the
 // prototype; fold the two behind one walker once the dynamic path is proven.
 void DynamicCursor::Move(i16 amt) {
+    // Hoist to locals (see Cursor::Move): mutating offset/progress through `this` each step
+    // is a ~200-cycle memory round-trip; held in locals they live in zero-page registers and
+    // write back once.  This walker is on the player re-anchor's hot path every frame.
+    u8  p = progress;
+    // Running pointer into DynLengths (see Cursor::Move): avoids the clc/adc/adc reconstruction
+    // of DynLengths[o] on every metatile stepped; lp advances with the run index, o is recovered
+    // from it once at the end.
+    const u8* lp = DynLengths + offset;
+    // unroll(disable): mirror of Cursor::Move -- constant-step callers (Move(levelHeight)
+    // column crossings in ColMapTrack/Seed) were unrolled 14x per inlined site, the dynamic
+    // half of the same PRG blow-up.  Keep it rolled; the per-step cost is the RLE compare.
+    #pragma clang loop unroll(disable)
     while (amt > 0) {
-        if (++progress >= DynLengths[offset]) {
-            offset++;
-            progress = 0;
+        if (++p >= *lp) {
+            ++lp;
+            p = 0;
         }
         --amt;
     }
+    #pragma clang loop unroll(disable)
     while (amt < 0) {
-        if (progress == 0) {
-            if (offset == 0) return;   // floor at the level start (see Cursor::Move)
-            offset--;
-            progress = DynLengths[offset];
+        if (p == 0) {
+            if (lp == DynLengths) break;   // floor at the level start (see Cursor::Move)
+            --lp;
+            p = *lp;
         }
-        --progress;
+        --p;
         ++amt;
     }
+    offset = static_cast<u16>(lp - DynLengths);
+    progress = p;
 }
 
 // AABB sweep over the dynamic plane.  Same column-major cell walk as
 // CollidesSolid, but returns the FIRST overlapped non-air dynamic tile (id +
 // owning run) instead of a bool, so the caller can dispatch a removal rule.
-DynHit CollidesDynamic(const DynamicCursor& origin, u16 px, u16 py, u8 w, u8 h) {
+DynHit CollidesDynamic(const DynamicCursor& origin, const u16 px, const u16 py, const u8 w, const u8 h) {
     const u16 rowTop = py >> 4;
     if (rowTop >= levelHeight) return {false, 0, 0};
 
@@ -61,14 +81,24 @@ DynHit CollidesDynamic(const DynamicCursor& origin, u16 px, u16 py, u8 w, u8 h) 
     const u8 cols = ((px + w - 1) >> 4) - (px >> 4);
     const u8 rows = static_cast<u8>(rowBot - rowTop);
 
-    for (u8 c = 0; c <= cols; c++) {
+    // ONE cursor, walked monotonically forward through the AABB cells in
+    // column-major order -- NEVER reset to origin.  Within a column each row is a
+    // single Move(1); crossing to the next column steps the remaining
+    // (levelHeight - rows) cells.  Total RLE stepping is the last cell's offset
+    // (~levelHeight for a 2-wide box), not the SUM of every cell's offset: the old
+    // per-cell `probe = origin; Move(c*H + r)` re-walked the whole first column
+    // from scratch for every second-column cell -- O(cols*levelHeight) of pure
+    // redundant 16-bit-indexed stepping, the exact RLE walk the static plane was
+    // moved off of.
+    DynamicCursor probe = origin;
+    for (u8 c = 0; ; c++) {
         for (u8 r = 0; r <= rows; r++) {
-            DynamicCursor probe = origin;
-            probe.Move(c * levelHeight + r);   // column-major: dCol*H + dRow
-            const u8 id = probe.Fetch();
-            if (id != 0)
+            if (const u8 id = probe.Fetch(); id != 0)
                 return {true, id, probe.Run()};
+            if (r != rows) probe.Move(1);                // next row, same column
         }
+        if (c == cols) break;
+        probe.Move(static_cast<i16>(levelHeight - rows)); // cross to next column, row 0
     }
     return {false, 0, 0};
 }
@@ -142,15 +172,14 @@ void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u8 runCount
 // passing the static cursor so the rule can read what sits underneath.
 [[maybe_unused]] static void ActorDynamicProbeExample(
     const Cursor& staticCursor, const DynamicCursor& dynCursor,
-    u16 px, u16 py, u8 w, u8 h) {
-    const DynHit dyn = CollidesDynamic(dynCursor, px, py, w, h);
-    if (dyn.hit)
+    const u16 px, const u16 py, const u8 w, const u8 h) {
+    if (const DynHit dyn = CollidesDynamic(dynCursor, px, py, w, h); dyn.hit)
         RemoveDynamic(dyn, staticCursor);
 }
 
 // Point (3): render compositing.  The dynamic plane draws OVER the static one,
 // so a column builder takes the dynamic metatile when non-air, else the static.
-[[maybe_unused]] static u8 CompositeCell(u8 staticMetatile, u8 dynamicMetatile) {
+[[maybe_unused]] static u8 CompositeCell(const u8 staticMetatile, const u8 dynamicMetatile) {
     return dynamicMetatile != 0 ? dynamicMetatile : staticMetatile;
 }
 

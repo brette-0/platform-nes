@@ -1,0 +1,150 @@
+# Build matrix for platform-nes: NES ROM + the three desktop targets.
+#
+# Local reproduction:
+#   The `nes` and `linux` jobs are just `docker compose run` against the images
+#   in docker/, so they reproduce locally byte-for-byte:
+#
+#       docker compose run --rm build-nes      # == the `nes` job
+#       docker compose run --rm build-linux    # == the `linux` job's compile
+#
+#   To run the workflow itself locally, use act (https://github.com/nektos/act),
+#   which executes Linux-container jobs against the host Docker daemon:
+#
+#       act -j nes
+#       act -j linux
+#
+#   act cannot emulate GitHub's macOS/Windows runners, so the `mac` and `win`
+#   jobs are GitHub-hosted only -- there is no local equivalent on a Linux box.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# Newer pushes to the same ref cancel in-flight runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nes:
+    name: NES (ROM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # FetchContent (intsh/tuple) + the FamiStudio download land in the build
+      # tree; caching it across runs skips re-cloning and re-measuring.
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-ci-nes-release
+          key: nes-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.nes') }}
+          restore-keys: nes-
+
+      - name: Build demo.nes
+        run: docker compose run --rm --build build-nes
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-nes
+          path: cmake-build-ci-nes-release/demo.nes
+          if-no-files-found: error
+
+  linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-ci-linux-release
+          key: linux-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.linux') }}
+          restore-keys: linux-
+
+      # Override the service command to drive the demo-appimage target (which
+      # depends on demo), inside the same image the local `build-linux` uses.
+      - name: Build AppImage
+        run: |
+          docker compose run --rm --build build-linux bash -c '
+            set -euo pipefail
+            cmake --preset linux-release -B cmake-build-ci-linux-release
+            cmake --build cmake-build-ci-linux-release --target demo-appimage -j"$(nproc)"
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-linux-appimage
+          path: cmake-build-ci-linux-release/*.AppImage
+          if-no-files-found: error
+
+  mac:
+    name: macOS (app)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: brew install ninja
+
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-mac-release
+          key: mac-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: mac-
+
+      - name: Build demo
+        run: |
+          cmake --preset mac-release
+          cmake --build cmake-build-mac-release -j"$(sysctl -n hw.ncpu)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-macos
+          path: |
+            cmake-build-mac-release/demo
+            cmake-build-mac-release/tracks
+            cmake-build-mac-release/sfx
+          if-no-files-found: error
+
+  win:
+    name: Windows (exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Set up the MSVC developer environment: provides the Windows SDK headers/
+      # libs and puts Visual Studio's bundled Ninja on PATH. clang (preinstalled
+      # on the runner) then targets the MSVC ABI while still accepting the GNU
+      # compound-literal / gnu++23 extensions the engine relies on -- which cl
+      # would reject.
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Cache build tree
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-win-release
+          key: win-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: win-
+
+      - name: Build demo
+        shell: cmd
+        run: |
+          cmake --preset win-release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --build cmake-build-win-release -j
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo-windows
+          path: |
+            cmake-build-win-release/demo.exe
+            cmake-build-win-release/tracks
+            cmake-build-win-release/sfx
+          if-no-files-found: error

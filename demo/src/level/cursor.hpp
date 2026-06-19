@@ -13,6 +13,6 @@ namespace demo::level {
 
         void Seek(i16 amt);  // relative reposition (keeps offset); same walk as Move
         void Move(i16 amt);
-        u8   Fetch();
+        [[nodiscard]] u8   Fetch() const;
     };
 }

@@ -3,7 +3,7 @@
 # Workhorse build script. Configures (via CMake preset) and builds one target.
 #
 # Usage:
-#   scripts/build.sh <target> [release|debug] [options]
+#   demo/scripts/build.sh <target> [release|debug] [options]
 #
 #   <target>        nes | linux | win | mac
 #   [release|debug] build type (default: release)
@@ -17,9 +17,10 @@
 # The thin wrappers (build-nes.sh, build-linux.sh, ...) just call this.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Repo root is two levels up now that the scripts live under demo/scripts/.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-usage() { sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 PLATFORM=""
 BUILD_TYPE="release"

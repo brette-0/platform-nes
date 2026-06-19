@@ -5,15 +5,30 @@
 # local.cmake is gitignored.
 include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
 
-# The NES target cross-compiles with llvm-mos. Derive its toolchain from the
-# SDK path (CMAKE_PREFIX_PATH, set in local.cmake) so the machine-specific
-# path lives in exactly one place. Runs before project(), and yields to an
-# explicitly supplied toolchain (-DCMAKE_TOOLCHAIN_FILE=... or an IDE preset).
-if(TARGET_PLATFORM STREQUAL "nes" AND NOT CMAKE_TOOLCHAIN_FILE AND CMAKE_PREFIX_PATH)
-    list(GET CMAKE_PREFIX_PATH 0 _llvm_mos_sdk_root)
+# The NES target cross-compiles with llvm-mos. Everything it needs -- clang,
+# ld.lld, llvm-readelf -- lives inside the SDK, so the build resolves those from
+# the SDK root, never the shell PATH. Point LLVM_MOS_SDK at your SDK install in
+# local.cmake (the single machine-specific path); from it we derive the
+# toolchain file and seed CMAKE_PREFIX_PATH for find_package(llvm-mos-sdk).
+# Runs before project(). An explicitly supplied toolchain
+# (-DCMAKE_TOOLCHAIN_FILE=... or an IDE preset) takes precedence and skips this.
+# Keeping the SDK off PATH lets a bare clang/clang++ resolve to the host system
+# compiler for the desktop builds instead of the 6502 cross-compiler.
+if(TARGET_PLATFORM STREQUAL "nes" AND NOT CMAKE_TOOLCHAIN_FILE)
+    if(NOT LLVM_MOS_SDK)
+        message(FATAL_ERROR
+            "NES build requires the llvm-mos-sdk location, but LLVM_MOS_SDK is "
+            "unset. Copy local.cmake.example to local.cmake and set it to your "
+            "SDK install root, e.g.\n"
+            "    set(LLVM_MOS_SDK \"/path/to/llvm-mos\" CACHE PATH \"\" FORCE)\n"
+            "The SDK does NOT need to be on your PATH.")
+    endif()
     set(CMAKE_TOOLCHAIN_FILE
-        "${_llvm_mos_sdk_root}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake")
-    unset(_llvm_mos_sdk_root)
+        "${LLVM_MOS_SDK}/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake")
+    # find_package(llvm-mos-sdk) below resolves through CMAKE_PREFIX_PATH; keep
+    # it derived from the one source of truth rather than asking for it twice.
+    set(CMAKE_PREFIX_PATH "${LLVM_MOS_SDK}"
+        CACHE PATH "llvm-mos-sdk root (derived from LLVM_MOS_SDK)" FORCE)
 endif()
 
 # Application / SDL3 window title, compiled in as the PROJECT_NAME define.
@@ -26,6 +41,14 @@ endif()
 if(NOT PROJECT_NAME)
     set(PROJECT_NAME "My Platform-NES Game")
 endif()
+
+# Capture the title for the AppImage .desktop file's Name= (configure_file
+# substitutes @GAME_NAME@ in docker/demo.desktop.in). This must happen here,
+# before project() resets the PROJECT_NAME *variable* to "platform-nes":
+# appimagetool derives the output filename's prefix from Name=, and an empty
+# Name produces a "-x86_64.AppImage" argument that mksquashfs rejects as a flag.
+# project() does not touch GAME_NAME, so it survives to the linux block below.
+set(GAME_NAME "${PROJECT_NAME}")
 add_compile_definitions(LANDSCAPE)
 add_compile_definitions(PROJECT_NAME="${PROJECT_NAME}")
 
@@ -99,10 +122,14 @@ if(TARGET_PLATFORM STREQUAL "nes")
     endif()
 
     # Locate the ca65 assembler and llvm-readelf binary used during the
-    # two-pass build below.
+    # two-pass build below. ca65 is part of cc65 (a separate, system-installed
+    # toolchain) so it legitimately falls back to PATH. llvm-readelf ships with
+    # the SDK: NO_DEFAULT_PATH pins it to the SDK bin (derived from the NES
+    # compiler's own directory) so a PATH-resolved llvm-mos can never sneak in.
     find_program(CA65 ca65 HINTS "${CC65_DIR}/bin" "C:/cc65/bin" REQUIRED)
     get_filename_component(LLVM_MOS_BIN ${CMAKE_C_COMPILER} DIRECTORY)
-    find_program(LLVM_READELF llvm-readelf HINTS "${LLVM_MOS_BIN}" REQUIRED)
+    find_program(LLVM_READELF llvm-readelf
+        HINTS "${LLVM_MOS_BIN}" NO_DEFAULT_PATH REQUIRED)
 
     set(FAMISTUDIO_CFG_NTSC_SUPPORT 1 CACHE STRING "FamiStudio: enable NTSC timing tables")
     set(FAMISTUDIO_CFG_PAL_SUPPORT  0 CACHE STRING "FamiStudio: enable PAL timing tables")

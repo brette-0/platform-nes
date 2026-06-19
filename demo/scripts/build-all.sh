@@ -2,7 +2,7 @@
 # Build every target whose preset can configure on this host.
 # (win only configures on Windows, mac only on Darwin -- those are skipped
 # elsewhere by the preset host condition, so failures there are tolerated.)
-#   scripts/build-all.sh [release|debug] [options]   (default: release)
+#   demo/scripts/build-all.sh [release|debug] [options]   (default: release)
 set -uo pipefail
 HERE="$(dirname "${BASH_SOURCE[0]}")"
 

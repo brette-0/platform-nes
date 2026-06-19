@@ -1,0 +1,125 @@
+#pragma once
+
+#include "cursor.hpp"
+#include "dynamic.hpp"                 // DynamicCursor (dynamic-plane producer edge)
+#include "../graphics/metatiles.hpp"   // MetatileCollision (query decodes per cell)
+#include <platform-nes/video.hpp>      // video::viewport_tx (window width tracks the viewport)
+#include <intsh>
+
+using namespace br0::intsh;
+
+namespace demo::level {
+
+// ---------------------------------------------------------------------------
+// Shared composite-metatile window (1 byte per cell)
+//
+// Every collision / render consumer wants the SAME thing: the metatile actually
+// occupying a visible cell.  The static plane (walls/ground) and the dynamic
+// plane (coins) are both RLE-compressed in ROM/RAM and decoding either by an
+// RLE walk is the per-query cost we keep paying.  So we decode ONCE, on column
+// entry, into a flat RAM window: each cell holds the COMPOSITE metatile id
+// (dynamic-over-static, dynamic wins when non-air -- identical to the render
+// path's GetNextMetaTile).  Collision then becomes a flat index + a one-mask
+// collision-class decode, with no RLE on the hot path; the window only re-decodes
+// the single column that enters as the camera scrolls.
+//
+// One byte per cell is the whole point: the metatile is the unit of detail for
+// this plane, so every future system (more layers, render-from-shadow, dynamic
+// edits) composites into the SAME byte instead of growing a new parallel buffer.
+//
+// Audience split falls straight out of the metatile collision class:
+//   Solid   -> blocks everyone (wall/ground)
+//   Collect -> blocks the player only (coin); enemies test == Solid, so they pass
+//   None    -> air
+//
+// Window: viewport (16 metatile cols) + 4 left + 4 right = 24 columns, centred on
+// the camera, levelHeight(=14) rows each.  It is a ring: a world column maps to a
+// slot base-relative to the leftmost column held, so the non-power-of-2 width
+// needs only a subtract + one conditional wrap, never a modulo.
+// ---------------------------------------------------------------------------
+
+// Window width = viewport(in metatiles) + 4 left + 4 right.  This is the SOLE knob
+// that makes the window track the viewport across both targets:
+//   - NES: viewport is a fixed 16 metatiles, so the width folds to a compile-time 24.
+//     ColMapWidth() is constexpr, so every ring compare/wrap below becomes "... 24".
+//   - Desktop (LANDSCAPE): the viewport width is a runtime function of the display
+//     mode (video::viewport_tx() depends on `mode`/`scale`), so the ring modulus must
+//     be that runtime value -- a hardcoded 24 was too narrow for wide displays, which
+//     is what dropped ground collision / coin pickups / a render column past a scroll
+//     threshold.  The ViewMap array is sized to a compile-time max (kColMapWidth) so it
+//     never depends on the resolved mode; only the ring math uses the runtime width.
+//
+// u8 ring invariant: a ring slot is (origin + delta), both < width, so slot < 2*width.
+// kColMapWidth is kept <= 128 so that sum always fits a u8 (max slot 254); realistic
+// desktop viewports resolve to width ~70, far under the cap.
+#ifdef TARGET_NES
+constexpr u8 kColMapWidth = 24;                 // array bound AND ring modulus (folds)
+constexpr u8 ColMapWidth() { return kColMapWidth; }
+#else
+constexpr u8 kColMapWidth = 128;                // array bound only (super-ultrawide cap)
+inline u16 ColMapWidth() { return static_cast<u16>((video::viewport_tx() >> 1) + 8); }
+#endif
+
+// Composite metatile per cell; ring of kColMapWidth columns x levelHeight rows.
+// Column-major: slot s occupies [s*levelHeight .. s*levelHeight+levelHeight-1], so
+// a slid column rewrites one contiguous levelHeight-byte span.
+extern u8 ViewMap[];
+// Leftmost world metatile column currently held in the window.
+extern u16 ColMapBaseCol;
+// Ring index of ColMapBaseCol (rotates as the window slides; avoids memmove).
+extern u8  ColMapOrigin;
+
+// Pointer to the levelHeight composited metatiles of world column `col` (top cell
+// first), or nullptr if the column is outside the currently held window.  This is
+// the single decompressed view both collision (Blocked/CollectCoins) and render
+// (BuildNextColumn/BuildPrevColumn) read -- the same slot resolution used inside
+// Blocked, exposed so the render path no longer re-walks the RLE for a column the
+// window already holds.
+const u8* ColMapColumn(u16 col);
+
+// Stamp one column's levelHeight composite metatiles into ring slot `slot`.
+// `stat` is a static Cursor and `dyn` a DynamicCursor, both parked on the column's
+// top cell (row 0); they are walked down the column in lockstep and composited
+// (dynamic wins when non-air).  Both caller copies are consumed.
+void ColMapStamp(u8 slot, Cursor stat, DynamicCursor dyn);
+
+// Seed the whole window to cover world columns [leftCol .. leftCol+kColMapWidth-1]
+// from a static Cursor + dynamic Cursor parked on (leftCol, row 0).  Used at level
+// load.  Also captures the internal left/right edge cursors that ColMapTrack walks.
+void ColMapSeed(u16 leftCol, Cursor stat, DynamicCursor dyn);
+
+// Per-frame producer driver.  `camLeftCol` is the camera's leftmost viewport
+// metatile column (cameraX >> 4).  Lazily slides the window so its base tracks
+// (camLeftCol - 4), clamped to [0, nColumns-kColMapWidth], stamping at most one
+// entering column per call from the module's own edge cursors -- so the window
+// stays centred on the camera WITHOUT touching the render edge bookkeeping
+// (edgeR / lastXWorldSpace).  Call once per frame after the camera settles.
+void ColMapTrack(u16 camLeftCol);
+
+// Slide the window one column: the entering column's top cell is given by the
+// static + dynamic cursors.  (Left slide is the mirror of right.)
+void ColMapSlideRight(Cursor newRightStat, DynamicCursor newRightDyn);
+void ColMapSlideLeft(Cursor newLeftStat, DynamicCursor newLeftDyn);
+
+// AABB block test, world-pixel inputs.  py is world pixel Y; the HUD strip is
+// removed internally so the row index lands in level space, consistent with how
+// ColMapStamp packed it.  `collectBlocks` decides the audience: true for the
+// player (coins block, pending pickup), false for enemies (coins pass).  Columns
+// outside the window or rows outside [0,levelHeight) read as air.
+bool Blocked(u16 px, u16 py, u8 w, u8 h, bool collectBlocks);
+
+// One collected coin: its world metatile cell and the static metatile revealed
+// underneath (what the cell shows now that the coin is gone).  The caller turns
+// these into nametable tile writes; CollectCoins has already done the data side.
+struct CoinPick { u16 col; u8 row; u8 reveal; };
+
+// Collect every coin (Collect-class cell) the AABB overlaps.  For each: the run is
+// looked up (a rare RLE walk off the hot path) and blanked in DynData so it never
+// recomposites when the column re-enters the window, and the window cell is replaced
+// with the revealed static metatile so collision + render see it gone immediately.
+// The picks (cell + reveal) are written to `out` (up to `maxOut`); returns the count
+// (which may exceed maxOut if the AABB straddles more coins than the caller budgeted).
+// Same world-pixel / HUD-strip convention as Blocked.
+u8 CollectCoins(u16 px, u16 py, u8 w, u8 h, CoinPick* out, u8 maxOut);
+
+}   // namespace demo::level

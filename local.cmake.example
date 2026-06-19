@@ -10,9 +10,13 @@
 # default if this is left unset.
 set(PROJECT_NAME "My Super Game")
 
-# Path to your llvm-mos-sdk install, used by the NES build.
-# Only required if you build the NES target.
-set(CMAKE_PREFIX_PATH "C:/llvm-mos" CACHE PATH "" FORCE)
+# Path to your llvm-mos-sdk install root, used by the NES build. Only required
+# if you build the NES target. CMakeLists derives the cross-toolchain and
+# CMAKE_PREFIX_PATH from this one value. The SDK does NOT need to be on your
+# PATH -- in fact keep it off PATH, so a bare clang/clang++ resolves to your
+# host system compiler for the desktop (linux/mac/win) builds rather than the
+# 6502 cross-compiler.
+set(LLVM_MOS_SDK "C:/llvm-mos" CACHE PATH "" FORCE)
 
 # Path to your cc65 install (the directory that contains bin/ca65). Used by
 # the NES build to assemble the FamiStudio sound engine. Only required if

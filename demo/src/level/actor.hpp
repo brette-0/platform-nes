@@ -1,13 +1,16 @@
 #pragma once
 #include <platform-nes>
-#include "cursor.hpp"
 #include "types.hpp"
 #include "../types.hpp"
 using namespace demo::level;
 
 class Actor {
     public:
-    Cursor cursor;
+    // Collision is now a shared composite-metatile window read (see collision_map.hpp
+    // / Blocked), so the actor no longer carries any per-actor collision cursors.  The
+    // old surround constellation (four static column cursors + a dynamic anchor) lived
+    // in zero page on every actor and is gone.  Enemies query Blocked(collectBlocks=
+    // false) so coins pass; the player passes true so coins stop it (pending pickup).
     vec2<u16> worldSpace;          // top-left origin, sub-pixel: bottom 3 bits = subpx, so >>3 = px
     vec2<oam::oam_t> screen;       // on-screen sprite position (OAM coords)
     vec2<u8> size;                 // AABB extents in pixels
@@ -25,8 +28,8 @@ class Actor {
 
 // Metasprite field providers: derive the sprite coordinate from the actor's
 // location.  `i` is the metasprite cell index (2 wide x 4 tall: col = i&1, row = i>>1).
-oam::oam_t AdjustSpriteY(Actor* self, u16 i);
-oam::oam_t AdjustSpriteX(Actor* self, u16 i);
+oam::oam_t AdjustSpriteY(const Actor* self, u16 i);
+oam::oam_t AdjustSpriteX(const Actor* self, u16 i);
 
 // the cursors for an NPC can be set on spawn from their metadata
 // the cursors can be moved by 1/-1 when moving up/down

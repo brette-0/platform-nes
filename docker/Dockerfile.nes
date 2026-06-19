@@ -1,0 +1,48 @@
+# NES (6502) build image for platform-nes.
+#
+# Ships the two toolchains the NES target needs and nothing the desktop builds
+# pull in:
+#   * llvm-mos-sdk  -- the C++23 -> 6502 cross compiler + cross binutils
+#                      (clang, ld.lld, llvm-readelf) installed under /opt/llvm-mos.
+#   * cc65 (ca65)   -- assembles the FamiStudio sound engine. The Debian package
+#                      puts ca65 on PATH, which is where CMakeLists.txt looks for
+#                      it (find_program(CA65 ca65 ...) falls back to PATH).
+#
+# The same image backs CI and local runs: `docker compose run --rm build-nes`
+# produces a byte-identical demo.nes on any host, and `act -j nes` reuses it.
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# No host clang/gcc is configured as the compiler here: the NES build drives
+# the llvm-mos clang exclusively via the SDK toolchain file. build-essential is
+# kept only for libc-dev/binutils that CMake's compiler probe expects to find.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cc65 \
+        ninja-build \
+        git \
+        wget \
+        ca-certificates \
+        xz-utils \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# Debian's CMake predates the 4.2 floor the intsh/tuple dependencies declare
+# (and CMakePresets.json needs 3.21+). Install Kitware's official binary, pinned
+# so CI and local stay in lockstep. Mirrors docker/Dockerfile.linux.
+ARG CMAKE_VERSION=4.3.3
+RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
+        | tar -xz -C /opt \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
+    && ln -s /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack
+
+# llvm-mos-sdk. The "latest" release URL tracks the rolling SDK; override
+# LLVM_MOS_URL with a dated release asset to pin a reproducible build. The
+# tarball unpacks to a top-level llvm-mos/ directory, landing it at /opt/llvm-mos.
+ARG LLVM_MOS_URL=https://github.com/llvm-mos/llvm-mos-sdk/releases/latest/download/llvm-mos-linux.tar.xz
+RUN wget -qO- "${LLVM_MOS_URL}" | tar -xJ -C /opt
+ENV LLVM_MOS_SDK=/opt/llvm-mos
+
+WORKDIR /src
