@@ -340,7 +340,10 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
 
 #ifndef TARGET_NES
   #if defined(_WIN32)
-    extern const u8 _chr_rom[];
+    // C linkage so the symbol is the bare `_chr_rom` defined by the inline-asm
+    // block in video.cpp. As a C++ variable it would take the MSVC-mangled
+    // name and fail to resolve against that undecorated asm label at link time.
+    extern "C" const u8 _chr_rom[];
   #elif defined(__APPLE__)
     extern const u8 _chr_rom[] __asm("section$start$__DATA$chr_rom");
   #else

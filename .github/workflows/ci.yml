@@ -34,12 +34,12 @@ jobs:
     name: NES (ROM)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # FetchContent (intsh/tuple) + the FamiStudio download land in the build
       # tree; caching it across runs skips re-cloning and re-measuring.
       - name: Cache build tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: cmake-build-ci-nes-release
           key: nes-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.nes') }}
@@ -48,7 +48,7 @@ jobs:
       - name: Build demo.nes
         run: docker compose run --rm --build build-nes
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: demo-nes
           path: cmake-build-ci-nes-release/demo.nes
@@ -58,10 +58,10 @@ jobs:
     name: Linux (AppImage)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Cache build tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: cmake-build-ci-linux-release
           key: linux-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.linux') }}
@@ -77,7 +77,7 @@ jobs:
             cmake --build cmake-build-ci-linux-release --target demo-appimage -j"$(nproc)"
           '
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: demo-linux-appimage
           path: cmake-build-ci-linux-release/*.AppImage
@@ -87,13 +87,13 @@ jobs:
     name: macOS (app)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build tools
         run: brew install ninja
 
       - name: Cache build tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: cmake-build-mac-release
           key: mac-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
@@ -104,7 +104,7 @@ jobs:
           cmake --preset mac-release
           cmake --build cmake-build-mac-release -j"$(sysctl -n hw.ncpu)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: demo-macos
           path: |
@@ -117,7 +117,7 @@ jobs:
     name: Windows (exe)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Set up the MSVC developer environment: provides the Windows SDK headers/
       # libs and puts Visual Studio's bundled Ninja on PATH. clang (preinstalled
@@ -128,7 +128,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Cache build tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: cmake-build-win-release
           key: win-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
@@ -140,7 +140,7 @@ jobs:
           cmake --preset win-release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build cmake-build-win-release -j
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: demo-windows
           path: |
