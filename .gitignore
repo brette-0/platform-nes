@@ -55,6 +55,10 @@ dkms.conf
 local.cmake
 CMakeUserPresets.json
 
+# Per-developer Docker Compose env (UID/GID for build-output ownership).
+# Must stay out of CI's checkout so the services fall back to the 0:0 default.
+.env
+
 # CMake build trees. Releases are produced by GitHub Actions;
 # local build directories should never be committed.
 cmake-build-*/

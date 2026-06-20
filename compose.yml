@@ -4,6 +4,8 @@
 #
 #   docker compose run --rm build-linux     # Linux desktop demo
 #   docker compose run --rm build-nes       # NES ROM (demo.nes)
+#   docker compose run --rm build-gc        # GameCube demo.dol
+#   docker compose run --rm build-wii       # Wii demo.dol (also runs on Wii U / vWii)
 #
 # Override the preset by setting PRESET in the environment:
 #
@@ -13,6 +15,22 @@
 # Output is written to ./cmake-build-<preset-name> in the repository root.
 # These are the same commands CI runs (.github/workflows/ci.yml), so the
 # Linux and NES jobs reproduce locally byte-for-byte (also via `act -j ...`).
+#
+# File ownership of the build output:
+#   The containers run as ${UID}:${GID}, defaulting to 0:0 (root) when those
+#   are unset -- which is what CI uses, so CI output stays root-owned exactly as
+#   before. To make LOCAL output owned by you (so you can delete build trees
+#   without sudo), pass your ids on the command line:
+#
+#       UID=$(id -u) GID=$(id -g) docker compose run --rm build-gc
+#
+#   or, to avoid repeating it, create an uncommitted .env in the repo root once:
+#
+#       printf 'UID=%s\nGID=%s\n' "$(id -u)" "$(id -g)" > .env
+#
+#   Compose auto-loads .env; it is gitignored so it never reaches CI's checkout
+#   (CI then falls back to the 0:0 default). $HOME is pointed at /tmp because a
+#   non-root uid has no home directory inside the image.
 
 services:
   build-nes:
@@ -20,11 +38,13 @@ services:
       context: docker
       dockerfile: Dockerfile.nes
     image: platform-nes-nes:trixie
+    user: "${UID:-0}:${GID:-0}"
     working_dir: /tmp/platform-nes
     volumes:
       - .:/tmp/platform-nes
     environment:
       PRESET: ${PRESET:-nes-release}
+      HOME: /tmp
     command:
       - bash
       - -c
@@ -47,11 +67,13 @@ services:
       context: docker
       dockerfile: Dockerfile.linux
     image: platform-nes-linux:bullseye
+    user: "${UID:-0}:${GID:-0}"
     working_dir: /tmp/platform-nes
     volumes:
       - .:/tmp/platform-nes
     environment:
       PRESET: ${PRESET:-linux-release}
+      HOME: /tmp
     command:
       - bash
       - -c
@@ -62,3 +84,52 @@ services:
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo"
+
+  # GameCube + Wii share one image (devkitPPC + libogc); the preset selects the
+  # console toolchain (GameCube.cmake vs Wii.cmake). The gc-/wii-release presets
+  # already point CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/*, and DEVKITPRO is
+  # exported by the base image, so no explicit -DCMAKE_TOOLCHAIN_FILE is needed
+  # (unlike build-nes, whose SDK path can't be derived from a bind-mounted
+  # local.cmake). The OGC branch never reads LLVM_MOS_SDK, so a forced value in a
+  # developer's local.cmake is inert here.
+  build-gc:
+    build:
+      context: docker
+      dockerfile: Dockerfile.ogc
+    image: platform-nes-ogc:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-gc-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.dol"
+
+  build-wii:
+    build:
+      context: docker
+      dockerfile: Dockerfile.ogc
+    image: platform-nes-ogc:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-wii-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.dol"

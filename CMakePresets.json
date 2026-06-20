@@ -96,6 +96,50 @@
       "inherits": "mac-release",
       "displayName": "macOS (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "gc-release",
+      "inherits": "_base",
+      "displayName": "GameCube (Release)",
+      "description": "GameCube .dol via the devkitPPC toolchain. Requires devkitPro installed and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file pulls in libogc + GX and the ogc_create_dol() helper. CMAKE_SYSTEM_NAME is set to NintendoGameCube by the toolchain, which drives the TARGET_GC/TARGET_OGC engine gating.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "gc",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/GameCube.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "gc-debug",
+      "inherits": "gc-release",
+      "displayName": "GameCube (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "wii-release",
+      "inherits": "_base",
+      "displayName": "Wii (Release)",
+      "description": "Wii .dol via the devkitPPC toolchain (also runs on Wii U via vWii). Requires devkitPro installed and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file pulls in libogc + GX + WPAD and the ogc_create_dol() helper. CMAKE_SYSTEM_NAME is set to NintendoWii by the toolchain, which drives the TARGET_WII/TARGET_OGC engine gating.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "wii",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/Wii.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "wii-debug",
+      "inherits": "wii-release",
+      "displayName": "Wii (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ]
 }

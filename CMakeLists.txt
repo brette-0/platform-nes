@@ -334,6 +334,94 @@ ${FAMISTUDIO_CFG}")
     )
 
     # ----------------------------------------------------------------------
+    # GameCube + Wii target (libogc / GX), via the devkitPPC toolchain.
+    #
+    # One backend (src/ogc) serves both consoles -- they share the Gekko/Broadway
+    # CPU and the Flipper/Hollywood GX pipeline; only input and a couple of build
+    # flags differ. The Wii .dol additionally runs unmodified on Wii U via vWii,
+    # so this single branch covers all three with the bar set at a Homebrew app.
+    #
+    # The toolchain file (GameCube.cmake / Wii.cmake) is supplied via the
+    # gc-release / wii-release presets; it sets CMAKE_SYSTEM_NAME and, through
+    # Platform/libogc.cmake, the arch flags, the -logc -lm link line (plus
+    # -lwiiuse -lbte on Wii) and the ogc_create_dol() helper used below.
+    # ----------------------------------------------------------------------
+elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
+    project(platform-nes CXX)
+
+    FetchContent_MakeAvailable(intsh tuple)
+
+    if(TARGET_PLATFORM STREQUAL "gc")
+        set(PLATFORM_DEFINE TARGET_GC)
+    else()
+        set(PLATFORM_DEFINE TARGET_WII)
+    endif()
+
+    # The OGC backend presents the shared software PPU (src/emu) through GX: the
+    # emulator and all the nametable/OAM/palette write functions are
+    # platform-agnostic and compiled here alongside the GX-specific
+    # video/present, the PAD/WPAD input, and the (stub) audio.
+    file(GLOB OGC_SOURCES CONFIGURE_DEPENDS src/ogc/*.cpp src/emu/*.cpp)
+    add_library(platform-nes STATIC ${OGC_SOURCES})
+    target_include_directories(platform-nes PUBLIC
+            ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/include/umbrella
+    )
+    # TARGET_OGC is the shared "GameCube-or-Wii" group the engine headers gate on
+    # (emulated PPU like SDL, but a fixed viewport and no SDL headers); TARGET_GC
+    # / TARGET_WII select the console-specific bits (e.g. WPAD on Wii only).
+    target_compile_definitions(platform-nes PUBLIC ${PLATFORM_DEFINE} TARGET_OGC)
+
+    # The on-target statistical PC sampler + on-screen overlay (src/ogc/
+    # profiler.cpp and the overlay path in video.cpp) is a development tool, not
+    # a shipping feature: it spins up a high-priority sampler thread and draws a
+    # hex/bar overlay every frame. Compile it only into Debug builds via the
+    # OGC_PROFILER gate, so Release .dols carry neither the thread nor the draw.
+    # PRIVATE: only the library's own TUs (profiler.cpp/video.cpp) consult it.
+    target_compile_definitions(platform-nes PRIVATE $<$<CONFIG:Debug>:OGC_PROFILER>)
+    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+    file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+    # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
+    # (being the includer) emits the folded CHR ROM image. Declare the art as an
+    # explicit dependency so editing it retriggers a recompile.
+    file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+            PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+    add_executable(demo ${DEMO_SOURCES})
+    set_target_properties(demo PROPERTIES SUFFIX ".elf")
+    target_link_libraries(demo PRIVATE platform-nes)
+
+    # CHR art is pulled in with #embed (C23). devkitPPC's GCC supports it without
+    # a diagnostic here; keep the Clang-only silencer guard for parity with the
+    # other branches (no-op under GCC).
+    target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+    # Enable LTO for release-type configs. The software PPU is the hot path and
+    # spans the platform-nes static lib (emu::GenerateFrame) and the demo (the
+    # per-frame IRQ handlers it calls back into); cross-module inlining matters
+    # here. CMake routes archiving through gcc-ar/gcc-ranlib once
+    # INTERPROCEDURAL_OPTIMIZATION is set, so the .dol-from-.elf step is
+    # unaffected. Mirrors the desktop branch below.
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+    if(_ipo_ok)
+        foreach(_cfg Release MinSizeRel RelWithDebInfo)
+            string(TOUPPER ${_cfg} _CFG)
+            set_property(TARGET demo platform-nes
+                    PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+        endforeach()
+    else()
+        message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+    endif()
+
+    # Convert the linked ELF into a bootable .dol (Homebrew Channel / loader
+    # format). Defined by Platform/libogc.cmake once the OGC toolchain is active.
+    ogc_create_dol(demo)
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()
@@ -467,7 +555,10 @@ else()
     )
     FetchContent_MakeAvailable(SDL3)
 
-    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp)
+    # The SDL3 backend presents the shared software PPU (src/emu): the emulator
+    # and all the nametable/OAM/palette write functions are platform-agnostic
+    # and compiled here alongside the SDL-specific window/present/input/audio.
+    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp src/emu/*.cpp)
     add_library(platform-nes STATIC ${SDL3_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include

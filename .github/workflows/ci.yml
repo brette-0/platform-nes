@@ -1,16 +1,20 @@
-# Build matrix for platform-nes: NES ROM + the three desktop targets.
+# Build matrix for platform-nes: NES ROM + GameCube/Wii .dol + three desktop targets.
 #
 # Local reproduction:
-#   The `nes` and `linux` jobs are just `docker compose run` against the images
-#   in docker/, so they reproduce locally byte-for-byte:
+#   The `nes`, `gc`, `wii` and `linux` jobs are just `docker compose run` against
+#   the images in docker/, so they reproduce locally byte-for-byte:
 #
 #       docker compose run --rm build-nes      # == the `nes` job
+#       docker compose run --rm build-gc       # == the `gc` job
+#       docker compose run --rm build-wii      # == the `wii` job
 #       docker compose run --rm build-linux    # == the `linux` job's compile
 #
 #   To run the workflow itself locally, use act (https://github.com/nektos/act),
 #   which executes Linux-container jobs against the host Docker daemon:
 #
 #       act -j nes
+#       act -j gc
+#       act -j wii
 #       act -j linux
 #
 #   act cannot emulate GitHub's macOS/Windows runners, so the `mac` and `win`
@@ -52,6 +56,50 @@ jobs:
         with:
           name: demo-nes
           path: cmake-build-ci-nes-release/demo.nes
+          if-no-files-found: error
+
+  gc:
+    name: GameCube (.dol)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-gc-release
+          key: gc-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.ogc') }}
+          restore-keys: gc-
+
+      - name: Build demo.dol
+        run: docker compose run --rm --build build-gc
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-gamecube
+          path: cmake-build-ci-gc-release/demo.dol
+          if-no-files-found: error
+
+  wii:
+    name: Wii (.dol)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-wii-release
+          key: wii-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.ogc') }}
+          restore-keys: wii-
+
+      - name: Build demo.dol
+        run: docker compose run --rm --build build-wii
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-wii
+          path: cmake-build-ci-wii-release/demo.dol
           if-no-files-found: error
 
   linux:
