@@ -1,0 +1,46 @@
+# Nintendo 3DS (libctru / citro2d) build image for platform-nes.
+#
+# Built on devkitPro's official devkitARM image, which ships the ARM
+# cross-toolchain (arm-none-eabi-g++), the dkp-pacman package manager and the
+# 3DS CMake integration (3DS.cmake + Tools3DS.cmake), with DEVKITPRO and
+# DEVKITARM already exported. The 3ds-dev package group (libctru, citro3d,
+# citro2d, tex3ds, the 3dsxtool/smdhtool helpers) is installed below so the
+# software-PPU backend in src/3ds builds against citro2d:
+#
+#   docker compose run --rm build-3ds      # 3DS demo.3dsx
+#
+# The same image backs CI and local runs, and `act -j ctr` reuses it.
+FROM devkitpro/devkitarm:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Ensure the full 3DS toolchain + libraries are present (libctru, citro3d,
+# citro2d, tex3ds and the .3dsx/.smdh packaging tools). --needed makes this a
+# no-op if the base image already ships them.
+RUN dkp-pacman -S --needed --noconfirm 3ds-dev
+
+# The base image is Ubuntu-based; add the host-side build tools the project
+# needs that aren't part of the devkit toolchain itself. (Ninja is the preset
+# generator; git/wget/ca-certificates support FetchContent of intsh/tuple.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build \
+        git \
+        wget \
+        ca-certificates \
+        xz-utils \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# The intsh/tuple dependencies declare a CMake 4.2 floor (and CMakePresets.json
+# needs 3.21+); the devkit image's bundled CMake can lag behind. Install
+# Kitware's official binary, pinned to match the other target images so every
+# target stays in lockstep. The symlinks go in /usr/local/bin, ahead of the
+# devkit-provided cmake on PATH.
+ARG CMAKE_VERSION=4.3.3
+RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
+        | tar -xz -C /opt \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack
+
+WORKDIR /src

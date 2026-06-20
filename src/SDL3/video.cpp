@@ -20,6 +20,14 @@
 #include <atomic>
 #include <SDL3/SDL.h>
 
+#ifdef __EMSCRIPTEN__
+// On the web the browser owns the event loop; emscripten_sleep() (with the
+// -sASYNCIFY link flag set by the web build) suspends the C stack and returns
+// control to requestAnimationFrame, then resumes here next tick. This is what
+// lets the otherwise-blocking main loop run unchanged in a browser.
+#include <emscripten.h>
+#endif
+
 // ---------------------------------------------------------------------------
 // SDL-specific state. Everything the core needs (VideoRAM, paletteRAM, scroll,
 // PPUCTRL/PPUMASK, the OAM snapshot, patternTable, ...) is owned by src/emu;
@@ -105,11 +113,24 @@ void WaitForPresent() {
         }
     }
 
+    constexpr u64 target = 16666667;   // 60 Hz frame budget, ns
+#ifdef __EMSCRIPTEN__
+    // Must yield to the browser every frame (not busy-wait): emscripten_sleep
+    // hands control back to the event loop so the canvas paints and input flows.
+    // Round the remaining budget to whole ms (its resolution); always sleep at
+    // least 1ms so a frame that overran its budget still yields rather than
+    // spinning the tab. Asyncify resumes execution right here next tick.
     const u64 elapsed = SDL_GetTicksNS() - last_frame;
-    if (constexpr u64 target = 16666667; elapsed < target) {
+    const u64 remain  = elapsed < target ? target - elapsed : 0;
+    emscripten_sleep(static_cast<unsigned>(remain / 1000000) + 1);
+    last_frame = SDL_GetTicksNS();
+#else
+    const u64 elapsed = SDL_GetTicksNS() - last_frame;
+    if (elapsed < target) {
         SDL_DelayPrecise(target - elapsed);
     }
     last_frame = SDL_GetTicksNS();
+#endif
 
     if (ppu::PPUMASK & (ppu::mask::BG | ppu::mask::SPRITE)) {
         present_frame();

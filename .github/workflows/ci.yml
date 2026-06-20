@@ -1,12 +1,16 @@
-# Build matrix for platform-nes: NES ROM + GameCube/Wii .dol + three desktop targets.
+# Build matrix for platform-nes: NES ROM + GameCube/Wii .dol + 3DS .3dsx +
+# WebAssembly + three desktop targets.
 #
 # Local reproduction:
-#   The `nes`, `gc`, `wii` and `linux` jobs are just `docker compose run` against
-#   the images in docker/, so they reproduce locally byte-for-byte:
+#   The `nes`, `gc`, `wii`, `web`, `ctr` and `linux` jobs are just
+#   `docker compose run` against the images in docker/, so they reproduce
+#   locally byte-for-byte:
 #
 #       docker compose run --rm build-nes      # == the `nes` job
 #       docker compose run --rm build-gc       # == the `gc` job
 #       docker compose run --rm build-wii      # == the `wii` job
+#       docker compose run --rm build-web      # == the `web` job
+#       docker compose run --rm build-3ds      # == the `ctr` job
 #       docker compose run --rm build-linux    # == the `linux` job's compile
 #
 #   To run the workflow itself locally, use act (https://github.com/nektos/act),
@@ -15,6 +19,8 @@
 #       act -j nes
 #       act -j gc
 #       act -j wii
+#       act -j web
+#       act -j ctr
 #       act -j linux
 #
 #   act cannot emulate GitHub's macOS/Windows runners, so the `mac` and `win`
@@ -100,6 +106,56 @@ jobs:
         with:
           name: demo-wii
           path: cmake-build-ci-wii-release/demo.dol
+          if-no-files-found: error
+
+  web:
+    name: Web (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-web-release
+          key: web-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.web') }}
+          restore-keys: web-
+
+      - name: Build demo.html
+        run: docker compose run --rm --build build-web
+
+      # The web build emits an interdependent set (HTML shell + JS glue + wasm +
+      # the MEMFS asset blob); upload all four so the artifact is runnable.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-web
+          path: |
+            cmake-build-ci-web-release/demo.html
+            cmake-build-ci-web-release/demo.js
+            cmake-build-ci-web-release/demo.wasm
+            cmake-build-ci-web-release/demo.data
+          if-no-files-found: error
+
+  ctr:
+    name: 3DS (.3dsx)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-ctr-release
+          key: ctr-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.3ds') }}
+          restore-keys: ctr-
+
+      - name: Build demo.3dsx
+        run: docker compose run --rm --build build-3ds
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-3ds
+          path: cmake-build-ci-ctr-release/demo.3dsx
           if-no-files-found: error
 
   linux:

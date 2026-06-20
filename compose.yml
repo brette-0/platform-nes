@@ -6,6 +6,8 @@
 #   docker compose run --rm build-nes       # NES ROM (demo.nes)
 #   docker compose run --rm build-gc        # GameCube demo.dol
 #   docker compose run --rm build-wii       # Wii demo.dol (also runs on Wii U / vWii)
+#   docker compose run --rm build-web       # WebAssembly demo.html (+ .js/.wasm/.data)
+#   docker compose run --rm build-3ds       # Nintendo 3DS demo.3dsx
 #
 # Override the preset by setting PRESET in the environment:
 #
@@ -85,6 +87,31 @@ services:
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo"
 
+  build-web:
+    build:
+      context: docker
+      dockerfile: Dockerfile.web
+    image: platform-nes-web:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-web-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        # The web-* preset points CMAKE_TOOLCHAIN_FILE at the image's
+        # Emscripten.cmake (via $$EMSDK), so a plain cmake --preset suffices --
+        # no emcmake wrapper needed. Dedicated build dir (see build-nes) so the
+        # container never clashes with an IDE-configured tree on the host mount.
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.html"
+
   # GameCube + Wii share one image (devkitPPC + libogc); the preset selects the
   # console toolchain (GameCube.cmake vs Wii.cmake). The gc-/wii-release presets
   # already point CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/*, and DEVKITPRO is
@@ -133,3 +160,30 @@ services:
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo.dol"
+
+  # Nintendo 3DS (devkitARM + libctru + citro2d). The ctr-release preset points
+  # CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/3DS.cmake, and DEVKITPRO is exported
+  # by the base image, so no explicit -DCMAKE_TOOLCHAIN_FILE is needed (unlike
+  # build-nes). The backend renders the shared software PPU to one RGBA texture
+  # via citro2d (the PICA200 has no paletted textures), so it never reads
+  # LLVM_MOS_SDK and a forced value in a developer's local.cmake is inert here.
+  build-3ds:
+    build:
+      context: docker
+      dockerfile: Dockerfile.3ds
+    image: platform-nes-3ds:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-ctr-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.3dsx"

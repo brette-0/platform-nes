@@ -98,6 +98,50 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
+      "name": "web-release",
+      "inherits": "_base",
+      "displayName": "Web (Release)",
+      "description": "WebAssembly build via Emscripten. Requires the emsdk installed and the EMSDK env var set (e.g. by sourcing emsdk_env.sh); the toolchain file ports SDL3 to the browser. The blocking main loop runs under -sASYNCIFY and the demo's tracks/sfx are baked into MEMFS. Output is demo.html + demo.js + demo.wasm + demo.data; serve over http and open demo.html.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "web",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{EMSDK}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "web-debug",
+      "inherits": "web-release",
+      "displayName": "Web (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "ctr-release",
+      "inherits": "_base",
+      "displayName": "3DS (Release)",
+      "description": "Nintendo 3DS .3dsx via the devkitARM toolchain. Requires devkitPro installed and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file pulls in libctru + citro2d/citro3d and the ctr_create_3dsx()/ctr_generate_smdh() helpers. CMAKE_SYSTEM_NAME is set to Nintendo3DS by the toolchain, which drives the TARGET_CTR engine gating. The PICA200 has no paletted textures, so the backend renders the shared software PPU to one RGBA texture (like SDL) rather than a GPU tilemap (like GameCube/Wii).",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "ctr",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/3DS.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "ctr-debug",
+      "inherits": "ctr-release",
+      "displayName": "3DS (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
       "name": "gc-release",
       "inherits": "_base",
       "displayName": "GameCube (Release)",

@@ -30,11 +30,12 @@ using namespace br0::intsh;
 
 #include "technology.hpp"
 
-// The SDL desktop backend pulls in SDL's display-mode types here; the libogc
-// (GameCube/Wii) backend is an emulated-PPU build like SDL but presents through
-// GX, so it must NOT see any SDL headers. Both are "non-NES", so the SDL-only
-// includes/globals are gated on (!TARGET_NES && !TARGET_OGC).
-#if !defined(TARGET_NES) && !defined(TARGET_OGC)
+// The SDL desktop backend pulls in SDL's display-mode types here. The libogc
+// (GameCube/Wii) and 3DS (citro2d) backends are emulated-PPU builds like SDL but
+// present through a console GPU, so they must NOT see any SDL headers. All are
+// "non-NES", so the SDL-only includes/globals are gated on
+// (!TARGET_NES && !TARGET_OGC && !TARGET_CTR).
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR)
 #include <SDL3/SDL_video.h>
 #endif
 
@@ -537,7 +538,7 @@ namespace ppu {
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
 }
-#if !defined(TARGET_NES) && !defined(TARGET_OGC)
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
@@ -545,14 +546,16 @@ extern u8 scale;
 #endif
 
 namespace video {
-#if defined(TARGET_NES) || defined(TARGET_OGC)
-    // NES and the libogc (GameCube/Wii) backend both present a fixed 32x30-tile
-    // NES frame. On NES this is the hardware PPU; on OGC the emulated framebuffer
-    // is a fixed 256x240 surface that GX scales to the TV, so the viewport is
+#if defined(TARGET_NES) || defined(TARGET_OGC) || defined(TARGET_CTR)
+    // NES, the libogc (GameCube/Wii) backend, and the 3DS (citro2d) backend all
+    // present a fixed 32x30-tile NES frame. On NES this is the hardware PPU; on
+    // OGC the emulated framebuffer is a fixed 256x240 surface that GX scales to
+    // the TV; on 3DS the emulated 256x240 frame is uploaded as one texture and
+    // citro2d scales it to the top screen. In every case the viewport is
     // constant (no window/display-mode dependency like the SDL backend has).
-    /** @brief Viewport width in tiles (NES/OGC: fixed 32). */
+    /** @brief Viewport width in tiles (NES/OGC/CTR: fixed 32). */
     constexpr u16 viewport_tx() { return 32; }
-    /** @brief Viewport height in tiles (NES/OGC: fixed 30). */
+    /** @brief Viewport height in tiles (NES/OGC/CTR: fixed 30). */
     constexpr u16 viewport_ty() { return 30; }
     /** @brief Viewport width in pixels (tiles * 8). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }

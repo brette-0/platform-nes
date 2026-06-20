@@ -422,6 +422,87 @@ elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
     ogc_create_dol(demo)
 
     # ----------------------------------------------------------------------
+    # Nintendo 3DS target (libctru + citro2d), via the devkitARM toolchain.
+    #
+    # The 3DS presents the shared software PPU (src/emu) like the SDL backend:
+    # emu::GenerateFrame rasterises one ARGB frame on the ARM11, which is
+    # uploaded as a single RGBA8 texture and scaled to the top screen by
+    # citro2d. The PICA200 has no paletted-texture format, so the GX/CI4 tilemap
+    # path the GameCube/Wii branch uses cannot port -- a CPU raster into one
+    # texture is the natural fit.
+    #
+    # The toolchain file (3DS.cmake) is supplied via the ctr-* presets; it sets
+    # CMAKE_SYSTEM_NAME=Nintendo3DS and, through Platform/devkitArm.cmake, the
+    # arch flags and the ctr_generate_smdh() / ctr_create_3dsx() helpers used
+    # below. citro2d/citro3d/ctru are linked explicitly (the toolchain does not
+    # add them implicitly the way libogc.cmake adds -logc).
+    # ----------------------------------------------------------------------
+elseif(TARGET_PLATFORM STREQUAL "ctr")
+    project(platform-nes CXX)
+
+    FetchContent_MakeAvailable(intsh tuple)
+
+    # The 3DS backend presents the shared software PPU (src/emu) through citro2d:
+    # the emulator and all the nametable/OAM/palette write functions are
+    # platform-agnostic and compiled here alongside the citro2d video/present,
+    # the hid input, and the (stub) audio.
+    file(GLOB CTR_SOURCES CONFIGURE_DEPENDS src/3ds/*.cpp src/emu/*.cpp)
+    add_library(platform-nes STATIC ${CTR_SOURCES})
+    target_include_directories(platform-nes PUBLIC
+            ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/include/umbrella
+    )
+    # TARGET_CTR is the group the engine headers gate on (emulated PPU like SDL,
+    # but a fixed 32x30 viewport and no SDL headers -- same family as TARGET_OGC).
+    target_compile_definitions(platform-nes PUBLIC TARGET_CTR)
+    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+    file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+    # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
+    # (being the includer) emits the folded CHR ROM image. Declare the art as an
+    # explicit dependency so editing it retriggers a recompile.
+    file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+            PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+    add_executable(demo ${DEMO_SOURCES})
+    set_target_properties(demo PROPERTIES SUFFIX ".elf")
+    target_link_libraries(demo PRIVATE platform-nes citro2d citro3d ctru m)
+
+    # CHR art is pulled in with #embed (C23). devkitARM's GCC supports it without
+    # a diagnostic here; keep the Clang-only silencer guard for parity with the
+    # other branches (no-op under GCC).
+    target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+    # Enable LTO for release-type configs, mirroring the OGC + desktop branches:
+    # the software PPU (emu::GenerateFrame) spans the static lib and the demo's
+    # per-frame IRQ handlers, so cross-module inlining matters on the hot path.
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+    if(_ipo_ok)
+        foreach(_cfg Release MinSizeRel RelWithDebInfo)
+            string(TOUPPER ${_cfg} _CFG)
+            set_property(TARGET demo platform-nes
+                    PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+        endforeach()
+    else()
+        message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+    endif()
+
+    # Wrap the linked ELF as a .3dsx (homebrew loader format) with an SMDH icon/
+    # metadata banner. Both helpers come from devkitARM's Tools3DS.cmake once the
+    # 3DS toolchain is active.
+    ctr_generate_smdh(demo.smdh
+            NAME "platform-nes demo"
+            DESCRIPTION "NES engine demo on 3DS (citro2d)"
+            AUTHOR "brette"
+    )
+    ctr_create_3dsx(demo
+            SMDH ${CMAKE_BINARY_DIR}/demo.smdh
+    )
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()
@@ -435,8 +516,17 @@ else()
         set(PLATFORM_DEFINE TARGET_WINDOWS)
     elseif(TARGET_PLATFORM STREQUAL "linux")
         set(PLATFORM_DEFINE TARGET_LINUX)
+    elseif(TARGET_PLATFORM STREQUAL "web")
+        # Emscripten/WASM. This is "just another SDL3 desktop target": the
+        # emsdk toolchain (active via the web-* presets / emcmake) ports SDL3's
+        # video, audio, keyboard and gamepad to the browser, so the src/SDL3
+        # backend and the emu core compile unchanged. The only target-specific
+        # bits are Asyncify (to let the blocking main loop yield to the browser)
+        # and packaging the runtime assets into MEMFS -- handled in the
+        # if(EMSCRIPTEN) block after the demo target below.
+        set(PLATFORM_DEFINE TARGET_WEB)
     else()
-        message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux")
+        message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux, web")
     endif()
 
     # ------------------------------------------------------------------
@@ -590,6 +680,42 @@ else()
     # option" note, and its own #embed support doesn't warn here anyway.
     target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
 
+    # ------------------------------------------------------------------
+    # Emscripten / WebAssembly packaging.
+    #
+    # The browser owns the event loop and cannot be blocked, but the demo's
+    # main() is a classic blocking `while (!quit) { ...; WaitForPresent(); }`.
+    # -sASYNCIFY lets that loop yield to requestAnimationFrame transparently:
+    # the SDL3 backend's per-frame wait calls emscripten_sleep() (guarded by
+    # __EMSCRIPTEN__ in src/SDL3/video.cpp), which Asyncify turns into a real
+    # browser yield -- so main.cpp stays byte-identical to every other platform.
+    #
+    # The demo loads its music/SFX from tracks/ and sfx/ at runtime via
+    # SDL_LoadWAV; on the web there is no host filesystem, so those trees are
+    # baked into the MEMFS virtual FS with --preload-file (producing demo.data).
+    # They mount at /tracks and /sfx, matching the relative paths the desktop
+    # build uses from the executable's working directory.
+    #
+    # SUFFIX .html makes emcc emit the HTML shell + demo.js + demo.wasm so the
+    # artifact is openable directly (served over http).
+    if(EMSCRIPTEN)
+        set_target_properties(demo PROPERTIES SUFFIX ".html")
+        # Each --preload-file is wrapped in SHELL: so CMake keeps the flag and
+        # its path as one token: a bare repeated "--preload-file" gets
+        # de-duplicated by link-option dedup, collapsing the two into one and
+        # leaving the second path stranded as a bogus input file.
+        target_link_options(demo PRIVATE
+                -sASYNCIFY
+                -sALLOW_MEMORY_GROWTH=1
+                "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/demo/tracks@/tracks"
+                "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/demo/sfx@/sfx"
+        )
+        # Re-link when the bundled assets change (emcc reads them at link time).
+        file(GLOB_RECURSE WEB_ASSET_FILES CONFIGURE_DEPENDS
+                ${CMAKE_SOURCE_DIR}/demo/tracks/* ${CMAKE_SOURCE_DIR}/demo/sfx/*)
+        set_property(TARGET demo APPEND PROPERTY LINK_DEPENDS "${WEB_ASSET_FILES}")
+    endif()
+
     # Enable LTO for release-type configs on desktop targets. CMake routes
     # archive/link through gcc-ar/gcc-ranlib (GCC) or lld (Clang) automatically
     # once INTERPROCEDURAL_OPTIMIZATION is set on the target.
@@ -605,24 +731,31 @@ else()
         message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
     endif()
 
-    add_custom_command(TARGET demo POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/demo/tracks
-            $<TARGET_FILE_DIR:demo>/tracks
-    )
+    # Desktop runs the demo from its own directory and loads tracks/ + sfx/ by
+    # relative path, so they are copied next to the executable. On Emscripten the
+    # same trees are baked into MEMFS via --preload-file (above), so skip the copy.
+    if(NOT EMSCRIPTEN)
+        add_custom_command(TARGET demo POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/demo/tracks
+                $<TARGET_FILE_DIR:demo>/tracks
+        )
 
-    add_custom_command(TARGET demo POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/demo/sfx
-            $<TARGET_FILE_DIR:demo>/sfx
-    )
+        add_custom_command(TARGET demo POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${CMAKE_SOURCE_DIR}/demo/sfx
+                $<TARGET_FILE_DIR:demo>/sfx
+        )
+    endif()
 
     # ------------------------------------------------------------------
     # Strip the final executable in non-Debug builds. MSVC has no strip
     # (symbols live in a separate .pdb), so only run when CMAKE_STRIP is
-    # available (GCC/Clang/MinGW toolchains).
+    # available (GCC/Clang/MinGW toolchains). Emscripten output is .wasm/.js,
+    # not an ELF the host `strip` understands, so skip it there (emcc strips
+    # itself in non-debug optimisation levels anyway).
     # ------------------------------------------------------------------
-    if(CMAKE_STRIP AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+    if(CMAKE_STRIP AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT EMSCRIPTEN)
         add_custom_command(TARGET demo POST_BUILD
                 COMMAND ${CMAKE_STRIP} $<TARGET_FILE:demo>
                 COMMENT "Stripping demo executable"
