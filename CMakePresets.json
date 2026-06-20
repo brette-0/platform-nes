@@ -184,6 +184,28 @@
       "inherits": "wii-release",
       "displayName": "Wii (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "switch-release",
+      "inherits": "_base",
+      "displayName": "Switch (Release)",
+      "description": "Nintendo Switch .nro via the devkitA64 toolchain. Requires devkitPro installed and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file pulls in libnx and the nx_generate_nacp()/nx_create_nro() helpers. CMAKE_SYSTEM_NAME is set to NintendoSwitch by the toolchain, which drives the TARGET_NX engine gating. The backend rasterises the shared software PPU and CPU scale-blits it into the libnx framebuffer (no deko3d), with audout for music.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "switch",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/Switch.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "switch-debug",
+      "inherits": "switch-release",
+      "displayName": "Switch (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ]
 }

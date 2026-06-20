@@ -15,7 +15,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # emsdk is Debian-based; add the host-side build tools the project needs that
 # aren't part of the emsdk image itself. (Ninja is the preset generator;
-# git/wget/ca-certificates support FetchContent of intsh/tuple/SDL3.)
+# git/wget/ca-certificates support FetchContent of intsh/tuple/SDL3/stb; ffmpeg
+# encodes the web audio track from WAV to Vorbis at build time -- see the
+# EMSCRIPTEN block in CMakeLists.txt.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         git \
@@ -23,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         xz-utils \
         file \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # The intsh/tuple dependencies declare a CMake 4.2 floor (and CMakePresets.json

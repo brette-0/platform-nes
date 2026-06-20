@@ -503,6 +503,107 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
     )
 
     # ----------------------------------------------------------------------
+    # Nintendo Switch target (libnx), via the devkitA64 toolchain.
+    #
+    # The Switch presents the shared software PPU (src/emu) like the SDL/3DS
+    # backends: emu::GenerateFrame rasterises a 256x240 ARGB frame and the CPU
+    # integer-scales it into the libnx framebuffer. The Tegra is wildly
+    # overpowered for NES-resolution pixels, so a straight scale-blit avoids
+    # pulling in deko3d/EGL for this first pass.
+    #
+    # The toolchain file (Switch.cmake) is supplied via the switch-* presets; it
+    # sets CMAKE_SYSTEM_NAME=NintendoSwitch and, through Platform/NXTools.cmake,
+    # the arch flags and the nx_generate_nacp() / nx_create_nro() helpers used
+    # below. libnx is linked explicitly (the toolchain does not auto-link it).
+    # ----------------------------------------------------------------------
+    elseif(TARGET_PLATFORM STREQUAL "switch")
+        project(platform-nes CXX)
+
+        FetchContent_MakeAvailable(intsh tuple)
+
+        # The Switch backend presents the shared software PPU (src/emu): the
+        # emulator and all the nametable/OAM/palette write functions are
+        # platform-agnostic and compiled here alongside the libnx framebuffer
+        # video/present, the hid input, and the audout audio.
+        file(GLOB NX_SOURCES CONFIGURE_DEPENDS src/switch/*.cpp src/emu/*.cpp)
+        add_library(platform-nes STATIC ${NX_SOURCES})
+        target_include_directories(platform-nes PUBLIC
+                ${CMAKE_SOURCE_DIR}/include
+                ${CMAKE_SOURCE_DIR}/include/umbrella
+        )
+        # TARGET_NX is the group the engine headers gate on (emulated PPU, fixed
+        # 32x30 viewport, no SDL headers -- same family as TARGET_OGC/TARGET_CTR).
+        target_compile_definitions(platform-nes PUBLIC TARGET_NX)
+        target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+        file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+        # metatiles.cpp #embeds the demo/chr art; declare it as a dependency so
+        # editing the art retriggers a recompile.
+        file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+                PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+        add_executable(demo ${DEMO_SOURCES})
+        set_target_properties(demo PROPERTIES SUFFIX ".elf")
+        target_link_libraries(demo PRIVATE platform-nes nx)
+
+        # CHR art is pulled in with #embed (C23); keep the Clang-only silencer for
+        # parity with the other branches (no-op under devkitA64's GCC).
+        target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+        # Enable LTO for release-type configs, mirroring the other branches.
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+        if(_ipo_ok)
+            foreach(_cfg Release MinSizeRel RelWithDebInfo)
+                string(TOUPPER ${_cfg} _CFG)
+                set_property(TARGET demo platform-nes
+                        PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+            endforeach()
+        else()
+            message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+        endif()
+
+        # libnx audout is fixed at 48kHz/2ch/s16, so encode the desktop WAV to
+        # exactly that raw PCM at build time and bake it into the .nro RomFS
+        # (src/switch/audio.cpp streams it). ffmpeg is provided by
+        # docker/Dockerfile.switch. This leaves demo/tracks (the lossless WAV)
+        # untouched for desktop -- the conversion output lives only in the build
+        # tree, mirroring the web branch's OGG step.
+        find_program(FFMPEG ffmpeg REQUIRED)
+        set(NX_ROMFS ${CMAKE_BINARY_DIR}/romfs)
+        set(NX_RAW   ${NX_ROMFS}/tracks/pc_audio.raw)
+        set(NX_WAV   ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        # nx_create_nro() validates the RomFS dir exists at configure time, but
+        # the audio asset inside it is only produced at build time (below). Create
+        # the directory now so configure passes; the build step then fills it.
+        file(MAKE_DIRECTORY ${NX_ROMFS}/tracks)
+        add_custom_command(
+                OUTPUT ${NX_RAW}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${NX_ROMFS}/tracks
+                COMMAND ${FFMPEG} -y -loglevel error -i ${NX_WAV}
+                        -ar 48000 -ac 2 -f s16le ${NX_RAW}
+                DEPENDS ${NX_WAV}
+                COMMENT "Encoding Switch audio: pc_audio.wav -> RomFS pc_audio.raw (48k s16le)"
+                VERBATIM)
+        add_custom_target(switch-assets DEPENDS ${NX_RAW})
+        add_dependencies(demo switch-assets)
+
+        # Wrap the linked ELF as a homebrew .nro with a NACP metadata banner and
+        # the RomFS asset tree. Both helpers come from devkitA64's NXTools.cmake
+        # once the Switch toolchain is active.
+        nx_generate_nacp(demo.nacp
+                NAME "platform-nes demo"
+                AUTHOR "brette"
+                VERSION "1.0.0"
+        )
+        nx_create_nro(demo
+                NACP ${CMAKE_BINARY_DIR}/demo.nacp
+                ROMFS ${NX_ROMFS}
+        )
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()
@@ -662,6 +763,22 @@ else()
         target_link_libraries(platform-nes PUBLIC usb-1.0)
     endif()
 
+    # The web build decodes a compressed Vorbis track at runtime (the full WAV
+    # would blow Cloudflare's 25MB/file limit); src/SDL3/audio.cpp #includes
+    # stb_vorbis.c under __EMSCRIPTEN__. stb is header-only with no CMakeLists,
+    # so FetchContent just populates it and we add the dir to the include path.
+    # Desktop never fetches or compiles it.
+    if(EMSCRIPTEN)
+        FetchContent_Declare(
+                stb
+                GIT_REPOSITORY https://github.com/nothings/stb.git
+                GIT_TAG        master
+                GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(stb)
+        target_include_directories(platform-nes PRIVATE ${stb_SOURCE_DIR})
+    endif()
+
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
 
     # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
@@ -700,20 +817,40 @@ else()
     # artifact is openable directly (served over http).
     if(EMSCRIPTEN)
         set_target_properties(demo PROPERTIES SUFFIX ".html")
-        # Each --preload-file is wrapped in SHELL: so CMake keeps the flag and
-        # its path as one token: a bare repeated "--preload-file" gets
-        # de-duplicated by link-option dedup, collapsing the two into one and
-        # leaving the second path stranded as a bogus input file.
+
+        # The desktop bundle's tracks/ is a 47MB PCM WAV -- too big for the web
+        # (Cloudflare Pages rejects any single deployed file > 25MB, and the WAV
+        # lands whole inside demo.data). Encode it to ~3MB Vorbis at build time
+        # and bake only that into MEMFS; src/SDL3/audio.cpp decodes it with
+        # stb_vorbis at load. Nothing under demo/ changes, so desktop keeps the
+        # lossless WAV. ffmpeg is provided by docker/Dockerfile.web.
+        find_program(FFMPEG ffmpeg REQUIRED)
+        set(WEB_ASSET_DIR ${CMAKE_BINARY_DIR}/web-assets)
+        set(WEB_OGG ${WEB_ASSET_DIR}/tracks/pc_audio.ogg)
+        set(WEB_WAV ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        add_custom_command(
+                OUTPUT ${WEB_OGG}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_ASSET_DIR}/tracks
+                COMMAND ${FFMPEG} -y -loglevel error -i ${WEB_WAV}
+                        -c:a libvorbis -q:a 4 ${WEB_OGG}
+                DEPENDS ${WEB_WAV}
+                COMMENT "Encoding web audio: pc_audio.wav -> pc_audio.ogg (Vorbis)"
+                VERBATIM)
+        add_custom_target(web-assets DEPENDS ${WEB_OGG})
+        add_dependencies(demo web-assets)
+
+        # The single --preload-file mounts the generated OGG at /tracks, matching
+        # the relative path the audio backend opens (sfx/ is NES-only .s source
+        # and PlaySFX is a no-op on this backend, so nothing is baked for it).
+        # SHELL: keeps the flag and path as one token so link-option dedup can't
+        # split them.
         target_link_options(demo PRIVATE
                 -sASYNCIFY
                 -sALLOW_MEMORY_GROWTH=1
-                "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/demo/tracks@/tracks"
-                "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/demo/sfx@/sfx"
+                "SHELL:--preload-file ${WEB_ASSET_DIR}/tracks@/tracks"
         )
-        # Re-link when the bundled assets change (emcc reads them at link time).
-        file(GLOB_RECURSE WEB_ASSET_FILES CONFIGURE_DEPENDS
-                ${CMAKE_SOURCE_DIR}/demo/tracks/* ${CMAKE_SOURCE_DIR}/demo/sfx/*)
-        set_property(TARGET demo APPEND PROPERTY LINK_DEPENDS "${WEB_ASSET_FILES}")
+        # Re-link when the encoded asset changes (emcc reads it at link time).
+        set_property(TARGET demo APPEND PROPERTY LINK_DEPENDS "${WEB_OGG}")
     endif()
 
     # Enable LTO for release-type configs on desktop targets. CMake routes

@@ -187,3 +187,30 @@ services:
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo.3dsx"
+
+  # Nintendo Switch (devkitA64 + libnx). The switch-release preset points
+  # CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/Switch.cmake, and DEVKITPRO is
+  # exported by the base image, so no explicit -DCMAKE_TOOLCHAIN_FILE is needed
+  # (unlike build-nes). The backend rasterises the shared software PPU and CPU
+  # scale-blits it into the libnx framebuffer (no deko3d), so it never reads
+  # LLVM_MOS_SDK and a forced value in a developer's local.cmake is inert here.
+  build-switch:
+    build:
+      context: docker
+      dockerfile: Dockerfile.switch
+    image: platform-nes-switch:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-switch-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.nro"

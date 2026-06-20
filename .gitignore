@@ -75,3 +75,8 @@ Testing/
 docs/_build/
 docs/doxygen-api/
 docs/doxygen-advanced/
+
+# Cloudflare Pages deploy staging (CI regenerates it from the web build) and
+# wrangler's local OAuth/cache state. Neither belongs in the repo.
+dist/
+.wrangler/
