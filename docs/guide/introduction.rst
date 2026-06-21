@@ -1,12 +1,40 @@
 ﻿Introduction
 ============
 
+Dependencies
+------------
+
+``platform-nes`` requires a few libraries, some of which are fetched at compile time for static compilation.
+
+1. ``intsh`` - integer type shorthands under the ``br0`` namespace for easy concise type specification and usage.
+2. ``tuple`` - a lightweight clone of ``std::tuple`` under ``br0::tuple`` to gain compile time advantages for ``llvm-mos-sdk``.
+3. ``SDL3`` - used for WASM, Linux, Windows and MacOS builds handling input, audio and video.
+4. ``devkitpro`` - used for nintendo ARM/PPC targets
+
+
 Compiling
 ---------
 
-Rename ``local.cmake.example`` to ``local.cmake`` and ensure that that ``CMAKE_PREFIX_PATH`` points to the location of
-your ``llvm-mos`` installation and ``cc65`` installation. If you are a Windows user, ensure that you use `docker`_ for Linux builds for local WSL
-tests or a Mac device for Mac tests.
+**1. Compiling For NES**
+
+Ensure that you have the ``llvm-mos-sdk`` installed and are using clang with c++23 and the compilation variable is set in
+your ``local.cmake`` file. The rest of the dependencies should be included via the ``CMakeLists``.
+
+**2. Compiling for Windows/Mac/Linux**
+
+If you are compiling for Linux, its recommended to not link against ``SDL3`` statically, however, it works on my machine.
+Regardless, you should face no issues as all libraries in this workflow are accounted for.
+
+**3. Compiling for Web Assembly**
+
+I use docker and CI for this, you can copy the CI if you want but of course you'll need to set up your host and I won't
+give you the cloudflare token for the official demo.
+
+**4. Compiling for OGC/Wii/3ds/WiiU/Switch**
+
+You need to set up ``devkitpro`` on your machine or in your CI. ``local.cmake`` does not ask for the paths here as
+compiler variables and the compilation workflow will expect the correct variables to exist OS-level. On some IDEs this
+isn't trivial but you can likely find a way.
 
 Famistudio
 ----------
@@ -38,16 +66,8 @@ decalred with:
 
 Character ROM
 -------------
-The ``PPU`` is the one thing that is emulated in ``platform-nes`` and weakly, to build Character ROM you must do:
 
-.. code-block:: c
-
-    CHARACTER_ROM(crate, "../demo/chr/all");
-
-    CHARACTER_ROM_ALIGN(0x2000);
-
-This will load 2BPP NES pattern data into ``rodata`` for both NES and SDL3 targets and then aligning the size to be
-correct for emulation.
+Under Construction.
 
 Boilerplate
 -----------

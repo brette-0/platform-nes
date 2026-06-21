@@ -214,3 +214,41 @@ services:
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo.nro"
+
+  # Native Nintendo Wii U (devkitPPC + wut + the SDL2 portlib). The wiiu-release
+  # preset points CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/WiiU.cmake, and
+  # DEVKITPRO is exported by the base image, so no explicit -DCMAKE_TOOLCHAIN_FILE
+  # is needed (unlike build-nes). This is the NATIVE Cafe OS target (.rpx/.wuhb),
+  # NOT the vWii .dol from build-wii. The backend rasterises the shared software
+  # PPU into an SDL2 streaming texture the GPU scales to the window, so it never
+  # reads LLVM_MOS_SDK and a forced value in a developer's local.cmake is inert.
+  build-wiiu:
+    build:
+      context: docker
+      dockerfile: Dockerfile.wiiu
+    image: platform-nes-wiiu:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-wiiu-release}
+      HOME: /tmp
+      # Optional: the Wii U common key (32 hex, or a path to a file holding it).
+      # When set, demo-wup encrypts an installable WUP; when empty it just emits
+      # the unpacked tree. NEVER committed -- supply it on the host invocation,
+      # e.g.  WIIU_COMMON_KEY=<key> docker compose run --rm build-wiiu
+      WIIU_COMMON_KEY: ${WIIU_COMMON_KEY:-}
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        # Also assemble the installable-title path: demo-wup emits the unpacked
+        # code/content/meta tree and, when WIIU_COMMON_KEY is set, packs a WUP.
+        # Without a key it skips encryption (leaving the usable tree), so this is
+        # safe to run unconditionally -- no secret is needed for the homebrew build.
+        cmake --build "cmake-build-ci-$$PRESET" --target demo-wup
+        echo "Built: cmake-build-ci-$$PRESET/demo.rpx (+ .wuhb, + wup/ tree)"

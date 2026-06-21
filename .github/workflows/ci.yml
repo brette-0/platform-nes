@@ -212,6 +212,48 @@ jobs:
           path: cmake-build-ci-switch-release/demo.nro
           if-no-files-found: error
 
+  wiiu:
+    name: Wii U (.rpx)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-wiiu-release
+          key: wiiu-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.wiiu') }}
+          restore-keys: wiiu-
+
+      # Builds the homebrew .rpx/.wuhb AND assembles the installable-title
+      # (demo-wup): the unpacked code/content/meta tree, plus a packed WUP when
+      # the optional WIIU_COMMON_KEY secret is present. The key is copyrighted, so
+      # forks/PRs without the secret simply get the tree (NUSPacker is skipped) --
+      # the build never fails for lack of a key.
+      - name: Build demo.rpx + WUP
+        env:
+          WIIU_COMMON_KEY: ${{ secrets.WII_U_COMMON_KEY }}
+        run: docker compose run --rm --build -e WIIU_COMMON_KEY build-wiiu
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-wiiu
+          path: |
+            cmake-build-ci-wiiu-release/demo.rpx
+            cmake-build-ci-wiiu-release/demo.wuhb
+          if-no-files-found: error
+
+      # The installable-title outputs: the unpacked tree (always) and the packed
+      # WUP (only when the common-key secret was set). Don't fail if the WUP is
+      # absent -- the tree alone is a valid artifact users can pack themselves.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-wiiu-wup
+          path: |
+            cmake-build-ci-wiiu-release/wup
+            cmake-build-ci-wiiu-release/wup-installable
+          if-no-files-found: warn
+
   linux:
     name: Linux (AppImage)
     runs-on: ubuntu-latest

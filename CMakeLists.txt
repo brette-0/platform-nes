@@ -604,6 +604,237 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         )
 
     # ----------------------------------------------------------------------
+    # Native Wii U target (devkitPPC + wut + the SDL2 Wii U portlib).
+    #
+    # This is the NATIVE Cafe OS target (.rpx / .wuhb), distinct from the Wii
+    # .dol the gc/wii branch above produces (which runs on Wii U only through
+    # vWii). The Espresso is wildly overpowered for an NES frame, so -- like the
+    # Switch/3DS branches -- this presents the shared software PPU (src/emu):
+    # emu::GenerateFrame rasterises one widescreen ARGB frame straight into an
+    # SDL2 streaming texture that the GPU scales to fill the window.
+    #
+    # The whole backend (src/wiiu) is ordinary SDL2: the devkitPro wiiu-sdl2
+    # portlib wraps GX2 + ProcUI + the TV scan buffer + VPAD/KPAD controllers
+    # internally. This is SDL2 -- separate from the SDL3 desktop backend -- so no
+    # code is shared with src/SDL3.
+    #
+    # The toolchain file (WiiU.cmake) is supplied via the wiiu-* presets; it sets
+    # CMAKE_SYSTEM_NAME=CafeOS and, through Platform/CafeOS.cmake, the Espresso
+    # arch flags and the wut_create_rpx() / wut_create_wuhb() helpers used below.
+    # ----------------------------------------------------------------------
+    elseif(TARGET_PLATFORM STREQUAL "wiiu")
+        project(platform-nes CXX)
+
+        FetchContent_MakeAvailable(intsh tuple)
+
+        # The SDL2 Wii U portlib (devkitPro package wiiu-sdl2). Its CMake config
+        # provides the SDL2::SDL2-static imported target, whose interface pulls in
+        # the GX2/coreinit/VPAD system libs it wraps.
+        find_package(SDL2 REQUIRED)
+
+        # The Wii U backend presents the shared software PPU (src/emu): the
+        # emulator and all the nametable/OAM/palette write functions are
+        # platform-agnostic and compiled here alongside the SDL2 video/present,
+        # the SDL2 GameController input, and the SDL2 audio.
+        file(GLOB WIIU_SOURCES CONFIGURE_DEPENDS src/wiiu/*.cpp src/emu/*.cpp)
+        add_library(platform-nes STATIC ${WIIU_SOURCES})
+        target_include_directories(platform-nes PUBLIC
+                ${CMAKE_SOURCE_DIR}/include
+                ${CMAKE_SOURCE_DIR}/include/umbrella
+        )
+        # TARGET_WIIU is the native-Wii-U define; the engine headers pair it with
+        # the Switch (TARGET_NX) family for the widescreen 52x30 (416x240)
+        # viewport, and exclude the SDL3 headers (this backend uses SDL2).
+        target_compile_definitions(platform-nes PUBLIC TARGET_WIIU)
+        target_link_libraries(platform-nes PUBLIC SDL2::SDL2-static br0::intsh br0::tuple)
+
+        # The music is EMBEDDED in the .rpx, not loaded from disk: a native Wii U
+        # title only has a /vol/content mount when launched with its packaged
+        # content, and a bare .rpx (e.g. dropped into Cemu) has none. So encode
+        # the desktop WAV to a small Vorbis OGG and #embed it (src/wiiu/audio.cpp
+        # decodes it with stb_vorbis at startup) -- it then plays however the
+        # title is launched, and the artifact stays small. Mirrors the web branch.
+        find_program(FFMPEG ffmpeg REQUIRED)
+        FetchContent_Declare(
+                stb
+                GIT_REPOSITORY https://github.com/nothings/stb.git
+                GIT_TAG        master
+                GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(stb)
+        target_include_directories(platform-nes PRIVATE ${stb_SOURCE_DIR})
+
+        set(WIIU_ASSET_DIR ${CMAKE_BINARY_DIR}/wiiu-assets)
+        set(WIIU_OGG ${WIIU_ASSET_DIR}/pc_audio.ogg)
+        set(WIIU_WAV ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        # #embed reads pc_audio.ogg at compile time of audio.cpp; create the dir
+        # now so it is on the include path at configure, and (a) make the lib
+        # depend on the encode target so it runs first, (b) mark audio.cpp as
+        # depending on the OGG so editing the source WAV retriggers a recompile.
+        file(MAKE_DIRECTORY ${WIIU_ASSET_DIR})
+        add_custom_command(
+                OUTPUT ${WIIU_OGG}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${WIIU_ASSET_DIR}
+                COMMAND ${FFMPEG} -y -loglevel error -i ${WIIU_WAV}
+                        -ar 48000 -ac 2 -c:a libvorbis -q:a 4 ${WIIU_OGG}
+                DEPENDS ${WIIU_WAV}
+                COMMENT "Encoding Wii U audio: pc_audio.wav -> pc_audio.ogg (Vorbis, embedded)"
+                VERBATIM)
+        add_custom_target(wiiu-assets DEPENDS ${WIIU_OGG})
+        add_dependencies(platform-nes wiiu-assets)
+        # audio.cpp resolves `#embed <pc_audio.ogg>` via --embed-dir (the canonical
+        # GCC mechanism; -I is not reliably searched for #embed). Scope both the
+        # search dir and the rebuild-on-change dependency to that one source.
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/src/wiiu/audio.cpp
+                PROPERTIES
+                    OBJECT_DEPENDS  ${WIIU_OGG}
+                    COMPILE_OPTIONS "--embed-dir=${WIIU_ASSET_DIR}")
+
+        file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+        # metatiles.cpp #embeds the demo/chr art; declare it as a dependency so
+        # editing the art retriggers a recompile.
+        file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+                PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+        add_executable(demo ${DEMO_SOURCES})
+        set_target_properties(demo PROPERTIES SUFFIX ".elf")
+        # The demo supplies its own main() via the RESET macro, so the backend
+        # builds with SDL_MAIN_HANDLED and SDL2main is deliberately NOT linked.
+        target_link_libraries(demo PRIVATE platform-nes)
+
+        # CHR art is pulled in with #embed (C23); keep the Clang-only silencer for
+        # parity with the other branches (no-op under devkitPPC's GCC).
+        target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+        # Enable LTO for release-type configs, mirroring the other branches.
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+        if(_ipo_ok)
+            foreach(_cfg Release MinSizeRel RelWithDebInfo)
+                string(TOUPPER ${_cfg} _CFG)
+                set_property(TARGET demo platform-nes
+                        PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+            endforeach()
+        else()
+            message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+        endif()
+
+        # Convert the linked ELF into an .rpx (the Cafe OS executable format) and
+        # package it as a .wuhb bundle (the Aroma/Homebrew-Launcher format). The
+        # music is embedded in the .rpx (above), so the bundle needs no content
+        # tree -- both artifacts are fully self-contained and play audio however
+        # they are launched. Both helpers come from wut's CafeOS.cmake.
+        wut_create_rpx(demo)
+        wut_create_wuhb(demo
+                NAME      "platform-nes demo"
+                SHORTNAME "platform-nes"
+                AUTHOR    "brette"
+        )
+
+        # ------------------------------------------------------------------
+        # Optional: installable WUP title (the NON-homebrew path)
+        #
+        # The .rpx/.wuhb above are the homebrew artifacts (Aroma / HBL). For
+        # people who want to *install* their game as a real Wii U title --
+        # runnable with the system closed, no homebrew environment imposed --
+        # this assembles the unpacked code/content/meta tree a Wii U title
+        # needs and (when a common key is supplied) runs NUSPacker to encrypt
+        # it into an installable WUP (.app/.h3/.tmd/.tik/.cert).
+        #
+        # This is a separate `demo-wup` target, NOT part of the default build:
+        # the homebrew path stays key-free and self-contained, and the WUP
+        # path only kicks in when someone asks for it (and only *packs* when a
+        # key is present -- otherwise it still emits the tree for manual use).
+        # The Wii U common key is a copyrighted secret: it is NEVER committed,
+        # only passed in via WIIU_COMMON_KEY at build time (a CI secret / local
+        # cache var, as a 32-hex string or a path to a file containing one).
+        # ------------------------------------------------------------------
+        set(WIIU_TITLE_ID     "000500001337C0DE" CACHE STRING "Wii U title id (16 hex)")
+        set(WIIU_GROUP_ID     "0000C0DE"         CACHE STRING "Wii U group id (8 hex)")
+        set(WIIU_PRODUCT_CODE "WUP-N-PNES"       CACHE STRING "Wii U product code")
+        set(WIIU_COMPANY_CODE "0001"             CACHE STRING "Wii U company code")
+        set(WIIU_LONGNAME     "${GAME_NAME}"     CACHE STRING "Wii U menu long name")
+        set(WIIU_SHORTNAME    "${GAME_NAME}"     CACHE STRING "Wii U menu short name")
+        set(WIIU_PUBLISHER    "brette"           CACHE STRING "Wii U menu publisher")
+        set(WIIU_RPX_NAME     "demo.rpx"         CACHE STRING "rpx filename inside the WUP")
+        set(WIIU_NUSPACKER_JAR "$ENV{WIIU_NUSPACKER_JAR}" CACHE STRING "Path to NUSPacker.jar")
+        set(WIIU_COMMON_KEY   "$ENV{WIIU_COMMON_KEY}"     CACHE STRING "Wii U common key (32 hex) or file path")
+
+        set(WUP_DIR     ${CMAKE_BINARY_DIR}/wup)
+        set(WUP_CODE    ${WUP_DIR}/code)
+        set(WUP_CONTENT ${WUP_DIR}/content)
+        set(WUP_META    ${WUP_DIR}/meta)
+        set(WUP_OUT     ${CMAKE_BINARY_DIR}/wup-installable)
+
+        # The title metadata: configure_file substitutes the @WIIU_*@ tokens in
+        # the proven dimok HBL-channel templates (src/wiiu/title/*.in) at
+        # configure time, so editing a cache var re-emits the XMLs on reconfigure.
+        configure_file(${CMAKE_SOURCE_DIR}/src/wiiu/title/app.xml.in  ${WUP_CODE}/app.xml  @ONLY)
+        configure_file(${CMAKE_SOURCE_DIR}/src/wiiu/title/cos.xml.in  ${WUP_CODE}/cos.xml  @ONLY)
+        configure_file(${CMAKE_SOURCE_DIR}/src/wiiu/title/meta.xml.in ${WUP_META}/meta.xml @ONLY)
+
+        # The menu artwork. The Wii U menu wants UNCOMPRESSED, top-left-origin
+        # TGAs at fixed sizes; derive them all from the existing demo/demo.png
+        # icon with ImageMagick so a title ships with art out of the box. (The
+        # boot sound, bootSound.btsnd, is optional -- the title boots silent
+        # without it -- so it is intentionally omitted.)
+        find_program(IMAGEMAGICK_CONVERT NAMES magick convert)
+        set(WUP_ICON  ${WUP_META}/iconTex.tga)
+        set(WUP_BOOTTV  ${WUP_META}/bootTvTex.tga)
+        set(WUP_BOOTDRC ${WUP_META}/bootDrcTex.tga)
+        set(WUP_BOOTLOGO ${WUP_META}/bootLogoTex.tga)
+        set(WIIU_ICON_SRC ${CMAKE_SOURCE_DIR}/demo/demo.png)
+        if(IMAGEMAGICK_CONVERT)
+            # iconTex 128x128, bootTvTex 1280x720, bootDrcTex 854x480,
+            # bootLogoTex ~170x42 -- all uncompressed, top-left origin.
+            set(_tga_opts -define tga:image-origin=TopLeft -compress none -type TrueColor)
+            add_custom_command(OUTPUT ${WUP_ICON}
+                    COMMAND ${IMAGEMAGICK_CONVERT} ${WIIU_ICON_SRC} -resize 128x128! ${_tga_opts} ${WUP_ICON}
+                    DEPENDS ${WIIU_ICON_SRC} VERBATIM)
+            add_custom_command(OUTPUT ${WUP_BOOTTV}
+                    COMMAND ${IMAGEMAGICK_CONVERT} ${WIIU_ICON_SRC} -resize 1280x720 -background black -gravity center -extent 1280x720 ${_tga_opts} ${WUP_BOOTTV}
+                    DEPENDS ${WIIU_ICON_SRC} VERBATIM)
+            add_custom_command(OUTPUT ${WUP_BOOTDRC}
+                    COMMAND ${IMAGEMAGICK_CONVERT} ${WIIU_ICON_SRC} -resize 854x480 -background black -gravity center -extent 854x480 ${_tga_opts} ${WUP_BOOTDRC}
+                    DEPENDS ${WIIU_ICON_SRC} VERBATIM)
+            add_custom_command(OUTPUT ${WUP_BOOTLOGO}
+                    COMMAND ${IMAGEMAGICK_CONVERT} ${WIIU_ICON_SRC} -resize 170x42 -background black -gravity center -extent 170x42 ${_tga_opts} ${WUP_BOOTLOGO}
+                    DEPENDS ${WIIU_ICON_SRC} VERBATIM)
+            set(WUP_TGAS ${WUP_ICON} ${WUP_BOOTTV} ${WUP_BOOTDRC} ${WUP_BOOTLOGO})
+        else()
+            message(STATUS "wiiu: ImageMagick not found; demo-wup will skip menu-art (TGA) generation")
+            set(WUP_TGAS "")
+        endif()
+
+        # The packer step runs through a small -P script (cmake/wiiu_pack.cmake)
+        # so the "pack vs. skip when no key" decision happens at BUILD time, not
+        # configure time -- you can set WIIU_COMMON_KEY after configuring and
+        # just rebuild demo-wup. The script also reads the key from a file if a
+        # path was given, so a CI secret can be mounted as a file.
+        add_custom_target(demo-wup
+                # The rpx is built by the demo target; drop it into code/ as the
+                # name cos.xml's argstr references.
+                COMMAND ${CMAKE_COMMAND} -E copy
+                        ${CMAKE_CURRENT_BINARY_DIR}/${WIIU_RPX_NAME} ${WUP_CODE}/${WIIU_RPX_NAME}
+                # NUSPacker requires a non-empty content/; the title has no data
+                # files (audio is embedded in the rpx), so seed a placeholder.
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${WUP_CONTENT}
+                COMMAND ${CMAKE_COMMAND} -E touch ${WUP_CONTENT}/.keep
+                COMMAND ${CMAKE_COMMAND}
+                        -DWUP_DIR=${WUP_DIR}
+                        -DWUP_OUT=${WUP_OUT}
+                        -DNUSPACKER_JAR=${WIIU_NUSPACKER_JAR}
+                        -DCOMMON_KEY=${WIIU_COMMON_KEY}
+                        -DTITLE_ID=${WIIU_TITLE_ID}
+                        -P ${CMAKE_SOURCE_DIR}/cmake/wiiu_pack.cmake
+                DEPENDS demo ${WUP_TGAS}
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                COMMENT "Assembling Wii U installable title (code/content/meta) and packing WUP"
+                VERBATIM)
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()

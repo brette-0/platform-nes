@@ -206,6 +206,28 @@
       "inherits": "switch-release",
       "displayName": "Switch (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "wiiu-release",
+      "inherits": "_base",
+      "displayName": "Wii U (Release)",
+      "description": "Native Nintendo Wii U .rpx/.wuhb via the devkitPPC + wut toolchain (NOT vWii -- this is a native Cafe OS app). Requires devkitPro installed with wut + the wiiu-sdl2 portlib and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file pulls in wut and the wut_create_rpx()/wut_create_wuhb() helpers. CMAKE_SYSTEM_NAME is set to CafeOS by the toolchain, which drives the TARGET_WIIU engine gating. The backend rasterises the shared software PPU into an SDL2 streaming texture the GPU scales to the window, with SDL2 audio for music.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "wiiu",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/WiiU.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "wiiu-debug",
+      "inherits": "wiiu-release",
+      "displayName": "Wii U (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ]
 }

@@ -1,8 +1,7 @@
 platform-nes documentation
 ==========================
 
-Cross-platform NES game/engine. The documentation is organised in
-three parts:
+platform-nes platform agnostic library for the creation of software for the Nintendo Entertainment System/Famicom System.
 
 - :doc:`guide/index` — hand-written prose: setup, design notes,
   limitations, tutorials.

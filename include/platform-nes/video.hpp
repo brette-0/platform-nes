@@ -30,12 +30,14 @@ using namespace br0::intsh;
 
 #include "technology.hpp"
 
-// The SDL desktop backend pulls in SDL's display-mode types here. The libogc
-// (GameCube/Wii), 3DS (citro2d) and Switch (libnx framebuffer) backends are
-// emulated-PPU builds like SDL but present through console graphics, so they
-// must NOT see any SDL headers. All are "non-NES", so the SDL-only includes/
-// globals are gated on (!TARGET_NES && !TARGET_OGC && !TARGET_CTR && !TARGET_NX).
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX)
+// The SDL desktop backend pulls in SDL3's display-mode types here. The libogc
+// (GameCube/Wii), 3DS (citro2d), Switch (libnx framebuffer) and Wii U backends
+// are emulated-PPU builds like SDL but present through console graphics, so they
+// must NOT see any SDL3 headers. (The Wii U backend DOES use SDL -- but SDL2,
+// from the devkitPro Wii U portlib -- which it includes itself in src/wiiu; it
+// must not pull in SDL3.) All are "non-NES", so the SDL3-only includes/globals
+// are gated on (!TARGET_NES && !OGC && !CTR && !NX && !WIIU).
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU)
 #include <SDL3/SDL_video.h>
 #endif
 
@@ -538,7 +540,7 @@ namespace ppu {
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
 }
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX)
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
@@ -561,19 +563,20 @@ namespace video {
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
     /** @brief Viewport height in pixels (tiles * 8). */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
-#elif defined(TARGET_NX)
-    // The Switch is a 16:9 console, so unlike the 4:3 GX/3DS consoles it does NOT
-    // pillarbox a 256-wide frame. Instead it widens the viewport (the same
-    // "render more of the world horizontally" model as the SDL LANDSCAPE desktop
-    // path), keeping the NES's 30-tile height. 52 tiles (416px) x 30 (240px) is
-    // ~16:9; the height stays a multiple of the source so a clean integer 3x
-    // fills 720p vertically, and src/switch/video.cpp scales the width to fill.
-    // 52 is a multiple of 4 tiles, keeping the 32px attribute regions aligned
-    // (matching the SDL path's `& ~3u`). VRAM is the same two pages (0x800) the
-    // SDL path uses for any sub-512px render width.
-    /** @brief Viewport width in tiles (Switch: 52, widescreen). */
+#elif defined(TARGET_NX) || defined(TARGET_WIIU)
+    // The Switch and Wii U are 16:9 consoles, so unlike the 4:3 GX/3DS consoles
+    // they do NOT pillarbox a 256-wide frame. Instead they widen the viewport
+    // (the same "render more of the world horizontally" model as the SDL
+    // LANDSCAPE desktop path), keeping the NES's 30-tile height. 52 tiles (416px)
+    // x 30 (240px) is ~16:9; the height stays a multiple of the source so a clean
+    // integer 3x fills 720p vertically, and the backend (src/switch/video.cpp,
+    // src/wiiu/video.cpp) scales the width to fill the panel. 52 is a multiple of
+    // 4 tiles, keeping the 32px attribute regions aligned (matching the SDL
+    // path's `& ~3u`). VRAM is the same two pages (0x800) the SDL path uses for
+    // any sub-512px render width.
+    /** @brief Viewport width in tiles (Switch/Wii U: 52, widescreen). */
     constexpr u16 viewport_tx() { return 52; }
-    /** @brief Viewport height in tiles (Switch: 30). */
+    /** @brief Viewport height in tiles (Switch/Wii U: 30). */
     constexpr u16 viewport_ty() { return 30; }
     /** @brief Viewport width in pixels (tiles * 8). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
