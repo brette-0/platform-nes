@@ -1,0 +1,49 @@
+# Game Boy Advance (libgba) build image for platform-nes.
+#
+# Built on devkitPro's official devkitARM image, which ships the ARM
+# cross-toolchain (arm-none-eabi-g++) and the dkp-pacman package manager, with
+# DEVKITPRO and DEVKITARM already exported. devkitPro now ships a first-class GBA
+# CMake toolchain ($DEVKITPRO/cmake/GBA.cmake + its Platform/NintendoGBA.cmake),
+# so the project just points the gba-* presets at it (exactly like the DS uses
+# NDS.cmake) -- no repo-local toolchain needed. The gba-dev group supplies
+# everything that toolchain needs: libgba, the .gba packaging tool (gbafix) and
+# gba-pkg-config (the official GBA.cmake requires arm-none-eabi-pkg-config):
+#
+#   docker compose run --rm build-gba      # Game Boy Advance  demo.gba
+#
+# The same image backs CI and local runs, and `act -j gba` reuses it.
+FROM devkitpro/devkitarm:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Ensure the full Game Boy Advance toolchain + library are present (libgba, the
+# GBA grit/maxmod ports, gbafix, and gba-pkg-config -- all members of the gba-dev
+# group). --needed makes this a no-op if the base image already ships them.
+RUN dkp-pacman -S --needed --noconfirm gba-dev
+
+# The base image is Ubuntu-based; add the host-side build tools the project
+# needs that aren't part of the devkit toolchain itself. (Ninja is the preset
+# generator; git/wget/ca-certificates support FetchContent of intsh/tuple;
+# file lets the build-verify sniff the produced ROM.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build \
+        git \
+        wget \
+        ca-certificates \
+        xz-utils \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# The intsh/tuple dependencies declare a CMake 4.2 floor (and CMakePresets.json
+# needs 3.21+); the devkit image's bundled CMake can lag behind. Install
+# Kitware's official binary, pinned to match the other target images so every
+# target stays in lockstep. The symlinks go in /usr/local/bin, ahead of the
+# devkit-provided cmake on PATH.
+ARG CMAKE_VERSION=4.3.3
+RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
+        | tar -xz -C /opt \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack
+
+WORKDIR /src

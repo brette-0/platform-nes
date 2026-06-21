@@ -98,8 +98,8 @@ void ColMapTrack(u16 camLeftCol);
 
 // Slide the window one column: the entering column's top cell is given by the
 // static + dynamic cursors.  (Left slide is the mirror of right.)
-void ColMapSlideRight(Cursor newRightStat, DynamicCursor newRightDyn);
-void ColMapSlideLeft(Cursor newLeftStat, DynamicCursor newLeftDyn);
+void ColMapSlideRight(const Cursor &newRightStat, DynamicCursor newRightDyn);
+void ColMapSlideLeft(const Cursor &newLeftStat, DynamicCursor newLeftDyn);
 
 // AABB block test, world-pixel inputs.  py is world pixel Y; the HUD strip is
 // removed internally so the row index lands in level space, consistent with how

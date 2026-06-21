@@ -930,6 +930,101 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         )
 
     # ----------------------------------------------------------------------
+    # Game Boy Advance target (devkitARM + libgba), via devkitPro's official
+    # GBA.cmake toolchain (the gba-* presets point CMAKE_TOOLCHAIN_FILE at
+    # $DEVKITPRO/cmake/GBA.cmake, exactly like the DS uses NDS.cmake).
+    #
+    # Same family as the DS: the GBA does NOT run the software rasteriser
+    # (emu::GenerateFrame). It is a 2D tile console whose hardware is a near-cousin
+    # of the NES PPU, so this backend maps the NES PPU onto the GBA's NATIVE 2D
+    # hardware (Model B):
+    #   * CHR pattern tables  -> GBA character (tile) VRAM (2bpp -> 4bpp expand)
+    #   * nametable+attribute -> GBA BG tilemap entries (tile + palette + flip)
+    #   * NES master palette  -> GBA BGR555 palette RAM
+    #   * OAM shadow          -> GBA hardware OBJ (OAM written directly)
+    #   * raster band timeline (emu::GenerateBands) -> a per-scanline HBlank scroll
+    #     table, so mid-frame scroll changes and the sprite-0 split still work.
+    # It therefore still pulls in src/emu for the platform-agnostic PPU bookkeeping
+    # (nametable/OAM/palette writes, the band/IRQ timeline, the OAM shadow), but
+    # the per-pixel rasteriser there goes unused.
+    #
+    # The 240x160 panel is the first target NARROWER than the NES (30 vs 32 tiles)
+    # as well as shorter (20 vs 30); the backend shows a window onto the unaltered
+    # 256x240 world (the engine never compromises the NES game for the GBA). Audio:
+    # the GBA's tiny RAM has no room for baked PCM, so audio is stubbed
+    # (src/gba/audio.cpp) exactly like the DS/GameCube/Wii backends -- the user
+    # supplies a synthesiser. Only the tiny CHR art (a few KiB) is embedded.
+    #
+    # The toolchain ($DEVKITPRO/cmake/GBA.cmake) is supplied via the gba-* presets;
+    # it imports devkitARM.cmake and routes CMAKE_SYSTEM_NAME=NintendoGBA to
+    # devkitPro's Platform/NintendoGBA.cmake module, which sets the armv4t flags,
+    # links libgba and provides the gba_create_rom() helper used below (gba.specs
+    # crt0 + cart link script are applied by gba_create_rom itself).
+    # ----------------------------------------------------------------------
+    elseif(TARGET_PLATFORM STREQUAL "gba")
+        project(platform-nes CXX)
+
+        FetchContent_MakeAvailable(intsh tuple)
+
+        # The GBA backend maps the shared PPU bookkeeping (src/emu) onto libgba 2D
+        # hardware: the emulator and all the nametable/OAM/palette write functions
+        # are platform-agnostic and compiled here alongside the libgba video/
+        # present, the keypad input, and the (stub) audio.
+        file(GLOB GBA_SOURCES CONFIGURE_DEPENDS src/gba/*.cpp src/emu/*.cpp)
+        add_library(platform-nes STATIC ${GBA_SOURCES})
+        target_include_directories(platform-nes PUBLIC
+                ${CMAKE_SOURCE_DIR}/include
+                ${CMAKE_SOURCE_DIR}/include/umbrella
+        )
+        # TARGET_GBA is the group the engine headers gate on (native 2D hardware,
+        # 30x20 viewport -- the first target narrower than the NES, no SDL headers).
+        target_compile_definitions(platform-nes PUBLIC TARGET_GBA)
+        target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+        file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+        # metatiles.cpp #embeds the demo/chr art; declare it as a dependency so
+        # editing the art retriggers a recompile.
+        file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+                PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+        add_executable(demo ${DEMO_SOURCES})
+        set_target_properties(demo PROPERTIES SUFFIX ".elf")
+        # libgba (-lgba) + gba.specs come in via the platform module's standard
+        # libraries/linker flags, so only the engine archive is linked explicitly.
+        target_link_libraries(demo PRIVATE platform-nes)
+
+        # CHR art is pulled in with #embed (C23); keep the Clang-only silencer for
+        # parity with the other branches (no-op under devkitARM's GCC).
+        target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+        # Enable LTO for release-type configs, mirroring the other branches.
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+        if(_ipo_ok)
+            foreach(_cfg Release MinSizeRel RelWithDebInfo)
+                string(TOUPPER ${_cfg} _CFG)
+                set_property(TARGET demo platform-nes
+                        PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+            endforeach()
+        else()
+            message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+        endif()
+
+        # Wrap the linked ELF as a header-fixed .gba ROM. devkitPro's
+        # gba_create_rom() operates on the executable target directly: it adds the
+        # cart link options (-specs=gba.specs) to `demo`, then POST_BUILD runs
+        # objcopy -O binary + gbafix (Nintendo logo checksum/complement + the
+        # title/game/maker codes). Output is named demo.gba to match demo.<ext>.
+        gba_create_rom(demo
+                OUTPUT ${CMAKE_BINARY_DIR}/demo.gba
+                TITLE "PLATFORMNES"
+                GAMECODE "CPNE"
+                MAKERCODE "00"
+        )
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()
