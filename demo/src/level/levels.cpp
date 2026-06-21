@@ -1,4 +1,4 @@
-﻿#include "levels.hpp"
+#include "levels.hpp"
 #include "collision_map.hpp"   // ColMapColumn: read the composited column the window already built
 #include "../graphics/metatiles.hpp"
 
