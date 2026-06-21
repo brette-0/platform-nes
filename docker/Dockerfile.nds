@@ -1,0 +1,50 @@
+# Nintendo DS / DSi (libnds) build image for platform-nes.
+#
+# Built on devkitPro's official devkitARM image, which ships the ARM
+# cross-toolchain (arm-none-eabi-g++), the dkp-pacman package manager and the
+# Nintendo DS CMake integration (NDS.cmake + Platform/NintendoDS.cmake, which
+# provides nds_create_rom), with DEVKITPRO and DEVKITARM already exported. The
+# nds-dev package group (libnds, calico, ndstool, grit, maxmod, the default
+# ARM7 binaries and the .nds packaging tools) is installed below so the
+# hardware-2D backend in src/nds builds against libnds:
+#
+#   docker compose run --rm build-nds      # Nintendo DS  demo.nds
+#   docker compose run --rm build-dsi      # Nintendo DSi demo.nds (DSi flags)
+#
+# The same image backs CI and local runs, and `act -j nds` reuses it. The DS and
+# DSi targets share this one image; the preset (nds-* vs dsi-*) selects the
+# extra DSi compile flags, so no separate toolchain is needed.
+FROM devkitpro/devkitarm:latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Ensure the full Nintendo DS toolchain + libraries are present (libnds, calico,
+# the default ARM7 cores, ndstool, grit and maxmod). --needed makes this a no-op
+# if the base image already ships them.
+RUN dkp-pacman -S --needed --noconfirm nds-dev
+
+# The base image is Ubuntu-based; add the host-side build tools the project
+# needs that aren't part of the devkit toolchain itself. (Ninja is the preset
+# generator; git/wget/ca-certificates support FetchContent of intsh/tuple.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ninja-build \
+        git \
+        wget \
+        ca-certificates \
+        xz-utils \
+        file \
+    && rm -rf /var/lib/apt/lists/*
+
+# The intsh/tuple dependencies declare a CMake 4.2 floor (and CMakePresets.json
+# needs 3.21+); the devkit image's bundled CMake can lag behind. Install
+# Kitware's official binary, pinned to match the other target images so every
+# target stays in lockstep. The symlinks go in /usr/local/bin, ahead of the
+# devkit-provided cmake on PATH.
+ARG CMAKE_VERSION=4.3.3
+RUN wget -qO- https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz \
+        | tar -xz -C /opt \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cmake /usr/local/bin/cmake \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/ctest /usr/local/bin/ctest \
+    && ln -sf /opt/cmake-${CMAKE_VERSION}-linux-x86_64/bin/cpack /usr/local/bin/cpack
+
+WORKDIR /src

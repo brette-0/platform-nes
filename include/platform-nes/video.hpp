@@ -31,13 +31,14 @@ using namespace br0::intsh;
 #include "technology.hpp"
 
 // The SDL desktop backend pulls in SDL3's display-mode types here. The libogc
-// (GameCube/Wii), 3DS (citro2d), Switch (libnx framebuffer) and Wii U backends
-// are emulated-PPU builds like SDL but present through console graphics, so they
-// must NOT see any SDL3 headers. (The Wii U backend DOES use SDL -- but SDL2,
-// from the devkitPro Wii U portlib -- which it includes itself in src/wiiu; it
-// must not pull in SDL3.) All are "non-NES", so the SDL3-only includes/globals
-// are gated on (!TARGET_NES && !OGC && !CTR && !NX && !WIIU).
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU)
+// (GameCube/Wii), 3DS (citro2d), Switch (libnx framebuffer), Wii U and Nintendo
+// DS backends are emulated-PPU builds like SDL but present through console
+// graphics, so they must NOT see any SDL3 headers. (The Wii U backend DOES use
+// SDL -- but SDL2, from the devkitPro Wii U portlib -- which it includes itself
+// in src/wiiu; it must not pull in SDL3. The DS backend drives the libnds 2D
+// hardware directly, with no SDL at all.) All are "non-NES", so the SDL3-only
+// includes/globals are gated on (!TARGET_NES && !OGC && !CTR && !NX && !WIIU && !NDS).
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS)
 #include <SDL3/SDL_video.h>
 #endif
 
@@ -540,7 +541,7 @@ namespace ppu {
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
 }
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU)
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
@@ -562,6 +563,25 @@ namespace video {
     /** @brief Viewport width in pixels (tiles * 8). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
     /** @brief Viewport height in pixels (tiles * 8). */
+    constexpr u16 viewport_py() { return viewport_ty() << 3; }
+#elif defined(TARGET_NDS)
+    // The Nintendo DS (and DSi) main engine is a fixed 256x192 panel -- the same
+    // 32-tile NES width, but 6 tiles (48px) SHORTER than the NES's 240px height.
+    // Per the project rule, the NES game is never compromised for another
+    // platform: the DS simply shows a 256x192 WINDOW onto the same 256x240 world
+    // the game renders. The backend (src/nds/video.cpp) maps the NES PPU onto the
+    // DS's native 2D hardware (BG tilemap + hardware OBJ + per-scanline HBlank
+    // scroll), so raster splits and sprite-0 still work; the bottom 48px of the
+    // NES frame fall below the panel. This is the first target whose viewport is
+    // shorter than the NES's 30 tiles, which is explicitly permitted: any code
+    // reading video::viewport_ty() must not assume 30.
+    /** @brief Viewport width in tiles (DS/DSi: fixed 32, full NES width). */
+    constexpr u16 viewport_tx() { return 32; }
+    /** @brief Viewport height in tiles (DS/DSi: 24 = the 192px panel, < NES 30). */
+    constexpr u16 viewport_ty() { return 24; }
+    /** @brief Viewport width in pixels (tiles * 8 = 256). */
+    constexpr u16 viewport_px() { return viewport_tx() << 3; }
+    /** @brief Viewport height in pixels (tiles * 8 = 192). */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
 #elif defined(TARGET_NX) || defined(TARGET_WIIU)
     // The Switch and Wii U are 16:9 consoles, so unlike the 4:3 GX/3DS consoles

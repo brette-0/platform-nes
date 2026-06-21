@@ -252,3 +252,56 @@ services:
         # safe to run unconditionally -- no secret is needed for the homebrew build.
         cmake --build "cmake-build-ci-$$PRESET" --target demo-wup
         echo "Built: cmake-build-ci-$$PRESET/demo.rpx (+ .wuhb, + wup/ tree)"
+
+  # Nintendo DS (devkitARM + libnds). The nds-release preset points
+  # CMAKE_TOOLCHAIN_FILE at $DEVKITPRO/cmake/NDS.cmake, and DEVKITPRO is exported
+  # by the base image, so no explicit -DCMAKE_TOOLCHAIN_FILE is needed (unlike
+  # build-nes). This is Model B: the backend maps the NES PPU onto the DS's native
+  # 2D tile hardware (BG tilemap + hardware OBJ + per-scanline HBlank scroll) via
+  # the shared emu band/OAM seam, so it never reads LLVM_MOS_SDK and a forced
+  # value in a developer's local.cmake is inert here.
+  build-nds:
+    build:
+      context: docker
+      dockerfile: Dockerfile.nds
+    image: platform-nes-nds:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-nds-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.nds"
+
+  # Nintendo DSi -- the same libnds backend and image as build-nds, but the
+  # dsi-release preset compiles with TARGET_DSI (the 16 MB / faster-clock variant
+  # that may later embed crunched audio; for now it shares the DS audio stub). A
+  # standard .nds runs on DSi, so the ROM packaging is identical.
+  build-dsi:
+    build:
+      context: docker
+      dockerfile: Dockerfile.nds
+    image: platform-nes-nds:latest
+    user: "${UID:-0}:${GID:-0}"
+    working_dir: /tmp/platform-nes
+    volumes:
+      - .:/tmp/platform-nes
+    environment:
+      PRESET: ${PRESET:-dsi-release}
+      HOME: /tmp
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
+        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
+        echo "Built: cmake-build-ci-$$PRESET/demo.nds"

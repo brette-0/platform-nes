@@ -11,7 +11,7 @@ for both the 6502 and modern CPU targets. However, it is far from being complete
 which are listed further down. 
 
 `platform-nes` may require the user to include additional technologies for DRM and content obfuscation, the entire
-project is designed in c11 with LTO oriented design with a demo ready to demonstrate some 
+project is designed in c++23 with LTO oriented design with a demo ready to demonstrate some 
 of the existing functions all of which are documented at the [docsite](https://platform-nes.readthedocs.io/en/latest/).
 Which will demonstrate how you can easily begin using this project.
 
@@ -23,6 +23,19 @@ Which will demonstrate how you can easily begin using this project.
 > **SDL3**:
 >   1. SDL3
 >      1. libusb (linux only)
+
+
+## Current Targets:
+- NES/Famicom
+- GameCube
+- Wii
+- 3ds
+- Wii U
+- Switch
+- Windows
+- Mac
+- Linux
+- Web Assembly
 
 
 ## Planned Updates:
@@ -44,8 +57,3 @@ or in the case of more modern targets save files with paths managed by the devel
 
 Currently, the pattern tables are not modified post-reset where they are fetched from `rodata`, in the future 
 Character ROM Bank switching technology will be supported.
-
-### Target Expansion
-
-It's a major goal to be able to support other environments, enabling ports to other consoles or other devices such as
-Android, or web browsers. 

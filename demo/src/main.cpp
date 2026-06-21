@@ -264,14 +264,6 @@ static u16 PlayerWorldX(const Actor* self) {
 
 static i8 AbsI8(const i8 v) { return v < 0 ? static_cast<i8>(-v) : v; }
 
-// Map a pixel-Y to the LEVEL-DATA metatile row it overlaps. World-row 0 is the
-// HUD strip (kHudRows tall, scrolled in by the sprite-0 split), so level-data
-// row 0 starts kHudRows below the top. Subtracting it here -- where the row
-// projection lives -- keeps every caller (seed, grounded check, vertical move)
-// indexing the scrolled background consistently, and unlike a one-shot cursor
-// seed it can't be swallowed at the level start: the offset simply develops as
-// the actor descends into the field. Above the field (underflow) or inside the
-// HUD clamps to the top row; below the floor clamps to the bottom.
 static i16 ClampRow(const u16 y) {
     if (y & 0x8000) return 0;
     const i16 r = static_cast<i16>(y >> 4) - kHudRows;
@@ -279,12 +271,6 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-// Would the player's AABB at world pixel (wx, wy) be blocked?  One read of the shared
-// composite-metatile window.  collectBlocks=false: coins (Collect) are pass-through
-// now -- they no longer stop the player; CollectPlayerCoins picks them up on the
-// committed position instead.  Only walls (Solid) block.  No RLE walk -- the cell is
-// already composited in the window.  Kept under the RED profiler tint so the raster
-// dump shows the per-actor collision cost (the thing that scales with actor count).
 static bool PlayerBlocked(Actor* self, const u16 wx, const u16 wy) {
     ppu::SetColorPriority(ppu::mask::RED);   // TEMP profiler: the collision query
     const bool blocked = level::Blocked(wx, wy, self->size.x, self->size.y,
@@ -293,11 +279,6 @@ static bool PlayerBlocked(Actor* self, const u16 wx, const u16 wy) {
     return blocked;
 }
 
-// Pick up any coins the player's COMMITTED AABB overlaps this frame.  CollectCoins
-// does the data side (blank the run so it never returns + reveal the static cell in
-// the window); here we turn each pick into its four nametable tile writes (the 2x2
-// metatile, revealing the static-under tiles) and queue them for the NMI drain.  The
-// nametable cell is a pure function of the world column (mod 64) + row, so no scroll
 // state is needed.  STUB: score / SFX hang off here later.
 static void CollectPlayerCoins(const Actor* self) {
     level::CoinPick picks[4];
@@ -307,9 +288,6 @@ static void CollectPlayerCoins(const Actor* self) {
         const u8  m  = picks[i].reveal;                  // static metatile now exposed
         const u16 tx = static_cast<u16>(picks[i].col) << 1;       // left tile column
         const u16 ty = static_cast<u16>(2 + (picks[i].row << 1)); // top tile row (HUD=2)
-        // Project each of the 2x2 tiles to its VRAM address HERE (mid-frame, off the
-        // vblank path).  CartesianToAddress masks X to the two-nametable window itself
-        // (same mod-64 wrap the column streamer relies on), so no scroll state is needed.
         CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
         CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
         CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
@@ -318,26 +296,34 @@ static void CollectPlayerCoins(const Actor* self) {
 }
 
 void SpriteZeroHandler() {
+#if TARGET_NDS
+    // --- DS vertical follow camera -------------------------------------------
+    // The DS panel (192px) is 48px shorter than the NES frame (240px), so it cannot
+    // show the whole vertical slice the NES game renders. While the player is low we
+    // bottom-anchor -- scroll Y bumped by the shortfall (240 - viewport_py()) so the
+    // ground sits on the panel bottom. Once the player climbs to the middle of the
+    // viewport we pan up with them, easing the bump from that maximum down to 0
+    // (top-anchored) as they rise, so they never clip off the top edge. The bump is
+    // just the player's height above the viewport midpoint, clamped to
+    // [0, 240 - viewport_py()]. Sprites are kept locked to this varying scroll by the
+    // DS backend (build_sprites offsets every OBJ by the live band scroll), so the
+    // whole vertical-follow policy lives here in one place. Every other target
+    // renders the full 240 lines and needs no vertical camera (the #else branch).
+    const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
+    const i16 anchor = static_cast<i16>(240 - video::viewport_py());
+    const i16 raw    = static_cast<i16>(player.screen.y) - mid;
+    const i16 bump   = raw < 0 ? 0 : (raw > anchor ? anchor : raw);
+    ppu::SetScroll(cameraX, static_cast<u16>(16 + bump));
+#else
     ppu::SetScroll(cameraX, 16);
+#endif
     spriteZeroHandled = 1;
     lastPort1 = port1; lastPort2 = port2;
     PollControllers(&port1, &port2);
-    // --- TEMP raster profiler: COLLISION ONLY.  The screen is left untinted
-    // (white) for everything -- audio, physics, scroll, level build, the bitmap
-    // producer -- and tinted RED only across the per-actor collision queries
-    // (PlayerBlocked).  So the height of the red band IS the collision cost, in
-    // isolation, which is the thing that scales with actor count; level/build
-    // cost is fixed and deliberately not shown.  Remove once measured.
     ppu::SetColorPriority(ppu::mask::RED | ppu::mask::GREEN);   // TEMP profiler: AudioUpdate (yellow)
     AudioUpdate();
     ppu::SetColorPriority(0);
     player.Update();
-    // Keep the shared static-collision bitmap centred on the (now settled) camera.
-    // Called here as a SIBLING of player.Update() -- not nested inside it -- so its
-    // ZP frame reuses PlayerUpdate's freed page-zero rather than stacking on it
-    // (page zero is at the cliff over the FamiStudio enclave).  Decoupled from the
-    // render edge stream: it tracks cameraX directly, leaving lastXWorldSpace/edgeR
-    // hysteresis untouched.
     ppu::SetColorPriority(ppu::mask::BLUE);   // TEMP profiler: window slide + ColMapStamp
     level::ColMapTrack(cameraX >> 4);
     ppu::SetColorPriority(0);

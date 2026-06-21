@@ -12,6 +12,8 @@
 #       docker compose run --rm build-web      # == the `web` job
 #       docker compose run --rm build-3ds      # == the `ctr` job
 #       docker compose run --rm build-switch   # == the `switch` job
+#       docker compose run --rm build-nds      # == the `nds` job
+#       docker compose run --rm build-dsi      # == the `dsi` job
 #       docker compose run --rm build-linux    # == the `linux` job's compile
 #
 #   To run the workflow itself locally, use act (https://github.com/nektos/act),
@@ -23,6 +25,8 @@
 #       act -j web
 #       act -j ctr
 #       act -j switch
+#       act -j nds
+#       act -j dsi
 #       act -j linux
 #
 #   act cannot emulate GitHub's macOS/Windows runners, so the `mac` and `win`
@@ -210,6 +214,50 @@ jobs:
         with:
           name: demo-switch
           path: cmake-build-ci-switch-release/demo.nro
+          if-no-files-found: error
+
+  nds:
+    name: Nintendo DS (.nds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-nds-release
+          key: nds-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.nds') }}
+          restore-keys: nds-
+
+      - name: Build demo.nds
+        run: docker compose run --rm --build build-nds
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-nds
+          path: cmake-build-ci-nds-release/demo.nds
+          if-no-files-found: error
+
+  dsi:
+    name: Nintendo DSi (.nds)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-dsi-release
+          key: dsi-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.nds') }}
+          restore-keys: dsi-
+
+      - name: Build demo.nds (DSi)
+        run: docker compose run --rm --build build-dsi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-dsi
+          path: cmake-build-ci-dsi-release/demo.nds
           if-no-files-found: error
 
   wiiu:

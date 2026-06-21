@@ -835,6 +835,101 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
                 VERBATIM)
 
     # ----------------------------------------------------------------------
+    # Nintendo DS / DSi target (devkitARM + libnds), via the NDS.cmake toolchain.
+    #
+    # Unlike every other emulated-PPU backend (SDL/OGC/CTR/NX/WIIU), the DS does
+    # NOT run the software rasteriser (emu::GenerateFrame). The DS is a 2D tile
+    # console whose hardware is a near-cousin of the NES PPU, so this backend maps
+    # the NES PPU onto the DS's NATIVE 2D hardware (Model B):
+    #   * CHR pattern tables  -> DS character (tile) VRAM (2bpp -> 4bpp expand)
+    #   * nametable+attribute -> DS BG tilemap entries (tile + palette + flip)
+    #   * NES master palette  -> DS BGR555 palette RAM
+    #   * OAM shadow          -> DS hardware OBJ (oamSet)
+    #   * raster band timeline (emu::GenerateBands) -> a per-scanline HBlank scroll
+    #     table, so mid-frame scroll changes and the sprite-0 split still work.
+    # It therefore still pulls in src/emu for the platform-agnostic PPU bookkeeping
+    # (nametable/OAM/palette writes, the band/IRQ timeline, the OAM shadow), but
+    # the per-pixel rasteriser there goes unused.
+    #
+    # The 256x192 panel is 6 tiles shorter than the NES's 240px; the backend shows
+    # a window onto the unaltered 256x240 world (the engine never compromises the
+    # NES game for the DS). Audio: the 4 MB DS has no room for baked PCM, so audio
+    # is stubbed (src/nds/audio.cpp) exactly like the GameCube/Wii backends -- the
+    # user supplies a synthesiser. The DSi build (TARGET_DSI) has 16 MB and may
+    # later embed crunched audio; for now it shares the DS stub path. Only the tiny
+    # CHR art (a few KiB) is embedded.
+    #
+    # The toolchain file (NDS.cmake) is supplied via the nds-*/dsi-* presets; it
+    # sets CMAKE_SYSTEM_NAME=NintendoDS and, through Platform/NintendoDS.cmake, the
+    # ARM9 arch flags and the nds_create_rom() helper used below. libnds is linked
+    # explicitly as -lnds9 (calico's ARM7 + linker script come in via the toolchain).
+    # ----------------------------------------------------------------------
+    elseif(TARGET_PLATFORM STREQUAL "nds" OR TARGET_PLATFORM STREQUAL "dsi")
+        project(platform-nes CXX)
+
+        FetchContent_MakeAvailable(intsh tuple)
+
+        # The DS backend maps the shared PPU bookkeeping (src/emu) onto libnds 2D
+        # hardware: the emulator and all the nametable/OAM/palette write functions
+        # are platform-agnostic and compiled here alongside the libnds video/
+        # present, the keypad input, and the (stub) audio.
+        file(GLOB NDS_SOURCES CONFIGURE_DEPENDS src/nds/*.cpp src/emu/*.cpp)
+        add_library(platform-nes STATIC ${NDS_SOURCES})
+        target_include_directories(platform-nes PUBLIC
+                ${CMAKE_SOURCE_DIR}/include
+                ${CMAKE_SOURCE_DIR}/include/umbrella
+        )
+        # TARGET_NDS is the group the engine headers gate on (native 2D hardware,
+        # 32x24 viewport, no SDL headers). The DSi build adds TARGET_DSI on top so
+        # the audio path can opt into the larger RAM later.
+        target_compile_definitions(platform-nes PUBLIC TARGET_NDS)
+        if(TARGET_PLATFORM STREQUAL "dsi")
+            target_compile_definitions(platform-nes PUBLIC TARGET_DSI)
+        endif()
+        target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+        file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+        # metatiles.cpp #embeds the demo/chr art; declare it as a dependency so
+        # editing the art retriggers a recompile.
+        file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+                PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+        add_executable(demo ${DEMO_SOURCES})
+        set_target_properties(demo PROPERTIES SUFFIX ".elf")
+        target_link_libraries(demo PRIVATE platform-nes nds9)
+
+        # CHR art is pulled in with #embed (C23); keep the Clang-only silencer for
+        # parity with the other branches (no-op under devkitARM's GCC).
+        target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+        # Enable LTO for release-type configs, mirroring the other branches.
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+        if(_ipo_ok)
+            foreach(_cfg Release MinSizeRel RelWithDebInfo)
+                string(TOUPPER ${_cfg} _CFG)
+                set_property(TARGET demo platform-nes
+                        PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+            endforeach()
+        else()
+            message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+        endif()
+
+        # Wrap the linked ELF as a .nds ROM (the default ARM7 core + libnds icon
+        # come from calico automatically). nds_create_rom() comes from devkitARM's
+        # Platform/NintendoDS.cmake once the NDS toolchain is active. The output is
+        # named demo.nds so it matches the other targets' demo.<ext> convention.
+        nds_create_rom(demo_nds
+                ARM9 demo
+                NAME "platform-nes demo"
+                SUBTITLE1 "NES engine demo on DS"
+                SUBTITLE2 "github.com/brette"
+                OUTPUT ${CMAKE_BINARY_DIR}/demo.nds
+        )
+
+    # ----------------------------------------------------------------------
     # Desktop targets (macOS, Windows, Linux)
     # ----------------------------------------------------------------------
 else()

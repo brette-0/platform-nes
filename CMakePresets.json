@@ -228,6 +228,50 @@
       "inherits": "wiiu-release",
       "displayName": "Wii U (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "nds-release",
+      "inherits": "_base",
+      "displayName": "Nintendo DS (Release)",
+      "description": "Nintendo DS .nds via the devkitARM toolchain. Requires devkitPro installed and the DEVKITPRO env var set (e.g. /opt/devkitpro); the toolchain file (NDS.cmake) pulls in libnds + calico and the nds_create_rom() helper. CMAKE_SYSTEM_NAME is set to NintendoDS by the toolchain, which drives the TARGET_NDS engine gating. Unlike the SDL-style software-framebuffer backends, the DS backend maps the NES PPU onto the console's native 2D hardware: CHR -> char VRAM, nametable -> BG tilemap, OAM shadow -> hardware OBJ, and the raster band timeline -> a per-scanline HBlank scroll table (so sprite-0 splits still work). The 256x192 panel shows a window onto the full 256x240 NES world; the NES game is never altered for the DS.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "nds",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/NDS.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "nds-debug",
+      "inherits": "nds-release",
+      "displayName": "Nintendo DS (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "dsi-release",
+      "inherits": "_base",
+      "displayName": "Nintendo DSi (Release)",
+      "description": "Nintendo DSi .nds via the devkitARM toolchain -- same libnds 2D-hardware backend as the DS preset, but built with the DSi extensions enabled (TARGET_DSI). The DSi's larger RAM (16 MB vs 4 MB) and faster clock let the build attempt to embed crunched audio; when that does not fit, it falls back to the same user-supplied/stubbed audio path as the DS. Requires devkitPro installed and the DEVKITPRO env var set; the toolchain file (NDS.cmake) pulls in libnds + calico and the nds_create_rom() helper.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "dsi",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/NDS.cmake"
+      },
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{DEVKITPRO}",
+        "rhs": ""
+      }
+    },
+    {
+      "name": "dsi-debug",
+      "inherits": "dsi-release",
+      "displayName": "Nintendo DSi (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ]
 }
