@@ -89,7 +89,7 @@ DynHit CollidesDynamic(const DynamicCursor& origin, u16 px, u16 py, u8 w, u8 h);
 // `under` is a static cursor already positioned on the SAME cell, so the rule
 // can read the metatile underneath and reveal it -- avoiding the SMB1 "coin on a
 // wall turns to air" artefact.
-void RemoveDynamic(const DynHit& h, Cursor under);
+void RemoveDynamic(const DynHit& h, const Cursor &under);
 
 // Copy the active level's dynamic ROM run-data into DynData and point DynLengths
 // at the level's dynamic lengths. STUB: call from LoadLevel once a level ships a

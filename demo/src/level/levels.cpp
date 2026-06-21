@@ -20,29 +20,49 @@ namespace demo::level {
     u8 AttributeBuffer[8];
     u8 attr_column = 0xFF;
 
-    const u8 TileData_1_1[] = {
-    #include "../../tiled/include/1-1_st"
+    // --- Attribute-half parity correction for odd-width viewports -------------
+    // One NES attribute byte spans 32px = two metatile columns (a left/right
+    // nibble pair), so a column's half is its absolute metatile-column parity.
+    // The streaming composer tracks that parity with the monotonic `attr_column`
+    // counter, whose phase is fixed at init to (attr_column - cameraCol) ==
+    // viewport_mx() and is invariant under every build (forward: both +1;
+    // backward: +1/-1, i.e. +2). Forward (Next) composition is therefore always
+    // correct. The backward (Prev) composer writes the INVERTED half, which stays
+    // phase-correct across a direction reversal only when the viewport spans a
+    // whole number of attribute bytes -- an EVEN metatile-column count, i.e.
+    // viewport_tx() a multiple of 4. The GBA panel is 240px = 30 tiles = 15
+    // metatiles (odd), so a right->left reversal injects a one-column parity
+    // offset and the returned-over columns land in the wrong half (grey coins,
+    // visible only at palette boundaries near the level start). This constant
+    // re-flips the Prev parity by exactly that offset: it is 0 for every
+    // multiple-of-4 viewport (NES/DS 32, Switch/Wii U 52, SDL `&~3`) and 1 only
+    // for the GBA's 30. Next is left untouched -- it has no reversal offset.
+    //
+    // A constexpr *function*, not a constexpr variable: on the SDL/desktop
+    // (LANDSCAPE) targets viewport_tx() reads runtime globals (mode/scale), so it
+    // is never a constant expression -- a constexpr variable initialiser would not
+    // compile there. As a function it folds to a compile-time 0/1 on the
+    // fixed-viewport targets and is a cheap runtime call (always 0, since SDL's
+    // `& ~3u` keeps viewport_mx() even) on the runtime-sized ones, mirroring how
+    // viewport_tx() itself is constexpr-yet-runtime.
+    static constexpr u8 prev_parity_fix() { return (video::viewport_tx() >> 1) & 1u; }
 
+    const u8 TileData_1_1[] = {
+        #include "../../tiled/include/1-1_st"
     };
 
     absolute
     const u8 HunkLengths_1_1[] = {
     #include "../../tiled/include/1-1_sl"
-
         , 0x00
     };
 
-    // Dynamic plane (second Tiled layer).  No 0x00 terminator: it spans exactly
-    // the same WxH cell grid as the static plane, so the static walk bounds it.
-    // DynData_1_1 is the ROM master copied into the RAM pool (DynData) at load.
     const u8 DynData_1_1[] = {
-    #include "../../tiled/include/1-1_dt"
-
+        #include "../../tiled/include/1-1_dt"
     };
 
     const u8 DynLengths_1_1[] = {
-    #include "../../tiled/include/1-1_dl"
-
+        #include "../../tiled/include/1-1_dl"
     };
 
     const Level Levels[] = {
@@ -51,23 +71,12 @@ namespace demo::level {
     };
 
     bool LoadLevel(const u16 n) {
-        // Point at the level data *before* sizing: BuildLevelSize() walks
-        // HunkLengths to compute nColumns, so it must already be assigned.
         TileData = Levels[n].TileData;
         HunkLengths = Levels[n].HunkLengths;
-        // Copy this level's dynamic run-data into the reserved RAM pool and aim
-        // the dyn walkers' length source at its ROM lengths (data peeks RAM, so
-        // a consumed run can be blanked in place later).
         LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
         return BuildLevelSize();
     }
 
-    // Composite the dynamic plane over the static one at the single point every
-    // render path funnels through: the dynamic tile wins when non-zero, else the
-    // static tile shows.  The dyn edge is advanced in lockstep with the static
-    // edge so it always peeks the SAME absolute metatile.  Compositing here means
-    // both the reset fill (GetNextWrite) and the scroll stream (BuildNextColumn)
-    // get dynamic-over-static for free, with no separate dynamic draw pass.
     __attribute__((always_inline))
     u8 GetNextMetaTile() {
         const u8 s = edgeR.Fetch();
@@ -116,7 +125,7 @@ namespace demo::level {
         if (~step & 1) {
             if (step == 0) {
                 attr_column++;
-                const u8 mask = attr_column & 1 ? 0xCC : 0x00;
+                const u8 mask = (attr_column + prev_parity_fix()) & 1 ? 0xCC : 0x00;
                 for (auto & j : AttributeBuffer)
                     j &= mask;
             }
@@ -127,7 +136,7 @@ namespace demo::level {
             const u8 attr_idx  = tile_row >> 2;
             const u8 pal       = Metatiles_ATTR[MetatileBuffer[step >> 1]] & MetatilePaletteMask;
             const u8 is_bottom = tile_row >> 1 & 1;
-            const u8 shift     = attr_column & 1
+            const u8 shift     = (attr_column + prev_parity_fix()) & 1
                                     ? (is_bottom ? 4 : 0)
                                     : is_bottom ? 6 : 2;
             AttributeBuffer[attr_idx] |= pal << shift;
@@ -148,16 +157,6 @@ namespace demo::level {
         return step & 1 ? Metatiles_BL[m] : Metatiles_BR[m];
     }
 
-    // Right-scroll: expand the 14 metatiles of the entering column into the 56
-    // nametable tiles + 8 attribute bytes.  The metatiles are read straight out of
-    // the collision window (ColMapColumn) -- the SAME composited, coin-aware column
-    // ColMapTrack already decoded this scroll -- instead of re-walking the RLE here.
-    // This deletes the second RLE walk that used to run on every column-crossing
-    // frame (the render path and the collision producer were both decompressing the
-    // same column); the window is now the single decompressor and render just does
-    // the CHR expansion it alone needs.  `worldCol` is the absolute metatile column
-    // the NMI will display at the right edge (derived from lastXWorldSpace by the
-    // caller, matching the NMI's nametable placement exactly).
     void BuildNextColumn(u8* buf, const u16 worldCol) {
         attr_column++;
         const u8 mask = attr_column & 1 ? 0x33 : 0x00;
@@ -185,15 +184,10 @@ namespace demo::level {
         }
     }
 
-    // Left-scroll mirror: same window read, written bottom-up.  Placement matches the
-    // old reversed strides exactly -- top row at buf[54-step]/buf[55-step], bottom row
-    // at buf[26-step]/buf[27-step].  The old GetPrevMetaTile walked edgeL UP the column
-    // (row 13 -> 0), so to reproduce that order from the window we index col[13 - mt];
-    // combined with the reversed buf placement this renders the column upright, exactly
-    // as the right path does forward.
     void BuildPrevColumn(u8* buf, const u16 worldCol) {
         attr_column++;
-        const u8 mask = attr_column & 1 ? 0xCC : 0x00;
+        const u8 ap = (attr_column + prev_parity_fix()) & 1;   // odd-width parity fix
+        const u8 mask = ap ? 0xCC : 0x00;
         for (auto & j : AttributeBuffer) j &= mask;
 
         const u8* col = ColMapColumn(worldCol);
@@ -207,8 +201,8 @@ namespace demo::level {
             const u8 attr_idx  = tile_row >> 2;
             const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
             const u8 is_bottom = tile_row >> 1 & 1;
-            const u8 shift     = attr_column & 1 ? (is_bottom ? 4 : 0)
-                                                 : (is_bottom ? 6 : 2);
+            const u8 shift     = ap ? (is_bottom ? 4 : 0)
+                                    : (is_bottom ? 6 : 2);
             AttributeBuffer[attr_idx] |= pal << shift;
 
             buf[54 - step] = Metatiles_UL[m];

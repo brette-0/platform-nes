@@ -154,7 +154,7 @@ void ColMapTrack(const u16 camLeftCol) {
 // Slide the window one column right: the slot that held the dropped leftmost column
 // (ColMapOrigin) is reused for the admitted rightmost column (base+width).  Stamp the
 // new column there, then advance base + rotate origin forward one slot.
-void ColMapSlideRight(Cursor newRightStat, DynamicCursor newRightDyn) {
+void ColMapSlideRight(const Cursor &newRightStat, DynamicCursor newRightDyn) {
     ColMapStamp(ColMapOrigin, newRightStat, newRightDyn);
     ColMapBaseCol++;
     if (++ColMapOrigin >= ColMapWidth()) ColMapOrigin = 0;
@@ -163,7 +163,7 @@ void ColMapSlideRight(Cursor newRightStat, DynamicCursor newRightDyn) {
 // Mirror: drop the rightmost column, admit (base-1) on the left.  The freed slot is
 // one before the current origin (where the old rightmost lived); rotate origin back
 // onto it, drop base, and stamp the new leftmost column into it.
-void ColMapSlideLeft(Cursor newLeftStat, DynamicCursor newLeftDyn) {
+void ColMapSlideLeft(const Cursor &newLeftStat, DynamicCursor newLeftDyn) {
     ColMapBaseCol--;
     if (ColMapOrigin == 0) ColMapOrigin = ColMapWidth() - 1;
     else                   ColMapOrigin--;

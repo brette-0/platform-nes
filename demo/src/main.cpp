@@ -41,7 +41,7 @@ static u8 CoinVramLen;                      // bytes used
 
 static void CoinVramReset() { CoinVramLen = 0; }
 
-static void CoinVramPush(const int address, const u8 value) {
+static void CoinVramPush(const u16 address, const u8 value) {
     if (CoinVramLen + 3 > kCoinVramCap) return;        // full: drop (next frame retries)
     CoinVram[CoinVramLen++] = static_cast<u8>(address >> 8);
     CoinVram[CoinVramLen++] = static_cast<u8>(address & 0xFF);
@@ -113,7 +113,7 @@ static oam::oam_t SpriteY(u16 i);
 static oam::oam_t SpriteX(u16 i);
 static u16  PlayerWorldX(const Actor* self);
 static i16  ClampRow(u16 y);
-static bool PlayerBlocked(Actor* self, u16 wx, u16 wy);
+static bool PlayerBlocked(const Actor* self, u16 wx, u16 wy);
 static void ProcessPlayerMovement(Actor* self, vec2<i8> moveForce);
 
 RESET {
@@ -259,7 +259,7 @@ static oam::oam_t SpriteX(const u16 i) { return AdjustSpriteX(&player, i); }
 // Player world-space pixel X: the actor's sub-pixel worldSpace.x dropped to px.
 // (camera + screen.x are derived from it; this is the single source of truth.)
 static u16 PlayerWorldX(const Actor* self) {
-    return static_cast<u16>(self->worldSpace.x >> 3);
+    return self->worldSpace.x >> 3;
 }
 
 static i8 AbsI8(const i8 v) { return v < 0 ? static_cast<i8>(-v) : v; }
@@ -271,7 +271,7 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-static bool PlayerBlocked(Actor* self, const u16 wx, const u16 wy) {
+static bool PlayerBlocked(const Actor* self, const u16 wx, const u16 wy) {
     ppu::SetColorPriority(ppu::mask::RED);   // TEMP profiler: the collision query
     const bool blocked = level::Blocked(wx, wy, self->size.x, self->size.y,
                                         /*collectBlocks=*/false);
@@ -296,19 +296,21 @@ static void CollectPlayerCoins(const Actor* self) {
 }
 
 void SpriteZeroHandler() {
-#if TARGET_NDS
-    // --- DS vertical follow camera -------------------------------------------
-    // The DS panel (192px) is 48px shorter than the NES frame (240px), so it cannot
-    // show the whole vertical slice the NES game renders. While the player is low we
-    // bottom-anchor -- scroll Y bumped by the shortfall (240 - viewport_py()) so the
-    // ground sits on the panel bottom. Once the player climbs to the middle of the
-    // viewport we pan up with them, easing the bump from that maximum down to 0
-    // (top-anchored) as they rise, so they never clip off the top edge. The bump is
-    // just the player's height above the viewport midpoint, clamped to
-    // [0, 240 - viewport_py()]. Sprites are kept locked to this varying scroll by the
-    // DS backend (build_sprites offsets every OBJ by the live band scroll), so the
-    // whole vertical-follow policy lives here in one place. Every other target
-    // renders the full 240 lines and needs no vertical camera (the #else branch).
+#if defined(TARGET_NDS) || defined(TARGET_GBA)
+    // --- cropped-panel vertical follow camera --------------------------------
+    // The DS (256x192) and GBA (240x160) panels are shorter than the NES frame
+    // (240px), so they cannot show the whole vertical slice the NES game renders.
+    // While the player is low we bottom-anchor -- scroll Y bumped by the shortfall
+    // (240 - viewport_py(): 48 on DS, 80 on GBA) so the ground sits on the panel
+    // bottom. Once the player climbs to the middle of the viewport we pan up with
+    // them, easing the bump from that maximum down to 0 (top-anchored) as they rise,
+    // so they never clip off the top edge. The bump is just the player's height above
+    // the viewport midpoint, clamped to [0, 240 - viewport_py()]. The math reads
+    // viewport_py() so it adapts to either panel. Sprites are kept locked to this
+    // varying scroll by the backend (build_sprites offsets every OBJ by the live band
+    // scroll), so the whole vertical-follow policy lives here in one place. Every
+    // full-height target renders the full 240 lines and needs no vertical camera
+    // (the #else branch).
     const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
     const i16 anchor = static_cast<i16>(240 - video::viewport_py());
     const i16 raw    = static_cast<i16>(player.screen.y) - mid;

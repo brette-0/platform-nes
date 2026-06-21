@@ -35,10 +35,11 @@ using namespace br0::intsh;
 // DS backends are emulated-PPU builds like SDL but present through console
 // graphics, so they must NOT see any SDL3 headers. (The Wii U backend DOES use
 // SDL -- but SDL2, from the devkitPro Wii U portlib -- which it includes itself
-// in src/wiiu; it must not pull in SDL3. The DS backend drives the libnds 2D
-// hardware directly, with no SDL at all.) All are "non-NES", so the SDL3-only
-// includes/globals are gated on (!TARGET_NES && !OGC && !CTR && !NX && !WIIU && !NDS).
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS)
+// in src/wiiu; it must not pull in SDL3. The DS and GBA backends drive the
+// libnds/libgba 2D hardware directly, with no SDL at all.) All are "non-NES", so
+// the SDL3-only includes/globals are gated on
+// (!TARGET_NES && !OGC && !CTR && !NX && !WIIU && !NDS && !GBA).
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
 #include <SDL3/SDL_video.h>
 #endif
 
@@ -541,7 +542,7 @@ namespace ppu {
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
 }
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS)
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
@@ -582,6 +583,28 @@ namespace video {
     /** @brief Viewport width in pixels (tiles * 8 = 256). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
     /** @brief Viewport height in pixels (tiles * 8 = 192). */
+    constexpr u16 viewport_py() { return viewport_ty() << 3; }
+#elif defined(TARGET_GBA)
+    // The Game Boy Advance panel is 240x160 -- the first target NARROWER than the
+    // NES horizontally (30 tiles vs 32) as well as shorter (20 tiles vs 30). Same
+    // family as the DS: the NES game is never compromised, so the GBA shows a
+    // 240x160 WINDOW onto the same 256x240 world the game renders, cropping 2 tiles
+    // (16px) of width and 10 tiles (80px) of height. The backend (src/gba/video.cpp)
+    // maps the NES PPU onto the GBA's native 2D hardware (BG tilemap + hardware OBJ
+    // + per-scanline HBlank scroll), so raster splits and sprite-0 still work.
+    //
+    // viewport_tx()/ty() are the VISIBLE window only. The emulated PPU VRAM stays
+    // generous against the viewport (the nametable is 32 tiles wide regardless),
+    // which is where the correctness margin for sub-tile scroll + lookahead lives --
+    // NOT in these accessors. Any code reading viewport_tx() must not assume 32, and
+    // any code reading viewport_ty() must not assume 30.
+    /** @brief Viewport width in tiles (GBA: 30 = the 240px panel, < NES 32). */
+    constexpr u16 viewport_tx() { return 30; }
+    /** @brief Viewport height in tiles (GBA: 20 = the 160px panel, < NES 30). */
+    constexpr u16 viewport_ty() { return 20; }
+    /** @brief Viewport width in pixels (tiles * 8 = 240). */
+    constexpr u16 viewport_px() { return viewport_tx() << 3; }
+    /** @brief Viewport height in pixels (tiles * 8 = 160). */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
 #elif defined(TARGET_NX) || defined(TARGET_WIIU)
     // The Switch and Wii U are 16:9 consoles, so unlike the 4:3 GX/3DS consoles
