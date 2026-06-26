@@ -40,4 +40,6 @@ constexpr bool IsBlocking(MetatileCollision c) {
     return c == MetatileCollision::Solid || c == MetatileCollision::Collect;
 }
 
-MetatileCollision GetMetatileCollisions(u8 metatile);
+inline MetatileCollision GetMetatileCollisions(const u8 metatile) {
+    return static_cast<MetatileCollision>(Metatiles_ATTR[metatile] & MetatileCollisionMask);
+}

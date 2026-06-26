@@ -20,22 +20,26 @@ wo_register<ppu::raw::OAMDMA>  OAMDMA;
 }   // namespace oam
 
 inline static u16 xy_to_nt_addr(const u16 x, const u16 y) {
-    constexpr auto base = 0x2000;
-    const auto nt_h = (x >> 5 & 1) << 10;
-    const auto nt_v = (y / 30) << 11;
-    const auto col  = x & 0x1F;
-    const auto row  = y % 30;
-
+    constexpr u16 base = 0x2000;
+    const u16 nt_h = static_cast<u16>((x >> 5 & 1) << 10);
+    const u16 col  = x & 0x1F;
+    if (y < 30) {
+        return base + nt_h + (y << 5) + col;
+    }
+    const u16 nt_v = static_cast<u16>((y / 30) << 11);
+    const u16 row  = y % 30;
     return base + nt_h + nt_v + row * 32 + col;
 }
 
 inline static u16 xy_to_at_addr(const u16 x, const u16 y) {
-    constexpr auto base = 0x2000;
-    const auto nt_h = (x >> 5 & 1) << 10;
-    const auto nt_v = (y / 30) << 11;
-    const auto col  = x & 0x1F;
-    const auto row  = y % 30;
-
+    constexpr u16 base = 0x2000;
+    const u16 nt_h = static_cast<u16>((x >> 5 & 1) << 10);
+    const u16 col  = x & 0x1F;
+    if (y < 30) {
+        return base + nt_h + 0x3C0 + ((y >> 2) << 3) + (col >> 2);
+    }
+    const u16 nt_v = static_cast<u16>((y / 30) << 11);
+    const u16 row  = y % 30;
     return base + nt_h + nt_v + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
@@ -179,21 +183,27 @@ void WriteFromBufferToAttributeTable(
 
     PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
 
+    if (polarity) {
+        // AT rows for the same tile column are 8 bytes apart.  Re-address each
+        // byte explicitly (peek PPUSTATUS + 2 pokes = 12 cycles/byte) instead of
+        // seven dummy PPUDATA reads (7×4 = 28 cycles/byte) to stride between rows.
+        // base_lo + i*8 stays ≤ $FF for sBuffer≤8 (base_lo ≤ $C7, 7×8 = $38).
+        const u8 hi = static_cast<u8>(offset >> 8);
+        const u8 lo = static_cast<u8>(offset & 0xFF);
+        for (u8 i = 0; i < sBuffer; i++) {
+            peek(raw::PPUSTATUS);
+            poke(raw::PPUADDR, hi);
+            poke(raw::PPUADDR, static_cast<u8>(lo + (i << 3)));
+            poke(raw::PPUDATA, source[i]);
+        }
+        return;
+    }
+
     peek(raw::PPUSTATUS);
     poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
     poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
-
     for (u8 i = 0; i < sBuffer; i++) {
         poke(raw::PPUDATA, source[i]);
-        if (polarity) {
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-            peek(raw::PPUDATA);
-        }
     }
 }
 

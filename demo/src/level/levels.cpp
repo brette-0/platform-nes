@@ -14,7 +14,6 @@ namespace demo::level {
     u16 nColumns;
 
     const u8* TileData;
-    const u8* HunkLengths;
 
     u8 MetatileBuffer[14];
     u8 AttributeBuffer[8];
@@ -51,12 +50,6 @@ namespace demo::level {
         #include "../../tiled/include/1-1_st"
     };
 
-    absolute
-    const u8 HunkLengths_1_1[] = {
-    #include "../../tiled/include/1-1_sl"
-        , 0x00
-    };
-
     const u8 DynData_1_1[] = {
         #include "../../tiled/include/1-1_dt"
     };
@@ -66,15 +59,15 @@ namespace demo::level {
     };
 
     const Level Levels[] = {
-        {TileData_1_1, HunkLengths_1_1,
+        {TileData_1_1, sizeof(TileData_1_1) / levelHeight,
          DynData_1_1, DynLengths_1_1, sizeof(DynLengths_1_1)}
     };
 
     bool LoadLevel(const u16 n) {
         TileData = Levels[n].TileData;
-        HunkLengths = Levels[n].HunkLengths;
+        nColumns = Levels[n].nColumns;
         LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
-        return BuildLevelSize();
+        return true;
     }
 
     __attribute__((always_inline))
@@ -212,22 +205,4 @@ namespace demo::level {
         }
     }
 
-    MINSIZE bool BuildLevelSize() {
-        u8 temp   = 0;
-        nColumns = 0;
-
-        for (u16 i = 0; i < 0xffff; i++) {
-            if (HunkLengths[i] == 0)
-                return true;
-
-            temp += HunkLengths[i];
-
-            while (temp >= levelHeight) {
-                nColumns++;
-                temp -= levelHeight;
-            }
-        }
-
-        return false;
-    }
 }

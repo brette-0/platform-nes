@@ -53,13 +53,17 @@ extern const u8* DynDataROM;
 // the prototype; unify behind a shared walker once the dynamic path is proven.)
 class DynamicCursor {
 public:
-    u16 offset;
-    u8  progress;
+    const u8* lp;   // pointer into DynLengths at the current run
+    u8*       dp;   // pointer into DynData (RAM) at the current run
+    u8        progress;
 
-    void Move(i16 amt);
-    void Seek(const i16 amt) { Move(amt); }
-    [[nodiscard]] u8   Fetch() const { return DynData[offset]; }   // RAM peek (mutable)
-    [[nodiscard]] u16  Run()   const { return offset; }            // run index to blank on removal
+    // Fast hot-path walk: i8 covers ±levelHeight.
+    void Move(i8 amt);
+    // Large-displacement walk for re-anchor / seek paths.
+    void Seek(i16 amt);
+
+    [[nodiscard]] u8  Fetch() const { return *dp; }                          // RAM peek
+    [[nodiscard]] u16 Run()   const { return static_cast<u16>(dp - DynData); } // run index
 };
 
 // Forward/backward dynamic-plane edge walkers, the dynamic analogue of

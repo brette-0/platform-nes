@@ -28,43 +28,49 @@ namespace demo::level {
     DynamicCursor dynEdgeR;
     DynamicCursor dynEdgeL;
 
-    // Walk the dynamic RLE by `amt` metatiles.  Byte-for-byte the same engine as
-    // Cursor::Move (including the run-0 floor guard that stops offset under-flowing
-    // to 0xFFFF), but lengths come from DynLengths (this plane's ROM run-lengths)
-    // rather than the global HunkLengths.  Duplicated rather than shared for the
-    // prototype; fold the two behind one walker once the dynamic path is proven.
-    void DynamicCursor::Move(i16 amt) {
-        // Hoist to locals (see Cursor::Move): mutating offset/progress through `this` each step
-        // is a ~200-cycle memory round-trip; held in locals they live in zero-page registers and
-        // write back once.  This walker is on the player re-anchor's hot path every frame.
-        u8  p = progress;
-        // Running pointer into DynLengths (see Cursor::Move): avoids the clc/adc/adc reconstruction
-        // of DynLengths[o] on every metatile stepped; lp advances with the run index, o is recovered
-        // from it once at the end.
-        const u8* lp = DynLengths + offset;
-        // unroll(disable): mirror of Cursor::Move -- constant-step callers (Move(levelHeight)
-        // column crossings in ColMapTrack/Seed) were unrolled 14x per inlined site, the dynamic
-        // half of the same PRG blow-up.  Keep it rolled; the per-step cost is the RLE compare.
+    // Hot-path walk: i8 covers ±levelHeight.  lp/dp hoisted to locals (ZP).
+    // Floor guard mirrors Cursor::Move: stop at level start, don't underflow.
+    void DynamicCursor::Move(i8 amt) {
+        const u8* dlp = lp;
+        u8*       ddp = dp;
+        u8 p = progress;
         #pragma clang loop unroll(disable)
         while (amt > 0) {
-            if (++p >= *lp) {
-                ++lp;
-                p = 0;
-            }
+            if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
             --amt;
         }
         #pragma clang loop unroll(disable)
         while (amt < 0) {
             if (p == 0) {
-                if (lp == DynLengths) break;   // floor at the level start (see Cursor::Move)
-                --lp;
-                p = *lp;
+                if (dlp == DynLengths) break;
+                --dlp; --ddp; p = *dlp;
             }
             --p;
             ++amt;
         }
-        offset = static_cast<u16>(lp - DynLengths);
-        progress = p;
+        lp = dlp; dp = ddp; progress = p;
+    }
+
+    // Large-displacement walk (re-anchor, seek): same engine, i16 counter.
+    void DynamicCursor::Seek(i16 amt) {
+        const u8* dlp = lp;
+        u8*       ddp = dp;
+        u8 p = progress;
+        #pragma clang loop unroll(disable)
+        while (amt > 0) {
+            if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
+            --amt;
+        }
+        #pragma clang loop unroll(disable)
+        while (amt < 0) {
+            if (p == 0) {
+                if (dlp == DynLengths) break;
+                --dlp; --ddp; p = *dlp;
+            }
+            --p;
+            ++amt;
+        }
+        lp = dlp; dp = ddp; progress = p;
     }
 
     // AABB sweep over the dynamic plane.  Same column-major cell walk as

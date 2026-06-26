@@ -118,6 +118,7 @@ def __main__() -> None:
             tmj_content = load(f)
 
         height : int = tmj_content["height"]
+        width  : int = tmj_content["width"]
         static, dynamic = pick_layers(tmj_content["layers"])
 
         # Tileset firstgids, sorted high->low so the first <= a GID owns it.
@@ -127,7 +128,10 @@ def __main__() -> None:
         st = column_major(decode_gids(static["data"], firstgids), height)
         dt = column_major(decode_gids(dynamic["data"], firstgids), height)
 
-        st_c, st_s = rle(st)
+        # Static plane: flat column-major dump, no compression.  The engine
+        # streams directly from ROM; no lengths array, no run tracking.
+        st_flat = ", ".join(f"0x{v:02x}" for v in st)
+
         # Dynamic plane: air-only RLE so each consumable tile is its own run.
         dt_c, dt_s, dyn_runs = rle_dynamic(dt)
 
@@ -140,13 +144,12 @@ def __main__() -> None:
                   f"thin the layer")
         else:
             print(f"  {tmj.stem}: {dyn_runs} dynamic runs "
-                  f"(cap {DYN_RUN_CAPACITY})")
+                  f"(cap {DYN_RUN_CAPACITY}), static {width*height} bytes flat")
 
         outputs = {
-            f"{tmj.stem}_st": st_c,   # static tiles
-            f"{tmj.stem}_sl": st_s,   # static lengths
-            f"{tmj.stem}_dt": dt_c,   # dynamic tiles
-            f"{tmj.stem}_dl": dt_s,   # dynamic lengths
+            f"{tmj.stem}_st": st_flat, # static: flat column-major, no compression
+            f"{tmj.stem}_dt": dt_c,    # dynamic tiles (air-only RLE)
+            f"{tmj.stem}_dl": dt_s,    # dynamic lengths
         }
 
         for name, body in outputs.items():

@@ -5,7 +5,8 @@
 # Usage:
 #   demo/scripts/build.sh <target> [release|debug] [options]
 #
-#   <target>        nes | linux | win | mac
+#   <target>        nes | linux | win | mac | web |
+#                   ctr | gc | wii | switch | wiiu | nds | dsi | gba
 #   [release|debug] build type (default: release)
 #
 # Options:
@@ -30,7 +31,8 @@ JOBS=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        nes|linux|win|mac)   PLATFORM="$1" ;;
+        nes|linux|win|mac|web|ctr|gc|wii|switch|wiiu|nds|dsi|gba)
+                             PLATFORM="$1" ;;
         release|debug)       BUILD_TYPE="$1" ;;
         -c|--clean)          CLEAN=1 ;;
         -t|--target)         CMAKE_TARGET="$2"; shift ;;
@@ -42,7 +44,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$PLATFORM" ]]; then
-    echo "error: no target given (nes|linux|win|mac)" >&2
+    echo "error: no target given (nes|linux|win|mac|web|ctr|gc|wii|switch|wiiu|nds|dsi|gba)" >&2
     usage >&2
     exit 2
 fi

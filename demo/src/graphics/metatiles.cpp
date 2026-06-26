@@ -297,8 +297,5 @@ extern constexpr std::array<u8, 256> Metatiles_UR   = MetatilePlane(2);   // top
 extern constexpr std::array<u8, 256> Metatiles_BR   = MetatilePlane(3);   // bottom-right
 extern constexpr std::array<u8, 256> Metatiles_ATTR = MetatilePlane(4); // collision (7..2) | palette (1..0)
 
-// Collision class now lives in the upper 6 bits of each metatile's AT byte
-// (the 5th plane); decoding is a single mask, no id-range table.
-MetatileCollision GetMetatileCollisions(const u8 metatile) {
-    return static_cast<MetatileCollision>(Metatiles_ATTR[metatile] & MetatileCollisionMask);
-}
+// GetMetatileCollisions is defined inline in metatiles.hpp so every call site
+// can emit a direct indexed load + mask with no JSR/RTS overhead.

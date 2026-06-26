@@ -2,7 +2,8 @@
 
 #include "levels.hpp"                  // levelHeight, kHudRows
 #include "../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
-#include <platform-nes/video.hpp>      // TEMP profiler: ppu::SetColorPriority
+
+#include <array>
 
 using namespace br0::intsh;
 
@@ -26,6 +27,16 @@ namespace demo::level {
 colmap_cold u8  ViewMap[kColMapWidth * levelHeight];
 colmap_cold u16 ColMapBaseCol;
 colmap_cold u8  ColMapOrigin;
+
+// Precomputed slot → ViewMap column-base offsets.  slot * levelHeight requires a
+// 16-bit software multiply on 6502 (14 * 23 = 322 > 255, result overflows u8).
+// This constexpr ROM table replaces that with a single indexed load, paying ~6
+// cycles vs ~80-100 cycles per column resolved in Blocked / ColMapColumn.
+static constexpr std::array<u16, kColMapWidth> kSlotOffset = []() constexpr {
+    std::array<u16, kColMapWidth> a{};
+    for (u8 i = 0; i < kColMapWidth; i++) a[i] = static_cast<u16>(i * levelHeight);
+    return a;
+}();
 
 // Producer edge cursors, internal to this TU.  Invariant: the *Left cursors sit on
 // the row-0 cell of the leftmost held column (ColMapBaseCol) and the *Right cursors
@@ -54,6 +65,8 @@ namespace {
     colmap_cold Cursor        colPlayerStat;
     colmap_cold DynamicCursor colPlayerDyn;
     colmap_cold u16           colPlayerCell;
+    colmap_cold u16           colPlayerColR;   // rightmost column of last AABB, for early-exit guard
+    colmap_cold u8            colPlayerRowB;   // bottom row of last AABB, for early-exit guard
 }
 
 // Stamp one column's composite metatiles into ring slot `slot`.  `stat`/`dyn` are
@@ -61,38 +74,27 @@ namespace {
 // (column-major, so Move(1) steps one row) and write the dynamic tile when non-air,
 // else the static tile -- identical compositing to the render path's GetNextMetaTile.
 // The caller's cursor copies are consumed (passed by value).
-// noinline: this 2KB-ish body is reached from THREE sites (the seed loop and both
-// slides); inlining it -- and through it ColMapTrack -- duplicated the whole column
-// walk per call site and blew up PRG.  It runs at most a couple times per frame on
-// column entry, so a JSR is free here.  unroll(disable): the levelHeight loop walks
-// two RLE cursors; -O3 unrolled it 14x (~150 B/iter of 16-bit-indexed cursor code),
-// which is the bulk of the bloat -- the rolled loop is a fraction of the size and
-// the per-iter overhead is nothing next to the Fetch/Move work.
+// noinline: this body is reached from THREE sites (the seed loop and both slides);
+// inlining it duplicated the walk per call site and blew up PRG.  It runs at most
+// a couple of times per frame on column entry so a JSR is free here.
+// unroll(disable): -O3 unrolled the 14-row loop; the rolled form is much smaller
+// and the per-iter overhead is negligible next to the dyn-cursor RLE work.
 __attribute__((noinline))
 void ColMapStamp(const u8 slot, Cursor stat, DynamicCursor dyn) {
-    u8* col = &ViewMap[slot * levelHeight];
+    u8* col = ViewMap + kSlotOffset[slot];
 
-    // Inline both cursor walks instead of calling Move(1) per row.  A Move(1) reloads the
-    // cursor's offset/progress, rebuilds the lengths pointer, runs one compare, then writes
-    // the state back -- ~50-60 cyc of fixed prologue/epilogue wrapped around a single step, x28
-    // (two cursors x 14 rows) every window slide.  Here we hoist all of that once: a data
-    // pointer (the metatile to Fetch) and a length pointer (the run-length to compare) per
-    // plane, both advanced in lockstep with progress, walking levelHeight consecutive cells
-    // forward.  The cursor copies are by-value and discarded, so nothing is written back.
-    // Equivalent to running Cursor::Move(1)/DynamicCursor::Move(1) 14 times, minus the churn.
-    const u8* sdat = stat.base + stat.offset;   // static metatile (Fetch = *(base+offset))
-    const u8* slen = HunkLengths + stat.offset; // static run-length under the cursor
-    u8        sp   = stat.progress;
-    const u8* ddat = DynData + dyn.offset;      // dynamic metatile (Fetch = DynData[offset])
-    const u8* dlen = DynLengths + dyn.offset;   // dynamic run-length under the cursor
+    // Static is a flat ROM pointer; dynamic still walks RLE.
+    const u8* sdat = stat.dp;
+    const u8* ddat = dyn.dp;
+    const u8* dlen = dyn.lp;
     u8        dp   = dyn.progress;
 
     #pragma clang loop unroll(disable)
     for (u8 r = 0; r < levelHeight; r++) {
         const u8 d = *ddat;
         col[r] = d ? d : *sdat;                 // dynamic-over-static
-        if (++sp >= *slen) { ++slen; ++sdat; sp = 0; }   // advance static one cell
-        if (++dp >= *dlen) { ++dlen; ++ddat; dp = 0; }   // advance dynamic one cell
+        ++sdat;                                  // flat: one byte per cell
+        if (++dp >= *dlen) { ++dlen; ++ddat; dp = 0; }
     }
 }
 
@@ -108,6 +110,8 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
     colPlayerStat = stat;          // collector anchor: parked on (leftCol, row 0) now;
     colPlayerDyn  = dyn;           //   the first CollectCoins re-anchors it to the player
     colPlayerCell = static_cast<u16>(leftCol) * levelHeight;
+    colPlayerColR = leftCol;
+    colPlayerRowB = 0;
     const auto width = ColMapWidth();
     for (u8 i = 0; i < width; i++) {
         if (i == width - 1) {          // rightmost held, row 0
@@ -120,13 +124,41 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
     }
 }
 
+// Pair advance helpers: static cursor is a flat pointer (just add/subtract
+// levelHeight); only the dynamic cursor still needs RLE walking.
+// noinline keeps each helper's ZP frame isolated from ColMapTrack's frame.
+__attribute__((noinline))
+static void AdvancePairForward(Cursor& s, DynamicCursor& d) {
+    s.dp += levelHeight;
+    const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;
+    #pragma clang loop unroll(disable)
+    for (u8 i = levelHeight; i != 0; --i) {
+        if (++dprog >= *dlp) { ++dlp; ++ddp; dprog = 0; }
+    }
+    d.lp = dlp; d.dp = ddp; d.progress = dprog;
+}
+
+__attribute__((noinline))
+static void AdvancePairBackward(Cursor& s, DynamicCursor& d) {
+    s.dp -= levelHeight;
+    const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;
+    #pragma clang loop unroll(disable)
+    for (u8 i = levelHeight; i != 0; --i) {
+        if (dprog == 0) {
+            if (dlp == DynLengths) break;
+            --dlp; --ddp; dprog = *dlp;
+        }
+        --dprog;
+    }
+    d.lp = dlp; d.dp = ddp; d.progress = dprog;
+}
+
 // Lazily centre the window on the camera.  Desired base = (camLeftCol - 4) so the
 // 24-wide window holds 4 columns left + viewport(16) + 4 right, clamped so it never
 // runs off either end of the level.  Each loop body slides one column and walks BOTH
 // edge cursor pairs the same direction, preserving their [base, base+width-1] invariant.
 // In steady scroll the camera moves <= 1 column/frame, so a call does 0 or 1 slides.
-// noinline: keep this driver's frame (the Cursor::Move walks) out of the giant
-// PlayerUpdate ZP frame -- the page-zero-cliff defence the window read relies on.
+// noinline: keep this driver's frame out of the giant PlayerUpdate ZP frame.
 __attribute__((noinline))
 void ColMapTrack(const u16 camLeftCol) {
     i16 desired = static_cast<i16>(camLeftCol) - 4;
@@ -136,18 +168,14 @@ void ColMapTrack(const u16 camLeftCol) {
     if (desired > hi) desired = hi;
 
     while (static_cast<i16>(ColMapBaseCol) < desired) {   // window slides right
-        colRightStat.Move(levelHeight);                   // current edges -> entering col
-        colRightDyn.Move(levelHeight);
-        ColMapSlideRight(colRightStat, colRightDyn);      // base++ inside
-        colLeftStat.Move(levelHeight);                    // re-anchor on the new base
-        colLeftDyn.Move(levelHeight);
+        AdvancePairForward(colRightStat, colRightDyn);    // entering column
+        ColMapSlideRight(colRightStat, colRightDyn);      // base++
+        AdvancePairForward(colLeftStat, colLeftDyn);      // re-anchor left edge
     }
     while (static_cast<i16>(ColMapBaseCol) > desired) {   // window slides left
-        colLeftStat.Move(-levelHeight);                   // current edges -> entering col
-        colLeftDyn.Move(-levelHeight);
-        ColMapSlideLeft(colLeftStat, colLeftDyn);         // base-- inside
-        colRightStat.Move(-levelHeight);                  // re-anchor on the new right
-        colRightDyn.Move(-levelHeight);
+        AdvancePairBackward(colLeftStat, colLeftDyn);     // entering column
+        ColMapSlideLeft(colLeftStat, colLeftDyn);         // base--
+        AdvancePairBackward(colRightStat, colRightDyn);   // re-anchor right edge
     }
 }
 
@@ -179,7 +207,7 @@ const u8* ColMapColumn(const u16 col) {
     if (d >= ColMapWidth()) return nullptr;       // outside window = air (caller skips)
     u8 slot = ColMapOrigin + static_cast<u8>(d);
     if (slot >= ColMapWidth()) slot -= ColMapWidth();
-    return &ViewMap[slot * levelHeight];
+    return ViewMap + kSlotOffset[slot];
 }
 
 // AABB block test on world-pixel inputs.  The HUD strip is removed so the row index
@@ -196,6 +224,10 @@ bool Blocked(const u16 px, const u16 py, const u8 w, const u8 h, const bool coll
     if (rowTop < 0)            rowTop = 0;
     if (rowBot >= levelHeight) rowBot = levelHeight - 1;
 
+    // Clamp to u8 now that bounds are validated -- eliminates i16 indexing below.
+    const u8 rowT = static_cast<u8>(rowTop);
+    const u8 rowB = static_cast<u8>(rowBot);
+
     const u16 colL = px >> 4;
     const u16 colR = (px + w - 1) >> 4;
     for (u16 c = colL; c <= colR; c++) {
@@ -203,9 +235,11 @@ bool Blocked(const u16 px, const u16 py, const u8 w, const u8 h, const bool coll
         if (d >= ColMapWidth()) continue;       // column outside window = air
         u8 slot = ColMapOrigin + static_cast<u8>(d);
         if (slot >= ColMapWidth()) slot -= ColMapWidth();   // non-pow2 ring: one wrap
-        const u8* colp = &ViewMap[slot * levelHeight];
-        for (i16 r = rowTop; r <= rowBot; r++) {
-            const MetatileCollision cls = GetMetatileCollisions(colp[r]);
+        // kSlotOffset replaces slot*levelHeight (16-bit software multiply) with a
+        // ROM table lookup.  Start colp at rowT so the inner walk is a bare *colp.
+        const u8* colp = ViewMap + kSlotOffset[slot] + rowT;
+        for (u8 cnt = rowB - rowT + 1; cnt != 0; --cnt, ++colp) {
+            const MetatileCollision cls = GetMetatileCollisions(*colp);
             if (cls == MetatileCollision::Solid) return true;
             if (collectBlocks && cls == MetatileCollision::Collect) return true;
         }
@@ -246,29 +280,49 @@ u8 CollectCoins(const u16 px, const u16 py, const u8 w, const u8 h,
     // (the player walks ~5 columns under a gap in the coins, then eats 70 steps at once -- the
     // exact one-frame spike that gating produced).  Cheap every frame >> occasional huge spike.
     const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
-    const i16 step = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayerCell);
-    ppu::SetColorPriority(ppu::mask::GREEN);   // TEMP profiler: isolate the re-anchor Move cost
-    colPlayerDyn.Move(step);
-    colPlayerStat.Move(step);
-    ppu::SetColorPriority(0);                  // TEMP profiler: end re-anchor region
+    const i16 step      = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayerCell);
+    const u8   rowB     = static_cast<u8>(rowBot);
+    const bool sameColR = (colR == colPlayerColR);
+    const bool sameRowB = (rowB == colPlayerRowB);
     colPlayerCell = anchorCell;
-
-    // Cheap gate: the AABB is empty air/ground on almost every frame, so before the probe WALK
-    // scan the already-composited window cells (plain ViewMap reads, no RLE walk) for a coin.
-    // The dry case -- the overwhelming majority of frames -- returns here, so the probe walk
-    // below NEVER runs unless a coin is actually under the AABB this frame.  (The re-anchor above
-    // still runs every frame -- it must, to keep step tiny -- but it IS tiny, so that is fine.)
-    bool anyCoin = false;
-    for (u16 c = colL; c <= colR && !anyCoin; c++) {
-        const u16 d = c - ColMapBaseCol;
-        if (d >= ColMapWidth()) continue;
-        u8 slot = ColMapOrigin + static_cast<u8>(d);
-        if (slot >= ColMapWidth()) slot -= ColMapWidth();
-        const u8* colp = &ViewMap[slot * levelHeight];
-        for (i16 r = rowTop; r <= rowBot; r++)
-            if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) { anyCoin = true; break; }
+    colPlayerColR = colR;
+    colPlayerRowB = rowB;
+    // Same cells as last frame → any coins there were already consumed; skip the walk.
+    // Guard all four AABB edges: step covers colL+rowTop; colR and rowB change independently
+    // when px%16 or py%16 crosses 0↔1 without the top-left anchor moving.
+    if (step == 0 && sameColR && sameRowB) return 0;
+    // After level load step is bounded to ±(levelHeight+1) ≤ 15; use the i8 path
+    // (single-byte loop counter on 6502) except on the first call after ColMapSeed
+    // where the player may be far from the seed point.
+    if (step >= -128 && step <= 127) {
+        colPlayerDyn.Move(static_cast<i8>(step));
+        colPlayerStat.Move(static_cast<i8>(step));
+    } else {
+        colPlayerDyn.Seek(step);
+        colPlayerStat.Seek(step);
     }
-    if (!anyCoin) return 0;
+
+    // ViewMap pre-scan: a cheap gate before the cursor probe walk.  ViewMap is composite
+    // (dynamic-over-static), so this fires for static Collect tiles too -- but the probe's
+    // pd.Fetch()!=0 guard rejects those in one dereference.  The gain is that the probe walk
+    // (cursor copies + Move calls) is skipped entirely on every frame where no Collect tile
+    // sits in the AABB, which is nearly every frame in open terrain.  The seek above must still
+    // run unconditionally to keep the persistent cursor aligned.
+    {
+        bool anyCoin = false;
+        for (u16 c = colL; !anyCoin && c <= colR; c++) {
+            const u16 d = c - ColMapBaseCol;
+            if (d >= ColMapWidth()) continue;
+            u8 slot = ColMapOrigin + static_cast<u8>(d);
+            if (slot >= ColMapWidth()) slot -= ColMapWidth();
+            const u8* colp = ViewMap + kSlotOffset[slot];
+            for (i16 r = rowTop; !anyCoin && r <= rowBot; r++) {
+                if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect)
+                    anyCoin = true;
+            }
+        }
+        if (!anyCoin) return 0;
+    }
 
     // ONE probe pair copied off the persistent anchor, walked monotonically column-major
     // through the AABB.  pd/ps sit on cell (c, r) at each step, so a coin is removed with a
@@ -286,10 +340,10 @@ u8 CollectCoins(const u16 px, const u16 py, const u8 w, const u8 h,
         if (inWin) {
             u8 slot = ColMapOrigin + static_cast<u8>(d);
             if (slot >= ColMapWidth()) slot -= ColMapWidth();
-            colp = &ViewMap[slot * levelHeight];
+            colp = ViewMap + kSlotOffset[slot];
         }
         for (i16 r = rowTop; r <= rowBot; r++) {
-            if (inWin && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
+            if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
                 DynData[pd.Run()] = 0;          // permanent removal (length-1 coin run)
                 const u8 reveal = ps.Fetch();   // static metatile to expose
                 colp[r] = reveal;               // window now shows the static cell

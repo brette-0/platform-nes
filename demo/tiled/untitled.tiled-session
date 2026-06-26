@@ -2,9 +2,9 @@
     "activeFile": "tilemaps/1-1.tmx",
     "expandedProjectPaths": [
         "tilesheets",
-        "tilemaps",
+        ".",
         "spritesheets",
-        "."
+        "tilemaps"
     ],
     "fileStates": {
         "1-1.tmx": {

@@ -143,8 +143,8 @@ RESET {
         .x = 0
     };
 
-    level::edgeR = { 0, 0, level::TileData };   // right edge walks from column 0
-    level::dynEdgeR = { 0, 0 };                 // dyn forward edge, lockstep w/ edgeR
+    level::edgeR = { level::TileData };
+    level::dynEdgeR = { level::DynLengths, level::DynData, 0 }; // dyn forward edge, lockstep w/ edgeR
     for (auto i = 0; i < 2 + video::viewport_tx(); i += 2) {
         ppu::WriteFromProviderToNameTable(
             i, 2,
@@ -166,8 +166,8 @@ RESET {
     // the first couple of right-streams -- each step is the same +levelHeight Move
     // it always does, so there is no extra cost and never an O(n) walk.
     edgeRAbs     = (1 + viewport_mx()) * level::levelHeight;
-    level::edgeL = { 0, 0, level::TileData };
-    level::dynEdgeL = { 0, 0 };                 // dyn backward edge, lockstep w/ edgeL
+    level::edgeL = { level::TileData };
+    level::dynEdgeL = { level::DynLengths, level::DynData, 0 }; // dyn backward edge, lockstep w/ edgeL
 
     ppu::SetScroll(0, 0);
 
@@ -178,7 +178,7 @@ RESET {
     // from the level start: a static Cursor and a dynamic Cursor both parked on
     // (col 0, row 0), composited per cell.  cameraX is 0 here, so the window is
     // already centred; ColMapTrack slides it as the camera scrolls.
-    level::ColMapSeed(0, { 0, 0, level::TileData }, { 0, 0 });
+    level::ColMapSeed(0, { level::TileData }, { level::DynLengths, level::DynData, 0 });
 
     player.size = {
         16, 16
@@ -272,11 +272,8 @@ static i16 ClampRow(const u16 y) {
 }
 
 static bool PlayerBlocked(const Actor* self, const u16 wx, const u16 wy) {
-    ppu::SetColorPriority(ppu::mask::RED);   // TEMP profiler: the collision query
-    const bool blocked = level::Blocked(wx, wy, self->size.x, self->size.y,
-                                        /*collectBlocks=*/false);
-    ppu::SetColorPriority(0);                // TEMP profiler: untinted everywhere else
-    return blocked;
+    return level::Blocked(wx, wy, self->size.x, self->size.y,
+                          /*collectBlocks=*/false);
 }
 
 // state is needed.  STUB: score / SFX hang off here later.
@@ -285,13 +282,25 @@ static void CollectPlayerCoins(const Actor* self) {
     const u8 n = level::CollectCoins(PlayerWorldX(self), self->screen.y,
                                      self->size.x, self->size.y, picks, 4);
     for (u8 i = 0; i < n && i < 4; i++) {
-        const u8  m  = picks[i].reveal;                  // static metatile now exposed
-        const u16 tx = static_cast<u16>(picks[i].col) << 1;       // left tile column
-        const u16 ty = static_cast<u16>(2 + (picks[i].row << 1)); // top tile row (HUD=2)
+        const u8  m   = picks[i].reveal;
+        const u16 tx  = static_cast<u16>(picks[i].col) << 1;
+        const u16 ty  = static_cast<u16>(2 + (picks[i].row << 1));
+#ifdef TARGET_NES
+        // TODO: profile CartesianToAddress on NES vs this inline formula before shipping.
+        // ty = 2 + row*2 ≤ 28 < 30, so nt_v = 0 and row % 30 = row; the three remaining
+        // tiles follow by cheap addition without rerunning the projection.
+        const u16 nt_h = static_cast<u16>((tx >> 5) & 1) << 10;
+        const u16 base  = 0x2000 + nt_h + (static_cast<u16>(ty) << 5) + (tx & 0x1F);
+        CoinVramPush(base,      Metatiles_UL[m]);
+        CoinVramPush(base +  1, Metatiles_UR[m]);
+        CoinVramPush(base + 32, Metatiles_BL[m]);
+        CoinVramPush(base + 33, Metatiles_BR[m]);
+#else
         CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
         CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
         CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
         CoinVramPush(ppu::CartesianToAddress(tx + 1, ty + 1), Metatiles_BR[m]);
+#endif
     }
 }
 
@@ -322,13 +331,9 @@ void SpriteZeroHandler() {
     spriteZeroHandled = 1;
     lastPort1 = port1; lastPort2 = port2;
     PollControllers(&port1, &port2);
-    ppu::SetColorPriority(ppu::mask::RED | ppu::mask::GREEN);   // TEMP profiler: AudioUpdate (yellow)
     AudioUpdate();
-    ppu::SetColorPriority(0);
     player.Update();
-    ppu::SetColorPriority(ppu::mask::BLUE);   // TEMP profiler: window slide + ColMapStamp
     level::ColMapTrack(cameraX >> 4);
-    ppu::SetColorPriority(0);
 }
 
 void PlayerUpdate(Actor* self) {
@@ -351,13 +356,15 @@ void PlayerUpdate(Actor* self) {
     const i8 maxSpeed = playerRunTimer ? kMaxRun : kMaxWalk;
 
     if (dir != 0) {
+        // dir ∈ {-1,1} here; negate-by-sign avoids __mulhi3 (i8*i16 = ~100 cycles).
+        const auto dirForce = [dir](i16 k) -> i16 { return dir > 0 ? k : static_cast<i16>(-k); };
         const bool sameDir = vx == 0 || (vx > 0) == (dir > 0);
         if (!sameDir)
-            playerXForce += dir * (grounded ? kSkid : kAirAccel);
+            playerXForce += dirForce(grounded ? kSkid : kAirAccel);
         else if (AbsI8(vx) < maxSpeed)
-            playerXForce += dir * (grounded ? (playerRunTimer ? kRunAccel : kWalkAccel) : kAirAccel);
+            playerXForce += dirForce(grounded ? (playerRunTimer ? kRunAccel : kWalkAccel) : kAirAccel);
         else if (AbsI8(vx) > maxSpeed && grounded)
-            playerXForce -= dir * kFriction;
+            playerXForce += dir > 0 ? -kFriction : kFriction;
     } else if (grounded && vx != 0) {
         playerXForce += vx > 0 ? -kFriction : kFriction;
     }
@@ -490,7 +497,6 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 if (lastDeltaScroll < 0)
                     levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
-                ppu::SetColorPriority(ppu::mask::GREEN | ppu::mask::BLUE);   // TEMP profiler: render column build (cyan)
                 // World metatile column the NMI will display at the right edge.
                 // lastXWorldSpace is still the PRE-increment boundary here (the +=16
                 // is below), so add the column we are about to advance into; this
@@ -499,7 +505,6 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 // already holds this column, so BuildNextColumn just reads it.
                 const u16 colBuiltR = ((lastXWorldSpace + 16) >> 4) + viewport_mx();
                 level::BuildNextColumn(TileBuffer, colBuiltR);
-                ppu::SetColorPriority(0);                                    // TEMP profiler: end render build
                 lastDeltaScroll = static_cast<i8>(scroll);
                 lastXWorldSpace += 16;
                 levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
@@ -517,14 +522,12 @@ void ProcessPlayerMovement(Actor* self, const vec2<i8> moveForce) {
                 levelStreamCommand = levelStreamCommand | STREAM_LEVEL_SWAP;
 
             lastDeltaScroll = static_cast<i8>(scroll);
-            ppu::SetColorPriority(ppu::mask::GREEN | ppu::mask::BLUE);   // TEMP profiler: render column build (cyan)
             // World metatile column entering on the left.  lastXWorldSpace is still
             // pre-decrement (the -=16 is below), so subtract the column we retreat
             // into, then -1 for the entering metatile (matches the NMI's (>>4)-1
             // placement after its own -=16).  Read straight from the window.
             const u16 colBuiltL = ((lastXWorldSpace - 16) >> 4) - 1;
-            level::BuildPrevColumn(TileBuffer, colBuiltL);   // reads window column
-            ppu::SetColorPriority(0);                                    // TEMP profiler: end render build
+            level::BuildPrevColumn(TileBuffer, colBuiltL);
             lastXWorldSpace -= 16;
             levelStreamCommand = levelStreamCommand | STREAM_LEVEL_DONE;
         }

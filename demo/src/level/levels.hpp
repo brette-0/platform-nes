@@ -13,7 +13,6 @@ namespace demo::level {
     constexpr i16 kHudRows = 1;
     extern u16 nColumns;
     extern const u8* TileData;
-    extern const u8* HunkLengths;
     extern const u8 LevelDataAttributes[];
     extern Cursor edgeR;
     extern Cursor edgeL;   // seeded valid at reset, kept in lockstep with edgeR
@@ -28,6 +27,5 @@ namespace demo::level {
     u8 GetNextMetaTile();
     void BuildNextColumn(u8* buf, u16 worldCol);   // right-scroll: reads window column
     void BuildPrevColumn(u8* buf, u16 worldCol);   // left-scroll: reads window column
-    MINSIZE bool BuildLevelSize();
     bool LoadLevel(u16 n);
 }
