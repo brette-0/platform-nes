@@ -1,7 +1,8 @@
-﻿#pragma once
+#pragma once
 #include <platform-nes/platform-nes.hpp>
 
 #include "level/actor.hpp"
+#include "level/player.hpp"
 
 enum class spriteZeroStatus : u8 {
     S0_DO_CALCULATE,
@@ -17,6 +18,11 @@ constexpr u16 viewport_my() { return video::viewport_ty() >> 1; }
 extern u8 port1;
 extern u8 port2;
 
+extern u8 lastPort1;
+extern u8 lastPort2;
+
+extern u16 cameraX;
+
 extern i8 lastDeltaScroll;
 
 extern atomic u16 lastXWorldSpace;
@@ -28,7 +34,10 @@ extern oam::sprite_t OAMBuffer[64];
 void SpriteZeroHandler();
 extern u8 TileBuffer[56];
 
-extern Actor player;
+extern demo::level::Player player1;
+#ifdef PLAYER2_SUPPORTED
+extern demo::level::Player player2;
+#endif
 
 enum class eLevelStreamCommands : u8 {
     STREAM_LEVEL_LEFT  = 0x00,
@@ -38,3 +47,7 @@ enum class eLevelStreamCommands : u8 {
 };
 
 extern atomic enum_flags<eLevelStreamCommands> levelStreamCommand;
+
+// Deferred VRAM write queue (coin pickups -> NMI drain).
+// Pushing is done by the player logic; draining is done by the NMI.
+void CoinVramPush(u16 address, u8 value);

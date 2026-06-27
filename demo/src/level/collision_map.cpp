@@ -67,6 +67,16 @@ namespace {
     colmap_cold u16           colPlayerCell;
     colmap_cold u16           colPlayerColR;   // rightmost column of last AABB, for early-exit guard
     colmap_cold u8            colPlayerRowB;   // bottom row of last AABB, for early-exit guard
+
+    // Independent anchor for player 2.  Same invariants as the P1 set; keeping
+    // them separate means each player tracks their own AABB with a tiny per-frame
+    // step rather than bouncing the shared cursor across the inter-player distance
+    // every frame.
+    colmap_cold Cursor        colPlayer2Stat;
+    colmap_cold DynamicCursor colPlayer2Dyn;
+    colmap_cold u16           colPlayer2Cell;
+    colmap_cold u16           colPlayer2ColR;
+    colmap_cold u8            colPlayer2RowB;
 }
 
 // Stamp one column's composite metatiles into ring slot `slot`.  `stat`/`dyn` are
@@ -112,6 +122,11 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
     colPlayerCell = static_cast<u16>(leftCol) * levelHeight;
     colPlayerColR = leftCol;
     colPlayerRowB = 0;
+    colPlayer2Stat = stat;         // P2 anchor seeded identically; diverges as P2 moves
+    colPlayer2Dyn  = dyn;
+    colPlayer2Cell = static_cast<u16>(leftCol) * levelHeight;
+    colPlayer2ColR = leftCol;
+    colPlayer2RowB = 0;
     const auto width = ColMapWidth();
     for (u8 i = 0; i < width; i++) {
         if (i == width - 1) {          // rightmost held, row 0
@@ -354,6 +369,83 @@ u8 CollectCoins(const u16 px, const u16 py, const u8 w, const u8 h,
         }
         if (c == colR) break;
         pd.Move(levelHeight - rows);            // cross to the next column's top row
+        ps.Move(levelHeight - rows);
+    }
+    return n;
+}
+
+// Player 2 coin collection.  Identical logic to CollectCoins but uses the
+// independent colPlayer2* anchor so P1 and P2 each pay a tiny per-frame step
+// rather than bouncing the shared cursor across the inter-player gap every frame.
+u8 CollectCoins2(const u16 px, const u16 py, const u8 w, const u8 h,
+                 CoinPick* out, const u8 maxOut) {
+    i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
+    i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
+    if (rowBot < 0 || rowTop >= levelHeight) return 0;
+    if (rowTop < 0)            rowTop = 0;
+    if (rowBot >= levelHeight) rowBot = levelHeight - 1;
+
+    const u16 colL = px >> 4;
+    const u16 colR = (px + w - 1) >> 4;
+
+    const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
+    const i16 step       = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayer2Cell);
+    const u8   rowB      = static_cast<u8>(rowBot);
+    const bool sameColR  = (colR == colPlayer2ColR);
+    const bool sameRowB  = (rowB == colPlayer2RowB);
+    colPlayer2Cell = anchorCell;
+    colPlayer2ColR = colR;
+    colPlayer2RowB = rowB;
+    if (step == 0 && sameColR && sameRowB) return 0;
+    if (step >= -128 && step <= 127) {
+        colPlayer2Dyn.Move(static_cast<i8>(step));
+        colPlayer2Stat.Move(static_cast<i8>(step));
+    } else {
+        colPlayer2Dyn.Seek(step);
+        colPlayer2Stat.Seek(step);
+    }
+
+    {
+        bool anyCoin = false;
+        for (u16 c = colL; !anyCoin && c <= colR; c++) {
+            const u16 d = c - ColMapBaseCol;
+            if (d >= ColMapWidth()) continue;
+            u8 slot = ColMapOrigin + static_cast<u8>(d);
+            if (slot >= ColMapWidth()) slot -= ColMapWidth();
+            const u8* colp = ViewMap + kSlotOffset[slot];
+            for (i16 r = rowTop; !anyCoin && r <= rowBot; r++) {
+                if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect)
+                    anyCoin = true;
+            }
+        }
+        if (!anyCoin) return 0;
+    }
+
+    DynamicCursor pd   = colPlayer2Dyn;
+    Cursor        ps   = colPlayer2Stat;
+    const i16     rows = rowBot - rowTop;
+    u8 n = 0;
+    for (u16 c = colL; ; c++) {
+        const u16  d     = c - ColMapBaseCol;
+        const bool inWin = d < ColMapWidth();
+        u8* colp = nullptr;
+        if (inWin) {
+            u8 slot = ColMapOrigin + static_cast<u8>(d);
+            if (slot >= ColMapWidth()) slot -= ColMapWidth();
+            colp = ViewMap + kSlotOffset[slot];
+        }
+        for (i16 r = rowTop; r <= rowBot; r++) {
+            if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
+                DynData[pd.Run()] = 0;
+                const u8 reveal = ps.Fetch();
+                colp[r] = reveal;
+                if (n < maxOut) out[n] = { c, static_cast<u8>(r), reveal };
+                n++;
+            }
+            if (r != rowBot) { pd.Move(1); ps.Move(1); }
+        }
+        if (c == colR) break;
+        pd.Move(levelHeight - rows);
         ps.Move(levelHeight - rows);
     }
     return n;

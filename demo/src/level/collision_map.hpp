@@ -121,5 +121,6 @@ struct CoinPick { u16 col; u8 row; u8 reveal; };
 // (which may exceed maxOut if the AABB straddles more coins than the caller budgeted).
 // Same world-pixel / HUD-strip convention as Blocked.
 u8 CollectCoins(u16 px, u16 py, u8 w, u8 h, CoinPick* out, u8 maxOut);
+u8 CollectCoins2(u16 px, u16 py, u8 w, u8 h, CoinPick* out, u8 maxOut);
 
 }   // namespace demo::level

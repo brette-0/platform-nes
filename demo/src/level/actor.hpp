@@ -2,7 +2,6 @@
 #include <platform-nes>
 #include "types.hpp"
 #include "../types.hpp"
-using namespace demo::level;
 
 class Actor {
     public:

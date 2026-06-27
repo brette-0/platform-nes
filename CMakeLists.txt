@@ -1158,6 +1158,8 @@ else()
     set(SDL_POWER OFF CACHE BOOL "" FORCE)
     set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
     set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+    set(SDL_GPU OFF CACHE BOOL "" FORCE)
+    set(SDL_RENDER_GPU OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
             SDL3

@@ -2,6 +2,7 @@
 #include <platform-nes/video.hpp>
 
 extern const oam::sprite_t msMary[0x04];
+extern const oam::sprite_t msMary2[0x04];  // player 2: same tiles, horizontally flipped
 
 // Hardware-sprite count of the player metasprite (16x16 = 2x2), derived from
 // msMary's array extent so the OAM populate counts can never drift from the
