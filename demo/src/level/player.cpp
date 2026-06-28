@@ -13,38 +13,27 @@ using enum eLevelStreamCommands;
 namespace demo::level {
 
 // ---------------------------------------------------------------------------
-// OAM provider shims -- bind the specific Actor to oam::PopulateFromProvider's
-// single-argument callback signature.
-// ---------------------------------------------------------------------------
-static oam::oam_t SpriteY1(const u16 i) { return AdjustSpriteY(&player1.actor, i); }
-static oam::oam_t SpriteX1(const u16 i) { return AdjustSpriteX(&player1.actor, i); }
-#ifdef PLAYER2_SUPPORTED
-static oam::oam_t SpriteY2(const u16 i) { return AdjustSpriteY(&player2.actor, i); }
-static oam::oam_t SpriteX2(const u16 i) { return AdjustSpriteX(&player2.actor, i); }
-#endif
-
-// ---------------------------------------------------------------------------
 // Per-player accessors -- resolved from `this` rather than a free ActorToPlayer.
 // ---------------------------------------------------------------------------
 
 static u8 PlayerPort(const Player* p)     { return p == &player1 ? port1     : port2;     }
 static u8 PlayerLastPort(const Player* p) { return p == &player1 ? lastPort1 : lastPort2; }
 
+// Direct OAM writes replace OAMFromProvider's per-sprite function-pointer calls
+// (4 indirect JSRs + loop overhead ~140 cycles) with 4 plain stores each.
+// AdjustSpriteY: y + (i>>1)*8  →  rows 0,1 get sy; rows 2,3 get sy+8.
+// AdjustSpriteX: x + (i&1)*8   →  cols 0,2 get sx; cols 1,3 get sx+8.
 static void PlayerRefreshY(const Player* p) {
-    if (p == &player1)
-        oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY1, kMarySprites);
-#ifdef PLAYER2_SUPPORTED
-    else
-        oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::y, SpriteY2, kMarySprites);
-#endif
+    oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
+    const oam::oam_t sy = p->actor.screen.y;
+    s[0].y = sy;         s[1].y = sy;
+    s[2].y = sy + 8u;    s[3].y = sy + 8u;
 }
 static void PlayerRefreshX(const Player* p) {
-    if (p == &player1)
-        oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX1, kMarySprites);
-#ifdef PLAYER2_SUPPORTED
-    else
-        oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::x, SpriteX2, kMarySprites);
-#endif
+    oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
+    const oam::oam_t sx = p->actor.screen.x;
+    s[0].x = sx;         s[1].x = sx + 8u;
+    s[2].x = sx;         s[3].x = sx + 8u;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,11 +84,13 @@ static void CollectCoinsFor(const Actor* self, const Player* p) {
 // Movement -- shared between P1 (drives scroll) and P2 (world-canonical X).
 // ---------------------------------------------------------------------------
 
-static void ProcessMovement(Player* p, const vec2<i8> moveForce) {
+static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u16 tx) {
     Actor* self = &p->actor;
 
     // ReSharper disable once CppVariableCanBeMadeConstexpr
     const auto playerMaxXPos = (video::viewport_px() - 16);
+    // tx is passed in from Update (already computed for the grounded check there),
+    // so all three Blocked calls below share a single ActorTX derivation.
 
     // Vertical: accumulate sub-pixel force; only the whole-pixel carry triggers
     // collision / sprite moves.  Gravity & jump retain sub-pixel precision.
@@ -108,7 +99,7 @@ static void ProcessMovement(Player* p, const vec2<i8> moveForce) {
         const i16 dy   = static_cast<i16>(rawY >> 3) - static_cast<i16>(self->worldSpace.y >> 3);
         if (dy) {
             const u16 ny = static_cast<u16>(self->screen.y) + dy;
-            if (!IsBlocked(self, ActorTX(self), ny)) {
+            if (!IsBlocked(self, tx, ny)) {
                 self->worldSpace.y = static_cast<u16>(rawY) & 0x7ff;
                 self->screen.y     = static_cast<oam::oam_t>(self->worldSpace.y >> 3);
                 PlayerRefreshY(p);
@@ -131,8 +122,8 @@ static void ProcessMovement(Player* p, const vec2<i8> moveForce) {
     }
 
     // Left world edge: hard wall.  Also guards rawX < 0 wrapping through u16.
-    if (rawX < 0 || (dx < 0 && ActorTX(self) == 0)) { self->moveForce.x = 0; return; }
-    if (IsBlocked(self, static_cast<u16>(static_cast<i16>(ActorTX(self)) + dx), self->screen.y)) {
+    if (rawX < 0 || (dx < 0 && tx == 0)) { self->moveForce.x = 0; return; }
+    if (IsBlocked(self, static_cast<u16>(static_cast<i16>(tx) + dx), self->screen.y)) {
         self->moveForce.x = 0;
         return;
     }
@@ -239,7 +230,8 @@ void Player::Update() {
         }
     }
 
-    bool grounded = IsBlocked(self, ActorTX(self), static_cast<u16>(self->screen.y + 1));
+    const u16 tx  = ActorTX(self);   // cached: shared by grounded check + ProcessMovement
+    bool grounded = IsBlocked(self, tx, static_cast<u16>(self->screen.y + 1));
 
     const u8   port     = PlayerPort(this);
     const u8   lastPort = PlayerLastPort(this);
@@ -295,10 +287,17 @@ void Player::Update() {
     const bool rising = self->moveForce.y < 0;
     yForce += (rising && (port & A)) ? kRiseGravity : kFallGravity;
     i8 vy = self->moveForce.y;
-    while (yForce >= 256) { yForce -= 256; if (vy < kMaxFall) vy++; }
+    // yForce is always non-negative; extracting whole-256 ticks is a high-byte
+    // load + mask, not a loop.  kFallGravity=896 previously cost 3-4 iterations.
+    {
+        const i8 ticks = static_cast<i8>(static_cast<u16>(yForce) >> 8);
+        yForce &= 0xFF;
+        const i8 newVy = static_cast<i8>(static_cast<i16>(vy) + ticks);
+        vy = newVy > kMaxFall ? kMaxFall : newVy;
+    }
     self->moveForce.y = vy;
 
-    ProcessMovement(this, self->moveForce);
+    ProcessMovement(this, self->moveForce, tx);
 
     // Pickup runs on the committed position; queues nametable writes for NMI drain.
     CollectCoinsFor(self, this);

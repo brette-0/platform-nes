@@ -239,6 +239,11 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # forces the C++ frontend for the source inputs.
             -std=gnu++23 -Wno-c23-extensions -x c++
             -Os -DTARGET_NES -DLANDSCAPE
+            # Reserve 10 ZP bytes for FamiStudio (8 vars + 2 alignment slack).
+            # mos-nes.cfg defaults to -mlto-zp=224 (the full region); capping at
+            # 214 prevents mos-zero-page-alloc from filling the last 10 bytes and
+            # leaving no room for FamiStudio's ZEROPAGE segment.
+            -mlto-zp=214
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
@@ -329,6 +334,7 @@ ${FAMISTUDIO_CFG}")
     # FamiStudio and the hand-written assembly objects are required by
     # every build configuration.
     target_link_options(demo PRIVATE
+            -mlto-zp=214   # match pass-1 cap; leaves 10 bytes for FamiStudio ZEROPAGE
             ${FAMISTUDIO_OBJ}
             ${DEMO_ASM_OBJECTS}
     )

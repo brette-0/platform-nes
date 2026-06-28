@@ -141,8 +141,10 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
 
 // Pair advance helpers: static cursor is a flat pointer (just add/subtract
 // levelHeight); only the dynamic cursor still needs RLE walking.
-// noinline keeps each helper's ZP frame isolated from ColMapTrack's frame.
-__attribute__((noinline))
+// always_inline: both callers are in this TU; the compiler sees the concrete
+// global addresses and emits absolute addressing instead of the indirect ZP
+// addressing that noinline + reference parameters forced.
+__attribute__((always_inline))
 static void AdvancePairForward(Cursor& s, DynamicCursor& d) {
     s.dp += levelHeight;
     const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;
@@ -153,7 +155,7 @@ static void AdvancePairForward(Cursor& s, DynamicCursor& d) {
     d.lp = dlp; d.dp = ddp; d.progress = dprog;
 }
 
-__attribute__((noinline))
+__attribute__((always_inline))
 static void AdvancePairBackward(Cursor& s, DynamicCursor& d) {
     s.dp -= levelHeight;
     const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;
@@ -182,16 +184,26 @@ void ColMapTrack(const u16 camLeftCol) {
     if (hi < 0) hi = 0;                       // level narrower than the window
     if (desired > hi) desired = hi;
 
+    u8 colIter = 0;
     while (static_cast<i16>(ColMapBaseCol) < desired) {   // window slides right
+#ifdef TARGET_NES
+        ppu::SetColorPriority(static_cast<u8>((++colIter << 5) & 0xE0));
+#endif
         AdvancePairForward(colRightStat, colRightDyn);    // entering column
         ColMapSlideRight(colRightStat, colRightDyn);      // base++
         AdvancePairForward(colLeftStat, colLeftDyn);      // re-anchor left edge
     }
     while (static_cast<i16>(ColMapBaseCol) > desired) {   // window slides left
+#ifdef TARGET_NES
+        ppu::SetColorPriority(static_cast<u8>((++colIter << 5) & 0xE0));
+#endif
         AdvancePairBackward(colLeftStat, colLeftDyn);     // entering column
         ColMapSlideLeft(colLeftStat, colLeftDyn);         // base--
         AdvancePairBackward(colRightStat, colRightDyn);   // re-anchor right edge
     }
+#ifdef TARGET_NES
+    ppu::SetColorPriority(0);
+#endif
 }
 
 // Slide the window one column right: the slot that held the dropped leftmost column

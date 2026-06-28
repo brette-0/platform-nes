@@ -283,10 +283,23 @@ void SpriteZeroHandler() {
     spriteZeroHandled = 1;
     lastPort1 = port1; lastPort2 = port2;
     PollControllers(&port1, &port2);
+#ifdef TARGET_NES
+    ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
+#endif
     AudioUpdate();
+#ifdef TARGET_NES
+    ppu::SetColorPriority(0x40);   // green band:        player1.Update
+#endif
     player1.Update();
 #ifdef PLAYER2_SUPPORTED
+#ifdef TARGET_NES
+    ppu::SetColorPriority(0x60);   // red+green band:    player2.Update
+#endif
     player2.Update();
 #endif
+#ifdef TARGET_NES
+    ppu::SetColorPriority(0x80);   // blue band:         ColMapTrack (slides override internally)
+#endif
     level::ColMapTrack(cameraX >> 4);
+    // ColMapTrack resets priority to 0 itself; no reset needed here.
 }
