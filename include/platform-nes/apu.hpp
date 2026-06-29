@@ -31,43 +31,49 @@
 #include <platform-nes/technology.hpp>
 
 /**
- * @brief All 2A03 APU write-only registers, grouped as a struct of shadows.
+ * @brief 2A03 APU register file as a static class namespace.
  *
- * Each field is a ::wo_register whose template argument is the physical
- * address of the corresponding APU port. Reads return the shadow (last
- * written value); writes update the shadow and poke the hardware port.
+ * All members are static; access as `apu::sq1_vol`, `apu::DisableFrameIRQ()`, etc.
  * Addresses $4009 and $400D are unused by the 2A03 and are omitted.
  */
-struct Apu {
-    wo_register<0x4000> sq1_vol;       ///< Pulse 1 — duty / envelope / volume
-    wo_register<0x4001> sq1_sweep;     ///< Pulse 1 — sweep unit
-    wo_register<0x4002> sq1_lo;        ///< Pulse 1 — timer low 8 bits
-    wo_register<0x4003> sq1_hi;        ///< Pulse 1 — length counter + timer high
+class apu {
+public:
+    static wo_register<0x4000> sq1_vol;       ///< Pulse 1 — duty / envelope / volume
+    static wo_register<0x4001> sq1_sweep;     ///< Pulse 1 — sweep unit
+    static wo_register<0x4002> sq1_lo;        ///< Pulse 1 — timer low 8 bits
+    static wo_register<0x4003> sq1_hi;        ///< Pulse 1 — length counter + timer high
 
-    wo_register<0x4004> sq2_vol;       ///< Pulse 2 — duty / envelope / volume
-    wo_register<0x4005> sq2_sweep;     ///< Pulse 2 — sweep unit
-    wo_register<0x4006> sq2_lo;        ///< Pulse 2 — timer low 8 bits
-    wo_register<0x4007> sq2_hi;        ///< Pulse 2 — length counter + timer high
+    static wo_register<0x4004> sq2_vol;       ///< Pulse 2 — duty / envelope / volume
+    static wo_register<0x4005> sq2_sweep;     ///< Pulse 2 — sweep unit
+    static wo_register<0x4006> sq2_lo;        ///< Pulse 2 — timer low 8 bits
+    static wo_register<0x4007> sq2_hi;        ///< Pulse 2 — length counter + timer high
 
-    wo_register<0x4008> tri_linear;    ///< Triangle — linear counter control
-    wo_register<0x400A> tri_lo;        ///< Triangle — timer low 8 bits
-    wo_register<0x400B> tri_hi;        ///< Triangle — length counter + timer high
+    static wo_register<0x4008> tri_linear;    ///< Triangle — linear counter control
+    static wo_register<0x400A> tri_lo;        ///< Triangle — timer low 8 bits
+    static wo_register<0x400B> tri_hi;        ///< Triangle — length counter + timer high
 
-    wo_register<0x400C> noise_vol;     ///< Noise — envelope / volume
-    wo_register<0x400E> noise_lo;      ///< Noise — mode + period
-    wo_register<0x400F> noise_hi;      ///< Noise — length counter
+    static wo_register<0x400C> noise_vol;     ///< Noise — envelope / volume
+    static wo_register<0x400E> noise_lo;      ///< Noise — mode + period
+    static wo_register<0x400F> noise_hi;      ///< Noise — length counter
 
-    wo_register<0x4010> dmc_freq;      ///< DMC — IRQ enable, loop, rate index
-    wo_register<0x4011> dmc_raw;       ///< DMC — direct load (7-bit DAC level)
-    wo_register<0x4012> dmc_start;     ///< DMC — sample start address ($C000 base)
-    wo_register<0x4013> dmc_len;       ///< DMC — sample byte count
+    static wo_register<0x4010> dmc_freq;      ///< DMC — IRQ enable, loop, rate index
+    static wo_register<0x4011> dmc_raw;       ///< DMC — direct load (7-bit DAC level)
+    static wo_register<0x4012> dmc_start;     ///< DMC — sample start address ($C000 base)
+    static wo_register<0x4013> dmc_len;       ///< DMC — sample byte count
 
-    wo_register<0x4015> snd_chn;       ///< Channel enable / length counter status
-    wo_register<0x4017> frame_counter; ///< Frame counter mode + IRQ inhibit
+    static wo_register<0x4015> snd_chn;       ///< Channel enable / length counter status
+    static wo_register<0x4017> frame_counter; ///< Frame counter mode + IRQ inhibit
+
+    /** @brief Inhibit the frame counter IRQ — forces 5-step mode ($4017 bits 7+6). */
+    static void DisableFrameIRQ() { frame_counter = static_cast<u8>(frame_counter) | 0xC0; }
+    /** @brief Allow the frame counter IRQ ($4017 bit 6 clear). */
+    static void EnableFrameIRQ()  { frame_counter = static_cast<u8>(frame_counter) & ~0x40; }
+
+    /** @brief Enable the DMC IRQ ($4010 bit 7). */
+    static void EnableDMCIRQ()    { dmc_freq = static_cast<u8>(dmc_freq) | 0x80; }
+    /** @brief Disable the DMC IRQ ($4010 bit 7 clear). */
+    static void DisableDMCIRQ()   { dmc_freq = static_cast<u8>(dmc_freq) & ~0x80; }
 };
-
-/** @brief The single global APU register file. */
-extern Apu apu;
 
 /**
  * @brief PRESERVE/RESTORE family covering all APU write-only registers.
@@ -89,12 +95,12 @@ extern Apu apu;
  * @endcode
  */
 #define APU_REGISTERS \
-    apu.sq1_vol,   apu.sq1_sweep, apu.sq1_lo,  apu.sq1_hi,  \
-    apu.sq2_vol,   apu.sq2_sweep, apu.sq2_lo,  apu.sq2_hi,  \
-    apu.tri_linear,apu.tri_lo,    apu.tri_hi,               \
-    apu.noise_vol, apu.noise_lo,  apu.noise_hi,              \
-    apu.dmc_freq,  apu.dmc_raw,   apu.dmc_start,apu.dmc_len, \
-    apu.snd_chn,   apu.frame_counter
+    apu::sq1_vol,   apu::sq1_sweep, apu::sq1_lo,  apu::sq1_hi,  \
+    apu::sq2_vol,   apu::sq2_sweep, apu::sq2_lo,  apu::sq2_hi,  \
+    apu::tri_linear,apu::tri_lo,    apu::tri_hi,               \
+    apu::noise_vol, apu::noise_lo,  apu::noise_hi,              \
+    apu::dmc_freq,  apu::dmc_raw,   apu::dmc_start,apu::dmc_len, \
+    apu::snd_chn,   apu::frame_counter
 
 /** @brief Flat snapshot storage for the ::APU_REGISTERS family (20 bytes). */
 extern u8 APU_REGISTERS_snapshot[20];

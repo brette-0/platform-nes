@@ -167,8 +167,9 @@ public:
     wo_register() = default;                                  ///< trivial: instance lives in .bss
     wo_register(const wo_register &o) : shadow_(o.shadow_) {} ///< snapshot, no poke
 
-    u8   get() const     { return shadow_; }                  ///< read  = shadow
-    void set(const u8 v) { shadow_ = v; poke(Addr, v); }      ///< write = shadow + hardware
+    u8   get() const          { return shadow_; }                  ///< read  = shadow
+    void set(const u8 v)      { shadow_ = v; poke(Addr, v); }      ///< write = shadow + hardware
+    void poke_only(const u8 v){ poke(Addr, v); }                    ///< write hardware only, no shadow update
 
     operator u8() const { return shadow_; }
     wo_register &operator=(const u8 v)           { set(v);         return *this; }

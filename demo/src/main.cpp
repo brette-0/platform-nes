@@ -14,9 +14,11 @@
 #include "level/player.hpp"
 
 #include "technology.hpp"
+#include "platform-nes/apu.hpp"
 
 using namespace demo;
 
+extern "C" __attribute__((used)) volatile bool HUDGateLock = false;
 volatile bool nmi_done;
 
 u8 port1;
@@ -24,6 +26,8 @@ u8 port2;
 
 u8 lastPort1;
 u8 lastPort2;
+
+FAST_LOCKED_IRQ(HUD_GATE, HUDGateLock, HUD);
 
 // ---------------------------------------------------------------------------
 // Deferred VRAM tile-write stack (coin pickups)
@@ -105,7 +109,10 @@ RESET {
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3
     }
-    ppu::Flush(chrHUDWhitespace_tile, 0x11);
+
+    SetIRQ(HUD_GATE);   // fast exit locked IRQ
+
+    ppu::Flush(chrAir_tile, 0x11);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
@@ -127,13 +134,6 @@ RESET {
 
     constexpr u8 coinUI[] = {chrHUDCoin_tile, chrFont_tile + 0, chrFont_tile + 0};
     ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(coinUI), 1, SIZED_OBJ(coinUI), 0);
-
-    OAMBuffer[0] = (oam::sprite_t) {
-        .y = 7,                     // accommodates for sprite rendering one scanline down.
-        .tile = chrSprite0_tile,
-        .attributes = 0,
-        .x = 0
-    };
 
     level::edgeR = { level::TileData };
     level::dynEdgeR = { level::DynLengths, level::DynData, 0 }; // dyn forward edge, lockstep w/ edgeR
@@ -181,6 +181,10 @@ RESET {
 #endif
     oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
     ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
+
+    apu::DisableFrameIRQ();
+    apu::DisableDMCIRQ();
+    EnableInterrupts();
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
         if (port1 & START) {
@@ -190,13 +194,40 @@ RESET {
 
         }
 
-        WaitThenReactToSpriteZero(0, 16, SpriteZeroHandler, &spriteZeroHandled);
+        SHADOW (APU_REGISTERS) {
+            HUDGateLock = false;
+
+            spriteZeroHandled = 1;
+            lastPort1 = port1; lastPort2 = port2;
+            PollControllers(&port1, &port2);
+
+            ppu::SetColorPriority(0x40);   // green band:        player1.Update
+            player1.Update();
+#ifdef PLAYER2_SUPPORTED
+            ppu::SetColorPriority(0x60);   // red+green band:    player2.Update
+            player2.Update();
+#endif
+            ppu::SetColorPriority(0x80);   // blue band:         ColMapTrack (slides override internally)
+
+            level::ColMapTrack(cameraX >> 4);
+        }
+
+        ScheduleInterrupt({}, 1820, &HUDGateLock);
+
+        ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
+        //AudioUpdate();
+        // fms does not shadow apu regs in a standarized way
+        // meaning that its not compatible with our wo reg shadow model
+        // need to look into this in a big way
+        ppu::SetColorPriority(0);
 
         video::WaitForPresent();
-    }
 
-    nmi_done = false;
-    while (!nmi_done) {}
+#if TARGET_NES
+        nmi_done = false;
+        while (!nmi_done) {}
+#endif
+    }
 }
 
 NMI {
@@ -218,8 +249,6 @@ NMI {
             if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
                 ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, level::AttributeBuffer, 8, 1);
         }
-
-        nmi_done = true;
     }
 
     // Drain coin pickups collected this frame into the nametable.  Like the level-stream
@@ -241,6 +270,8 @@ NMI {
     }
 
     ppu::SetColorPriority(0);
+
+    nmi_done = true;
 }
 
 static oam::oam_t Clear(const u16 _) {
@@ -263,50 +294,30 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-void SpriteZeroHandler() {
-#if defined(TARGET_NDS) || defined(TARGET_GBA)
-    // --- cropped-panel vertical follow camera --------------------------------
-    // The DS (256x192) and GBA (240x160) panels are shorter than the NES frame
-    // (240px), so they cannot show the whole vertical slice the NES game renders.
-    // While the player is low we bottom-anchor -- scroll Y bumped by the shortfall
-    // (240 - viewport_py(): 48 on DS, 80 on GBA) so the ground sits on the panel
-    // bottom. Once the player climbs to the middle of the viewport we pan up with
-    // them, easing the bump from that maximum down to 0 (top-anchored) as they rise,
-    // so they never clip off the top edge. The bump is just the player's height above
-    // the viewport midpoint, clamped to [0, 240 - viewport_py()]. The math reads
-    // viewport_py() so it adapts to either panel. Sprites are kept locked to this
-    // varying scroll by the backend (build_sprites offsets every OBJ by the live band
-    // scroll), so the whole vertical-follow policy lives here in one place. Every
-    // full-height target renders the full 240 lines and needs no vertical camera
-    // (the #else branch).
-    const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
-    const i16 anchor = static_cast<i16>(240 - video::viewport_py());
-    const i16 raw    = static_cast<i16>(player1.actor.screen.y) - mid;
-    const i16 bump   = raw < 0 ? 0 : (raw > anchor ? anchor : raw);
-    ppu::SetScroll(cameraX, static_cast<u16>(16 + bump));
-#else
-    ppu::SetScroll(cameraX, 16);
-#endif
-    spriteZeroHandled = 1;
-    lastPort1 = port1; lastPort2 = port2;
-    PollControllers(&port1, &port2);
-#ifdef TARGET_NES
-    ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
-#endif
-    AudioUpdate();
-#ifdef TARGET_NES
-    ppu::SetColorPriority(0x40);   // green band:        player1.Update
-#endif
-    player1.Update();
-#ifdef PLAYER2_SUPPORTED
-#ifdef TARGET_NES
-    ppu::SetColorPriority(0x60);   // red+green band:    player2.Update
-#endif
-    player2.Update();
-#endif
-#ifdef TARGET_NES
-    ppu::SetColorPriority(0x80);   // blue band:         ColMapTrack (slides override internally)
-#endif
-    level::ColMapTrack(cameraX >> 4);
-    // ColMapTrack resets priority to 0 itself; no reset needed here.
+IRQ (HUD) {
+    HUDGateLock = false;
+    apu::DisableDMCIRQ();
+    #if defined(TARGET_NDS) || defined(TARGET_GBA)
+        // --- cropped-panel vertical follow camera --------------------------------
+        // The DS (256x192) and GBA (240x160) panels are shorter than the NES frame
+        // (240px), so they cannot show the whole vertical slice the NES game renders.
+        // While the player is low we bottom-anchor -- scroll Y bumped by the shortfall
+        // (240 - viewport_py(): 48 on DS, 80 on GBA) so the ground sits on the panel
+        // bottom. Once the player climbs to the middle of the viewport we pan up with
+        // them, easing the bump from that maximum down to 0 (top-anchored) as they rise,
+        // so they never clip off the top edge. The bump is just the player's height above
+        // the viewport midpoint, clamped to [0, 240 - viewport_py()]. The math reads
+        // viewport_py() so it adapts to either panel. Sprites are kept locked to this
+        // varying scroll by the backend (build_sprites offsets every OBJ by the live band
+        // scroll), so the whole vertical-follow policy lives here in one place. Every
+        // full-height target renders the full 240 lines and needs no vertical camera
+        // (the #else branch).
+        const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
+        const i16 anchor = static_cast<i16>(240 - video::viewport_py());
+        const i16 raw    = static_cast<i16>(player1.actor.screen.y) - mid;
+        const i16 bump   = raw < 0 ? 0 : (raw > anchor ? anchor : raw);
+        ppu::SetScroll(cameraX, static_cast<u16>(16 + bump));
+    #else
+        ppu::SetScroll(cameraX, 16);
+    #endif
 }

@@ -49,9 +49,7 @@ namespace video {
 //       a true 'wait for present' on NES would infinite loop, but won't return to main thread
 //       without special return tech which we don't have yet
 void WaitForPresent() {
-    // TODO: This is a bad name, it does not actually wait on NES and shouldn't for NES multithreading
-    //       a true 'wait for present' on NES would infinite loop, but won't return to main thread
-    //       without special return tech which we don't have yet
+
 }
 
 }   // namespace video

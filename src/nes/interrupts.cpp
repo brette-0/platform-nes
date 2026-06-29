@@ -6,10 +6,12 @@ irq_t nextHandle;
 void SetNextIRQHandler(const irq_t handle) { nextHandle = handle; }
 irq_t GetCurrentIRQHandler() { return nextHandle; }
 
-extern "C" __attribute__((used)) void (*irq_fn)() = nullptr;
+extern "C" {
+__attribute__((used, section(".bss"))) void (*irqTrampoline)();
+}
 
 ASM_LINKAGE __attribute__((naked, used))
-void irq() { __asm__ volatile ("jmp (irq_fn)"); }
+void irq() { __asm__ volatile ("jmp (irqTrampoline)"); }
 
 void reset() {
     /* TODO: banked ROM needs far-call reset */
@@ -67,21 +69,21 @@ __attribute__((used, section(".zp.bss"))) u8 sReadyHi;
 // clobbering the APU state; SHADOW restores it after the frame split.
 // ---------------------------------------------------------------------------
 static inline void arm_dmc(const u8 rate_idx, const u8 dmc_start) {
-    apu.dmc_freq  = 0x80u | rate_idx;
-    apu.dmc_raw   = 0x00u;
-    apu.dmc_start = dmc_start;
-    apu.dmc_len   = 0x00u;
-    apu.snd_chn   = static_cast<u8>(apu.snd_chn) | 0x10u;
+    apu::dmc_freq  = 0x80u | rate_idx;
+    apu::dmc_raw   = 0x00u;
+    apu::dmc_start = dmc_start;
+    apu::dmc_len   = 0x00u;
+    apu::snd_chn.poke_only(static_cast<u8>(apu::snd_chn) | 0x10u);
 }
 
 // ---------------------------------------------------------------------------
 // Naked intermediate chain handler.
 //
-// Pointed to by irq_fn for all but the final DMC note.  Each invocation:
+// Pointed to by irqTrampoline for all but the final DMC note.  Each invocation:
 //   1. Arms the next note from sChainRates[sChainIdx].
 //   2. Advances sChainIdx.
 //   3. If sChainIdx just reached sChainCount (final note was just armed):
-//        sets *ready = 1 and restores irq_fn to HUD_GATE so the final note
+//        sets *ready = 1 and restores irqTrampoline to HUD_GATE so the final note
 //        routes through the FAST_LOCKED_IRQ dispatch path.
 //
 // Naked (no imaginary-register save/restore) to keep overhead fixed and cheap:
@@ -94,6 +96,7 @@ ASM_LINKAGE __attribute__((naked, used))
 void dmc_chain_handler() {
     __asm__ (
         "pha\n\t"                       // 3: save A (X is caller-saved / don't care)
+        "lda $4015\n\t"                 // 4: ack DMC IRQ (clears $4015 bit 7)
 
         // Arm the note at sChainRates[sChainIdx]
         "ldx sChainIdx\n\t"             // 3: X = next index (ZP)
@@ -120,9 +123,9 @@ void dmc_chain_handler() {
         "lda #1\n\t"                    // 2
         "sta (sReadyLo),y\n\t"          // 6: *ready = 1  (ZP indirect+Y)
         "lda #<HUD_GATE\n\t"            // 2
-        "sta irq_fn\n\t"                // 4: restore gate lo
+        "sta irqTrampoline\n\t"         // 4: restore gate lo
         "lda #>HUD_GATE\n\t"            // 2
-        "sta irq_fn+1\n\t"              // 4: restore gate hi
+        "sta irqTrampoline+1\n\t"       // 4: restore gate hi
 
         "1:\n\t"
         "pla\n\t"                       // 4: restore A
@@ -144,7 +147,7 @@ void dmc_chain_handler() {
 //   never involved.
 //
 // For N > 1 notes:
-//   irq_fn is temporarily redirected to dmc_chain_handler; it is restored to
+//   irqTrampoline is temporarily redirected to dmc_chain_handler; it is restored to
 //   HUD_GATE by the handler itself when it arms the final note.
 // ---------------------------------------------------------------------------
 void ScheduleInterrupt(const irq_pos_t /*location*/, const u16 cycles,
@@ -189,13 +192,13 @@ void ScheduleInterrupt(const irq_pos_t /*location*/, const u16 cycles,
         if (ready) *ready = true;
         arm_dmc(final_rate, dmc_start);
     } else {
-        // Multi-note: redirect irq_fn to chain handler for intermediate notes.
+        // Multi-note: redirect irqTrampoline to chain handler for intermediate notes.
         // The handler arms notes [1..sChainCount-1] in sequence, then on
         // sChainRates[sChainCount] (the final note) sets *ready and restores
-        // irq_fn to HUD_GATE before returning.
+        // irqTrampoline to HUD_GATE before returning.
         sChainIdx     = 1;
         sChainDmcStart = dmc_start;
-        sChainSndChn   = static_cast<u8>(apu.snd_chn) | 0x10u;
+        sChainSndChn   = static_cast<u8>(apu::snd_chn) | 0x10u;
 
         if (ready) {
             const auto addr = reinterpret_cast<u16>(ready);
@@ -203,7 +206,7 @@ void ScheduleInterrupt(const irq_pos_t /*location*/, const u16 cycles,
             sReadyHi = static_cast<u8>(addr >> 8);
         }
 
-        irq_fn = &dmc_chain_handler;
+        irqTrampoline = &dmc_chain_handler;
         arm_dmc(sChainRates[0], dmc_start);
     }
 }

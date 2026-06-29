@@ -143,6 +143,9 @@ irq_t GetCurrentIRQHandler();
  */
 #define RESET int main()
 
+inline void EnableInterrupts()  { __asm__ volatile ("cli"); }
+inline void DisableInterrupts() { __asm__ volatile ("sei"); }
+
 /**
  * @brief Declares the NMI handler on NES builds.
  *
@@ -157,11 +160,11 @@ void nmi()
 /**
  * @brief Active IRQ gate function pointer, dispatched from the hardware IRQ vector.
  *
- * Set via ::SetIRQ. Stored at an absolute address; the naked `irq()` dispatcher
- * jumps through it with `jmp (irq_fn)` — no compiler prologue, no register
+ * Set via ::SetIRQ. Stored in absolute BSS; the naked `irq()` dispatcher
+ * jumps through it with `jmp (irqTrampoline)` — no compiler prologue, no register
  * save — so whatever the gate does first is what the CPU does first.
  */
-extern "C" void (*irq_fn)();
+extern "C" void (*irqTrampoline)();
 
 /**
  * @brief Defines a fast-path IRQ gate with a constant-time denial path.
@@ -190,6 +193,7 @@ extern "C" void (*irq_fn)();
     void gate_name() {                                    \
         __asm__ (                                         \
             "pha\n\t"           /* 3 cy: save A        */ \
+            "lda $4015\n\t"     /* 4 cy: ack DMC IRQ   */ \
             "lda " #lock "\n\t" /* 3-4 cy: read lock   */ \
             "bne 1f\n\t"        /* 2 cy: not ready (not taken = faster) */ \
             "pla\n\t"           /* 4 cy: restore A     */ \
@@ -204,14 +208,14 @@ extern "C" void (*irq_fn)();
  * @brief Arms a ::FAST_LOCKED_IRQ gate (or any naked IRQ function) as the
  *        target of the hardware IRQ vector for this frame.
  *
- * Stores the function pointer into ::irq_fn; the naked `irq()` dispatcher
+ * Stores the function pointer into ::irqTrampoline; the naked `irq()` dispatcher
  * (which lives at the hardware IRQ vector) jumps through it immediately,
  * with no intervening saves or overhead.
  *
  * @param gate  Function defined by ::FAST_LOCKED_IRQ (or another naked
  *              C-linkage IRQ function) to arm.
  */
-#define SetIRQ(gate) (irq_fn = &(gate))
+#define SetIRQ(gate) (irqTrampoline = &(gate))
 
 /**
  * @brief Schedule a cycle-counted IRQ on NES using silent DMC note chaining.
