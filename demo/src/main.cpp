@@ -17,6 +17,8 @@
 
 using namespace demo;
 
+volatile bool nmi_done;
+
 u8 port1;
 u8 port2;
 
@@ -192,6 +194,9 @@ RESET {
 
         video::WaitForPresent();
     }
+
+    nmi_done = false;
+    while (!nmi_done) {}
 }
 
 NMI {
@@ -213,6 +218,8 @@ NMI {
             if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
                 ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, level::AttributeBuffer, 8, 1);
         }
+
+        nmi_done = true;
     }
 
     // Drain coin pickups collected this frame into the nametable.  Like the level-stream

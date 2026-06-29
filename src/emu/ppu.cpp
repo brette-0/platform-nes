@@ -122,7 +122,7 @@ void GenerateFrame(u32 *fb, const int stride) {
     int ppu_y = (int)yScroll;
     yScroll_written = 0;
 
-    size_t irq_idx = 0;
+    bool irq_fired = false;
 
     for (int py = 0; py < vph; py++) {
         /* Sprites use screen-space Y -- they don't scroll with the background. */
@@ -137,21 +137,19 @@ void GenerateFrame(u32 *fb, const int stride) {
 
         int seg_start = 0;
         while (seg_start < vpw) {
-            /* Find the next IRQ on this scanline at or after seg_start. */
+            /* Check whether the single pending IRQ falls on this scanline. */
             int seg_end = vpw;
             int fire    = 0;
-            while (irq_idx < irqCount) {
-                const irq_t ev = irqBuffer[irq_idx];
+            if (!irq_fired && irqPendingValid) {
+                const irq_t& ev = irqPending;
                 if (static_cast<int>(ev.py) < py
                     || (static_cast<int>(ev.py) == py && static_cast<int>(ev.px) < seg_start)) {
-                    irq_idx++;
-                    continue;
-                }
-                if (static_cast<int>(ev.py) == py) {
+                    /* Already past — treat as fired without calling the handler. */
+                    irq_fired = true;
+                } else if (static_cast<int>(ev.py) == py) {
                     seg_end = static_cast<int>(ev.px);
                     fire    = 1;
                 }
-                break;
             }
 
             /* Derive Y source from ppu_y (the PPU's current absolute row).
@@ -273,8 +271,9 @@ void GenerateFrame(u32 *fb, const int stride) {
              * If so, reset ppu_y to the new value -- the next segment (which
              * starts at seg_end) will derive wy from the updated counter. */
             if (fire) {
-                if (const irq_t ev = irqBuffer[irq_idx++]; ev.id < irqTableCount && irqTable[ev.id])
-                    irqTable[ev.id]();
+                irq_fired = true;
+                if (irqPending.id < irqTableCount && irqTable[irqPending.id])
+                    irqTable[irqPending.id]();
                 if (yScroll_written) {
                     ppu_y = static_cast<int>(yScroll);
                     yScroll_written = 0;
@@ -304,31 +303,32 @@ void GenerateBands(const band_emit_fn emit) {
     const int vph = video::viewport_py();
 
     yScroll_written = 0;
-    size_t irq_idx   = 0;
-    int    band_start = 0;
-    u16    cur_xs = xScroll;
-    u16    cur_ys = yScroll;
+    bool irq_fired  = false;
+    int  band_start = 0;
+    u16  cur_xs = xScroll;
+    u16  cur_ys = yScroll;
 
     for (int py = 0; py < vph; py++) {
-        /* Fire every IRQ scheduled on this scanline, in queue order. We band at
+        /* Fire the single pending IRQ when its scanline is reached. We band at
          * scanline granularity (the px within a line is irrelevant to a tile
          * renderer), but still run the handler so game logic and the scroll
          * write happen at the right raster position. */
-        while (irq_idx < irqCount) {
-            const irq_t ev = irqBuffer[irq_idx];
-            if (static_cast<int>(ev.py) < py) { irq_idx++; continue; }  // stale
-            if (static_cast<int>(ev.py) != py) break;                   // future line
-
-            if (py > band_start) {
-                emit(band_start, py, cur_xs, cur_ys);
-                band_start = py;
-            }
-            irq_idx++;
-            if (ev.id < irqTableCount && irqTable[ev.id]) irqTable[ev.id]();
-            if (yScroll_written) {
-                cur_xs = xScroll;
-                cur_ys = yScroll;
-                yScroll_written = 0;
+        if (!irq_fired && irqPendingValid) {
+            const irq_t& ev = irqPending;
+            if (static_cast<int>(ev.py) < py) {
+                irq_fired = true;   // stale — past without firing
+            } else if (static_cast<int>(ev.py) == py) {
+                irq_fired = true;
+                if (py > band_start) {
+                    emit(band_start, py, cur_xs, cur_ys);
+                    band_start = py;
+                }
+                if (ev.id < irqTableCount && irqTable[ev.id]) irqTable[ev.id]();
+                if (yScroll_written) {
+                    cur_xs = xScroll;
+                    cur_ys = yScroll;
+                    yScroll_written = 0;
+                }
             }
         }
     }

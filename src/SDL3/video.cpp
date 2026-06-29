@@ -139,9 +139,9 @@ void WaitForPresent() {
         SDL_RenderClear(renderer);
         SDL_RenderPresent(renderer);
     }
-    /* No IRQs permitted post-frame; discard anything still queued
-     * from this frame's render before NMI enqueues for the next one. */
-    irqCount = 0;
+    /* Clear the pending IRQ slot between frames so a handler that was not
+     * reached this frame (e.g. fired too late) does not re-fire next frame. */
+    irqPendingValid = false;
     nmi();
 }
 

@@ -2,23 +2,21 @@
 #include <cstdlib>
 #include <cstring>
 
-irq_t* irqBuffer;
-size_t irqCount;
-size_t irqCap;
+irq_t  irqPending;
+bool   irqPendingValid;
+u8     scheduledIRQId;
 
 irq_handler_fn* irqTable;
 size_t          irqTableCount;
 size_t          irqTableCap;
 
 void SetNextIRQHandler(const irq_t handle) {
-    if (irqCount == irqCap) {
-        const auto n = irqCap ? irqCap * 2 : 8;
-        auto *grown = static_cast<irq_t *>(realloc(irqBuffer, n * sizeof(irq_t)));
-        if (!grown) abort();
-        irqBuffer = grown;
-        irqCap = n;
-    }
-    irqBuffer[irqCount++] = handle;
+    irqPending      = handle;
+    irqPendingValid = true;
+}
+
+irq_t GetCurrentIRQHandler() {
+    return irqPendingValid ? irqPending : irq_t{};
 }
 
 void RegisterIRQHandler(const u8 id, const irq_handler_fn fn) {
@@ -34,6 +32,10 @@ void RegisterIRQHandler(const u8 id, const irq_handler_fn fn) {
     }
     irqTable[id] = fn;
     if (static_cast<size_t>(id) + 1 > irqTableCount) irqTableCount = static_cast<size_t>(id) + 1;
+}
+
+void ScheduleInterrupt(const irq_pos_t location, u16 /*cycles*/, volatile bool* /*ready*/) {
+    SetNextIRQHandler({ scheduledIRQId, location.x, location.y });
 }
 
 void reset() {

@@ -248,6 +248,73 @@ public:
     friend constexpr bool operator==(enum_flags, enum_flags) = default;   ///< also yields !=
 };
 
+namespace prsv {
+    template <std::size_t... I, class... Ts>
+    void save_impl(u8* snap, br0::index_sequence<I...>, Ts&... regs) {
+        ((snap[I] = static_cast<u8>(regs)), ...);
+    }
+
+    template <std::size_t... I, class... Ts>
+    void restore_impl(u8* snap, br0::index_sequence<I...>, Ts&... regs) {
+        ((regs = snap[I]), ...);
+    }
+
+    /**
+     * @brief Write shadow values of @p regs into the flat byte array @p snap.
+     *
+     * Called by ::PRESERVE. Reads each lvalue once through its shadow (no
+     * hardware access) and stores the byte at the corresponding index.
+     */
+    template <class... Ts>
+    void save(u8* snap, Ts&... regs) {
+        save_impl(snap, br0::index_sequence_for<Ts...>{}, regs...);
+    }
+
+    /**
+     * @brief Write bytes from @p snap back to the lvalues @p regs.
+     *
+     * Called by ::RESTORE. For ::wo_register lvalues this writes both the
+     * shadow and the hardware port; for raw `atomic u8` lvalues it is a
+     * plain volatile store.
+     */
+    template <class... Ts>
+    void restore(u8* snap, Ts&... regs) {
+        restore_impl(snap, br0::index_sequence_for<Ts...>{}, regs...);
+    }
+} // namespace prsv
+
+/**
+ * @brief Snapshot a register family into its paired static storage.
+ *
+ * A register family is a pair of definitions that live together:
+ * @code
+ *   #define MY_REGS         reg_a, reg_b, reg_c
+ *   inline u8 MY_REGS_snapshot[3] = {};
+ * @endcode
+ *
+ * `PRESERVE(MY_REGS)` saves the current shadow value of every listed
+ * register into `MY_REGS_snapshot`. The `##` in the expansion prevents the
+ * family name from being macro-expanded when building the snapshot symbol, so
+ * the same symbol name is produced at both ::PRESERVE and ::RESTORE, even
+ * across translation-unit boundaries (e.g. ISR in a different file).
+ *
+ * No hardware is read on save; only the ::wo_register shadows are accessed.
+ *
+ * @param name Bare identifier of the family macro (e.g. `APU_REGISTERS`).
+ */
+#define PRESERVE(name) ::prsv::save(name##_snapshot, name)
+
+/**
+ * @brief Restore a ::PRESERVE-d register family from static storage.
+ *
+ * Writes `name##_snapshot` back into every listed register. For
+ * ::wo_register lvalues this pokes the hardware port and updates the shadow;
+ * for raw `atomic u8` lvalues it is a plain volatile store.
+ *
+ * @param name Bare identifier of the family macro (e.g. `APU_REGISTERS`).
+ */
+#define RESTORE(name) ::prsv::restore(name##_snapshot, name)
+
 /**
  * @brief Scoped save/restore of N variables — truly variadic.
  *

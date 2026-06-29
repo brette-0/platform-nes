@@ -374,7 +374,7 @@ IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
 
     // No IRQs permitted post-frame; discard anything still queued from this
     // frame's render before NMI enqueues for the next one (matches OGC/3DS/DS).
-    irqCount = 0;
+    irqPendingValid = false;
     nmi();
 }
 

@@ -367,7 +367,7 @@ void WaitForPresent() {
 
     /* No IRQs permitted post-frame; discard anything still queued from this
      * frame's render before NMI enqueues for the next one. */
-    irqCount = 0;
+    irqPendingValid = false;
     nmi();
 }
 
