@@ -94,16 +94,24 @@ public:
  *   if (*ready) RESTORE(APU_REGISTERS); // replay shadows + poke hardware
  * @endcode
  */
+/**
+ * @brief PRESERVE/RESTORE family covering APU registers except DMC timing.
+ *
+ * DMC registers ($4010–$4013) are intentionally excluded: ::ScheduleInterrupt
+ * arms them mid-frame for split timing and they must survive the SHADOW block
+ * restore.  Callers that need to schedule an IRQ should call
+ * ::ScheduleInterrupt before or after the SHADOW block — the DMC state is
+ * never clobbered by PRESERVE/RESTORE.
+ */
 #define APU_REGISTERS \
     apu::sq1_vol,   apu::sq1_sweep, apu::sq1_lo,  apu::sq1_hi,  \
     apu::sq2_vol,   apu::sq2_sweep, apu::sq2_lo,  apu::sq2_hi,  \
-    apu::tri_linear,apu::tri_lo,    apu::tri_hi,               \
-    apu::noise_vol, apu::noise_lo,  apu::noise_hi,              \
-    apu::dmc_freq,  apu::dmc_raw,   apu::dmc_start,apu::dmc_len, \
+    apu::tri_linear,apu::tri_lo,    apu::tri_hi,                 \
+    apu::noise_vol, apu::noise_lo,  apu::noise_hi,               \
     apu::snd_chn,   apu::frame_counter
 
-/** @brief Flat snapshot storage for the ::APU_REGISTERS family (20 bytes). */
-extern u8 APU_REGISTERS_snapshot[20];
+/** @brief Flat snapshot storage for the ::APU_REGISTERS family (16 bytes). */
+extern u8 APU_REGISTERS_snapshot[16];
 
 #endif // TARGET_NES
 #endif // APU_H

@@ -23,6 +23,6 @@ wo_register<0x4013> apu::dmc_len;
 wo_register<0x4015> apu::snd_chn;
 wo_register<0x4017> apu::frame_counter;
 
-u8 APU_REGISTERS_snapshot[20];
+u8 APU_REGISTERS_snapshot[16];
 
 #endif

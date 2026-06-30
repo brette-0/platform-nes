@@ -167,6 +167,17 @@ void nmi()
 extern "C" void (*irqTrampoline)();
 
 /**
+ * @brief Naked DMC chain advance handler — the deny-path trampoline for
+ *        ::FAST_LOCKED_IRQ_CHAINED.
+ *
+ * Called directly (via `jmp`) from the gate's deny path.  Arms the next
+ * queued DMC note, advances the chain index, and on the final note sets
+ * the gate's lock flag so the next IRQ dispatches instead of denying.
+ * Does NOT touch irqTrampoline — the gate stays armed at all times.
+ */
+extern "C" void dmc_chain_handler();
+
+/**
  * @brief Defines a fast-path IRQ gate with a constant-time denial path.
  *
  * Emits a naked, C-linkage function `gate_name` suitable for use with ::SetIRQ.
@@ -188,6 +199,15 @@ extern "C" void (*irqTrampoline)();
  * @param target     The `id` passed to ::IRQ that defines the success handler
  *                   (e.g. `HUD` expands the jump to `irqHUD`).
  */
+/**
+ * @brief Defines a fast-path IRQ gate with a no-op deny path.
+ *
+ * Deny path does `pla; rti` — 26 cycles total.  Use this variant when
+ * there are no intermediate DMC notes to advance on denial (single-note
+ * schedules, or when the chain is managed externally).
+ *
+ * For DMC chaining use ::FAST_LOCKED_IRQ_CHAINED instead.
+ */
 #define FAST_LOCKED_IRQ(gate_name, lock, target)          \
     ASM_LINKAGE __attribute__((naked, used))              \
     void gate_name() {                                    \
@@ -201,6 +221,42 @@ extern "C" void (*irqTrampoline)();
             "1:\n\t"                                      \
             "pla\n\t"           /* 4 cy: restore A     */ \
             "jmp irq" #target   /* 3 cy: jump in       */ \
+        );                                                \
+    }
+
+/**
+ * @brief Defines a fast-path IRQ gate whose deny path advances a DMC chain.
+ *
+ * Same dispatch path as ::FAST_LOCKED_IRQ.  On denial (lock not set), instead
+ * of `rti`, restores A and jumps to ::dmc_chain_handler, which arms the next
+ * note, advances the chain index, and — on the final note — sets the lock so
+ * the next fire dispatches.  irqTrampoline is NEVER redirected away from the
+ * gate; all intermediate and final DMC IRQs go through the same deny/dispatch
+ * test.
+ *
+ * Deny path (intermediate):  26 cy (gate) + ~63 cy (chain handler) = ~89 cy.
+ * Deny path (final note):     sets lock=true so the NEXT fire dispatches.
+ * Dispatch path:              identical to ::FAST_LOCKED_IRQ.
+ *
+ * @param gate_name  C identifier for the gate function.
+ * @param lock       Symbol of the `volatile bool` gate lock (true = dispatch).
+ * @param target     ::IRQ id whose handler fires on dispatch.
+ * @param on_deny    C symbol to jump to on denial; must be ::dmc_chain_handler
+ *                   or a compatible naked function that saves/restores A and RTIs.
+ */
+#define FAST_LOCKED_IRQ_CHAINED(gate_name, lock, target, on_deny) \
+    ASM_LINKAGE __attribute__((naked, used))              \
+    void gate_name() {                                    \
+        __asm__ (                                         \
+            "pha\n\t"              /* 3 cy: save A        */ \
+            "lda $4015\n\t"        /* 4 cy: ack DMC IRQ   */ \
+            "lda " #lock "\n\t"    /* 3-4 cy: read lock   */ \
+            "bne 1f\n\t"           /* 2 cy: not ready     */ \
+            "pla\n\t"              /* 4 cy: restore A     */ \
+            "jmp " #on_deny "\n\t" /* 3 cy: advance chain */ \
+            "1:\n\t"                                         \
+            "pla\n\t"              /* 4 cy: restore A     */ \
+            "jmp irq" #target      /* 3 cy: jump in       */ \
         );                                                \
     }
 

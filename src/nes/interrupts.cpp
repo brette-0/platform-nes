@@ -77,26 +77,28 @@ static inline void arm_dmc(const u8 rate_idx, const u8 dmc_start) {
 }
 
 // ---------------------------------------------------------------------------
-// Naked intermediate chain handler.
+// Naked DMC chain advance handler — deny-path trampoline.
 //
-// Pointed to by irqTrampoline for all but the final DMC note.  Each invocation:
-//   1. Arms the next note from sChainRates[sChainIdx].
+// Called via `jmp` from the gate's deny path (A already restored by gate).
+// Each invocation:
+//   1. Saves A, arms the next note from sChainRates[sChainIdx].
 //   2. Advances sChainIdx.
 //   3. If sChainIdx just reached sChainCount (final note was just armed):
-//        sets *ready = 1 and restores irqTrampoline to HUD_GATE so the final note
-//        routes through the FAST_LOCKED_IRQ dispatch path.
+//        sets *ready = 1 so the gate dispatches on the next fire.
 //
-// Naked (no imaginary-register save/restore) to keep overhead fixed and cheap:
-//   7 (hw entry) + ~63 (body, not-last path) = ~70 cycles per intermediate note.
+// irqTrampoline is NOT touched — the gate (HUD_GATE) stays armed at all
+// times.  All intermediate and final DMC IRQs route through the same deny/
+// dispatch test; only the lock value changes.
 //
-// Register contract: only A and X are touched; the caller (hardware ISR entry)
-// has not established any register state, so no saves beyond A are needed.
+// Naked to keep overhead fixed:
+//   3 (pha) + ~57 (body, not-last path) + 4 (pla) + 6 (rti) = ~70 cycles.
+//
+// Register contract: only A and X are touched.
 // ---------------------------------------------------------------------------
 ASM_LINKAGE __attribute__((naked, used))
 void dmc_chain_handler() {
     __asm__ (
-        "pha\n\t"                       // 3: save A (X is caller-saved / don't care)
-        "lda $4015\n\t"                 // 4: ack DMC IRQ (clears $4015 bit 7)
+        "pha\n\t"                       // 3: save A
 
         // Arm the note at sChainRates[sChainIdx]
         "ldx sChainIdx\n\t"             // 3: X = next index (ZP)
@@ -118,14 +120,10 @@ void dmc_chain_handler() {
         "cpx sChainCount\n\t"           // 3: ZP  (X == sChainCount -> final)
         "bcc 1f\n\t"                    // 2/3: branch if more notes remain
 
-        // Final note was just armed: signal ready and restore the real gate
+        // Final note was just armed: signal ready so next gate fire dispatches
         "ldy #0\n\t"                    // 2
         "lda #1\n\t"                    // 2
         "sta (sReadyLo),y\n\t"          // 6: *ready = 1  (ZP indirect+Y)
-        "lda #<HUD_GATE\n\t"            // 2
-        "sta irqTrampoline\n\t"         // 4: restore gate lo
-        "lda #>HUD_GATE\n\t"            // 2
-        "sta irqTrampoline+1\n\t"       // 4: restore gate hi
 
         "1:\n\t"
         "pla\n\t"                       // 4: restore A
@@ -188,15 +186,15 @@ void ScheduleInterrupt(const irq_pos_t /*location*/, const u16 cycles,
     sChainRates[sChainCount] = final_rate;  // append final note at end
 
     if (sChainCount == 0) {
-        // Single note: set ready now and arm; chain handler never runs
+        // Single note: set ready now and arm; deny path never fires.
         if (ready) *ready = true;
         arm_dmc(final_rate, dmc_start);
     } else {
-        // Multi-note: redirect irqTrampoline to chain handler for intermediate notes.
-        // The handler arms notes [1..sChainCount-1] in sequence, then on
-        // sChainRates[sChainCount] (the final note) sets *ready and restores
-        // irqTrampoline to HUD_GATE before returning.
-        sChainIdx     = 1;
+        // Multi-note: irqTrampoline stays at the gate the whole time.
+        // Intermediate fires hit the gate's deny path → dmc_chain_handler,
+        // which arms notes [1..sChainCount] in sequence; on the final note
+        // dmc_chain_handler sets *ready so the next gate fire dispatches.
+        sChainIdx      = 1;
         sChainDmcStart = dmc_start;
         sChainSndChn   = static_cast<u8>(apu::snd_chn) | 0x10u;
 
@@ -206,7 +204,6 @@ void ScheduleInterrupt(const irq_pos_t /*location*/, const u16 cycles,
             sReadyHi = static_cast<u8>(addr >> 8);
         }
 
-        irqTrampoline = &dmc_chain_handler;
         arm_dmc(sChainRates[0], dmc_start);
     }
 }

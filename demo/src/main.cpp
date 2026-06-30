@@ -27,7 +27,7 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
-FAST_LOCKED_IRQ(HUD_GATE, HUDGateLock, HUD);
+FAST_LOCKED_IRQ_CHAINED(HUD_GATE, HUDGateLock, HUD, dmc_chain_handler);
 
 // ---------------------------------------------------------------------------
 // Deferred VRAM tile-write stack (coin pickups)
@@ -112,9 +112,15 @@ RESET {
 
     SetIRQ(HUD_GATE);   // fast exit locked IRQ
 
-    ppu::Flush(chrAir_tile, 0x11);
+    ppu::Flush(chrHUDWhitespace_tile, 0x11);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
+
+    // Sprite-0 hit anchor: placed at OAM (0,0) → renders at scanline 1 pixel 1
+    // due to the OAM Y+1 offset.  The hit fires at a fixed PPU dot each frame,
+    // giving ScheduleInterrupt a cycle-accurate arm point independent of game
+    // logic duration.  Requires a non-transparent BG pixel at nametable (0,0).
+    OAMBuffer[0] = { 0, chrSprite0_tile, 0, 0 };
 
     // fill in with mario metatiles
     oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary,  kMarySprites);
@@ -191,15 +197,27 @@ RESET {
 #ifndef  TARGET_NES
             quit = 1;
 #endif
-
         }
 
-        SHADOW (APU_REGISTERS) {
-            HUDGateLock = false;
+#if TARGET_NES
+        // Stage 1: wait for the previous frame's hit flag to clear (pre-render scanline).
+        // Without this, NMI exits while the stale flag is still set and the poll
+        // below returns immediately, arming the DMC in VBlank instead of at scanline 1.
+        while (*reinterpret_cast<volatile u8*>(0x2002) & 0x40) {}
+        // Stage 2: wait for this frame's sprite-0 hit.
+        while (!(*reinterpret_cast<volatile u8*>(0x2002) & 0x40)) {}
+#endif
+        // Poll controllers BEFORE arming the DMC — the DMC DMA byte-fetch steal
+        // happens immediately after $4015 is poked and can corrupt a concurrent
+        // $4016/$4017 read, shifting the joypad shift register by one bit.
+        lastPort1 = port1; lastPort2 = port2;
+        PollControllers(&port1, &port2);
 
+        HUDGateLock = false;
+        ScheduleInterrupt({0, 16}, 1700, &HUDGateLock);
+
+        SHADOW (APU_REGISTERS) {
             spriteZeroHandled = 1;
-            lastPort1 = port1; lastPort2 = port2;
-            PollControllers(&port1, &port2);
 
             ppu::SetColorPriority(0x40);   // green band:        player1.Update
             player1.Update();
@@ -212,7 +230,7 @@ RESET {
             level::ColMapTrack(cameraX >> 4);
         }
 
-        ScheduleInterrupt({}, 1820, &HUDGateLock);
+        OAMBuffer[0] = { 0, chrSprite0_tile, 0, 0 };   // re-assert after player update
 
         ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
         //AudioUpdate();
