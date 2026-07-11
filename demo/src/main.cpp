@@ -111,6 +111,8 @@ RESET {
     SwitchBank(window1Control, 0);
     SwitchBank(window2Control, 1);
     SwitchBank(window3Control, 2);
+    SwitchCHRBank0(0);
+    SwitchCHRBank0(1);
 
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3

@@ -76,25 +76,3 @@ static void SyncBankShadows() {
 wo_register<0x9000> chrHighBits;
 wo_register<0xe000> chr0Control;
 wo_register<0xf000> chr1Control;
-
-/**
- * @brief Establishes VRC1's default CHR bank layout: pattern table 0 =
- *        bank 0, pattern table 1 = bank 1.
- *
- * That's the flat identity mapping matching the project's current single
- * 8 KiB CHR-ROM image (first 4 KiB = pattern table 0, second 4 KiB =
- * pattern table 1) -- i.e. what CHR already looked like before VRC1.
- *
- * Unlike the PRG windows (::_reset), this doesn't need to run before
- * crt0's .bss zeroing or from the fixed bank: CHR-ROM is PPU-addressed,
- * not CPU-addressed, so an unset or momentarily-wrong bank here can't
- * crash anything the way a wrong PRG bank could -- it can only be wrong
- * pixels, and only until this runs, well before the PPU is ever turned on.
- * An ordinary constructor through the normal shadowed path is enough; no
- * need to touch _reset or SyncBankShadows for this.
- */
-__attribute__((constructor(101)))
-static void InitCHRBankState() {
-    SwitchCHRBank0(0);
-    SwitchCHRBank1(1);
-}
