@@ -135,13 +135,30 @@ irq_t GetCurrentIRQHandler();
 
 #ifdef TARGET_NES
 
+#ifdef NES_MAPPER_BANKSWITCHED
+/**
+ * @brief Declares the program's reset handler on bankswitched NES builds.
+ *
+ * Expands to `int main()`, which the llvm-mos crt0 invokes at cold boot,
+ * pinned to `.prg_rom_fixed`. main is the one piece of code that must
+ * always be resident no matter what any switchable window currently holds
+ * -- everything else, including the bankswitching calls themselves, runs
+ * from it. NES_MAPPER_BANKSWITCHED is set by CMakeLists.txt from
+ * LLVM_MOS_PLATFORM, so this follows the mapper choice automatically.
+ * Follow the macro with the handler body.
+ */
+#define RESET __attribute__((section(".prg_rom_fixed"))) int main()
+#else
 /**
  * @brief Declares the program's reset handler on NES builds.
  *
  * Expands to `int main()`, which the llvm-mos crt0 invokes at cold
- * boot. Follow the macro with the handler body.
+ * boot. Follow the macro with the handler body. NROM has no banks to
+ * escape to, so unlike the bankswitched variant of this macro, main isn't
+ * pinned to any particular section.
  */
 #define RESET int main()
+#endif
 
 inline void EnableInterrupts()  { __asm__ volatile ("cli"); }
 inline void DisableInterrupts() { __asm__ volatile ("sei"); }

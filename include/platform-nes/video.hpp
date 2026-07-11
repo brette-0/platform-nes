@@ -87,7 +87,7 @@ ASM_LINKAGE const u8 name##_end[];
 /**
  * @brief Forward-declares the `<name>_start` / `<name>_end` symbols of a CHR
  *        ROM blob defined elsewhere.
- *
+ *1
  * Use this in a header to reference a blob from a different translation unit:
  * the blob is *defined* once by ::CHARACTER_ROM in a single `.cpp`, and any TU
  * that includes the header may then use ::CHR and ::CHR_SIZE on @p name. Do not

@@ -15,6 +15,7 @@
 
 #include "technology.hpp"
 #include "platform-nes/apu.hpp"
+#include "platform-nes/mappers/vrc1.hpp"
 
 using namespace demo;
 
@@ -106,6 +107,11 @@ static oam::oam_t SpriteX2(u16 i);
 static i16  ClampRow(u16 y);
 
 RESET {
+    // init bank state
+    SwitchBank(window1Control, 0);
+    SwitchBank(window2Control, 1);
+    SwitchBank(window3Control, 2);
+
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3
     }

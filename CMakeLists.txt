@@ -97,10 +97,47 @@ FetchContent_Declare(
 # NES target
 # ----------------------------------------------------------------------
 if(TARGET_PLATFORM STREQUAL "nes")
-    set(LLVM_MOS_PLATFORM nes-nrom)
+    # Mapper 75 (VRC1), not NROM: linked against the generic nes-platform
+    # crt0 (LLVM_MOS_PLATFORM=nes, not nes-nrom) per vrc1.ld's own
+    # precondition note -- nes-nrom's crt0.o hardcodes __mapper=0 as a
+    # non-weak symbol, which conflicts with vrc1.ld's own __mapper=75.
+    #
+    # The generic nes platform has no default link.ld (unlike nes-nrom and
+    # the other mapper subtargets), so -T must be supplied explicitly. This
+    # has to happen *before* project() below: project() runs CMake's own
+    # compiler-identification and ABI-detection probes, which both perform
+    # real links, and without -T those fail before any of this project's
+    # own code is ever touched ("cannot find linker script link.ld", then
+    # a harder-to-place "No known features for CXX compiler" once
+    # identification itself silently comes back empty).
+    #
+    # CMAKE_CXX_FLAGS, not CMAKE_EXE_LINKER_FLAGS: CMake's own
+    # CMAKE_DETERMINE_COMPILER_ID probe builds its test invocation from
+    # CMAKE_<LANG>_FLAGS specifically (see CMakeDetermineCompilerId.cmake) and
+    # does not consult CMAKE_EXE_LINKER_FLAGS at all, so -T placed there is
+    # invisible to that one probe even though it reaches every ordinary
+    # target's link step. Compile-only steps harmlessly warn that -T is
+    # unused; silenced below rather than left to spam every translation unit.
+    set(VRC1_LD ${CMAKE_SOURCE_DIR}/src/nes/mappers/vrc1.ld)
+    set(CMAKE_CXX_FLAGS "-T ${VRC1_LD} -Wno-unused-command-line-argument")
+
+    set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes CXX)
     set(PLATFORM_DEFINE TARGET_NES)
+
+    # NROM has no bankswitching, so RESET has nowhere to "escape to" and
+    # stays plain int main(). Every other mapper needs its RESET/main pinned
+    # to the fixed bank (interrupts.hpp), since main is the code's one
+    # guaranteed-always-resident home base while everything else may be
+    # banked in and out from under it. LLVM_MOS_PLATFORM is this project's
+    # one source of truth for which mapper is being built, set just above.
+    if(NOT LLVM_MOS_PLATFORM STREQUAL "nes-nrom")
+        list(APPEND PLATFORM_DEFINE NES_MAPPER_BANKSWITCHED)
+    endif()
+    # -D-prefixed form for the pass-1 custom command below, which invokes the
+    # compiler directly and so doesn't pick up target_compile_definitions.
+    list(TRANSFORM PLATFORM_DEFINE PREPEND "-D" OUTPUT_VARIABLE PLATFORM_DEFINE_FLAGS)
 
     FetchContent_MakeAvailable(intsh tuple)
 
@@ -209,7 +246,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
         list(APPEND DEMO_ASM_OBJECTS ${ASM_OBJ})
     endforeach()
 
-    file(GLOB NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp)
+    file(GLOB_RECURSE NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp)
     add_library(platform-nes STATIC ${NES_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
@@ -238,12 +275,16 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # silencer must be set explicitly to match the demo target. -x c++
             # forces the C++ frontend for the source inputs.
             -std=gnu++23 -Wno-c23-extensions -x c++
-            -Os -DTARGET_NES -DLANDSCAPE
+            -Os ${PLATFORM_DEFINE_FLAGS} -DLANDSCAPE
             # Reserve 10 ZP bytes for FamiStudio (8 vars + 2 alignment slack).
             # mos-nes.cfg defaults to -mlto-zp=224 (the full region); capping at
             # 214 prevents mos-zero-page-alloc from filling the last 10 bytes and
             # leaving no room for FamiStudio's ZEROPAGE segment.
             -mlto-zp=214
+            # This custom command calls the compiler directly, bypassing
+            # CMAKE_EXE_LINKER_FLAGS (which supplies -T for every ordinary
+            # CMake target's link step) -- so -T has to be repeated here too.
+            -T ${VRC1_LD}
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
