@@ -11,30 +11,6 @@ using namespace br0::intsh;
  *  I don't expect there to be much overhead to this, it will suggest encapsulation to the user
  */
 
-#ifdef TARGET_NES
-/**
- * @brief Builds the body of a segment-placement keyword like ::fixed.
- *
- * `CREATE_SEGMENT_KEYWORD(name)` expands to the `__attribute__((section(...)))`
- * that pins a function or variable into `.prg_rom_<name>`, the linker section
- * this mapper's script (vrc1.ld) maps into a real PRG-ROM region. It is a
- * builder, not a keyword itself: the preprocessor can't register a new macro
- * name from inside another macro's expansion, so a call like
- * `CREATE_SEGMENT_KEYWORD(fixed)` can only ever be the *right-hand side* of a
- * keyword's definition, e.g.
- *
- *     #define fixed CREATE_SEGMENT_KEYWORD(fixed)
- *
- * — one such line per segment name, after which the bare word (`fixed`) is
- * usable everywhere in VRC1 code as a ::direct / ::absolute-style qualifier.
- *
- * Expands to nothing off-NES.
- */
-#define CREATE_SEGMENT_KEYWORD(name) __attribute__((section(".prg_rom_" #name)))
-#else
-#define CREATE_SEGMENT_KEYWORD(name)
-#endif
-
 /**
  * @brief Pins a function or variable into VRC1's fixed PRG-ROM bank ($E000-$FFFF).
  *
@@ -42,7 +18,7 @@ using namespace br0::intsh;
  * real, always-mapped region -- see the file comment at the top of vrc1.ld.
  * Expands to nothing off-NES.
  */
-#define fixed CREATE_SEGMENT_KEYWORD(fixed)
+#define fixed CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")
 
 /**
  * @brief VRC1's three switchable 8 KiB PRG-select registers ($8000/$A000/$C000).
@@ -152,9 +128,9 @@ fixed TReturn Long(TFunc fn, const u8 window = 0) {
  *
  * chrHighBits ($9000) is shared between both pattern tables (bit 0 = table
  * 0's bank bit 4, bit 1 = table 1's), which is exactly what ::wo_register's
- * shadow exists for: ::SwitchCHRBank0 / ::SwitchCHRBank1 read it back to
- * flip only their own bit, never the other window's. chr0Control ($E000)
- * and chr1Control ($F000) hold each table's low 4 bank bits. Not `const`,
+ * shadow exists for: ::SwitchCHRBank reads it back to flip only the calling
+ * window's own bit, never the other window's. chr0Control ($E000) and
+ * chr1Control ($F000) hold each table's low 4 bank bits. Not `const`,
  * same reasoning as window1Control etc.
  */
 extern wo_register<0x9000> chrHighBits;
@@ -162,23 +138,25 @@ extern wo_register<0xe000> chr0Control;
 extern wo_register<0xf000> chr1Control;
 
 /**
- * @brief Selects which 4 KiB CHR-ROM bank appears at PPU $0000-$0FFF
- *        (pattern table 0).
+ * @brief Selects which 4 KiB CHR-ROM bank appears in a VRC1 pattern table.
  *
+ * Single template, mirroring ::SwitchBank's shape: @p addr (deduced from
+ * @p reg) picks between chr0Control ($E000, PPU $0000-$0FFF / pattern table
+ * 0) and chr1Control ($F000, PPU $1000-$1FFF / pattern table 1), which in
+ * turn selects which bit of the *shared* chrHighBits register this call is
+ * allowed to touch -- see the comment above chrHighBits. The read-modify-
+ * write against chrHighBits' shadow is what keeps the other window's high
+ * bit untouched.
+ *
+ * @param reg  chr0Control or chr1Control; any other instantiation is a
+ *             compile error.
  * @param bank Target bank, 0-31.
  */
-inline void SwitchCHRBank0(u8 bank) {
-    chr0Control = bank & 0x0F;
-    chrHighBits = (chrHighBits.get() & 0b10) | ((bank >> 4) & 1);
-}
-
-/**
- * @brief Selects which 4 KiB CHR-ROM bank appears at PPU $1000-$1FFF
- *        (pattern table 1).
- *
- * @param bank Target bank, 0-31.
- */
-inline void SwitchCHRBank1(u8 bank) {
-    chr1Control = bank & 0x0F;
-    chrHighBits = (chrHighBits.get() & 0b01) | (((bank >> 4) & 1) << 1);
+template <u16 addr>
+constexpr void SwitchCHRBank(wo_register<addr> &reg, u8 bank) {
+    static_assert(addr == 0xe000 || addr == 0xf000,
+                  "SwitchCHRBank only valid for chr0Control ($E000) or chr1Control ($F000)");
+    constexpr u8 bit = (addr == 0xe000) ? 0 : 1;
+    reg = bank & 0x0F;
+    chrHighBits = (chrHighBits.get() & ~(u8(1) << bit)) | (((bank >> 4) & 1) << bit);
 }

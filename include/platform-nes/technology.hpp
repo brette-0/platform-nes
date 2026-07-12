@@ -25,6 +25,32 @@ using namespace br0::intsh;
 #include <array>
 #include <cstddef>
 
+
+#ifdef TARGET_NES
+/**
+ * @brief Builds the body of a segment-placement keyword like ::fixed.
+ *
+ * `CREATE_SEGMENT_KEYWORD(name)` expands to the `__attribute__((section(...)))`
+ * that pins a function or variable into `.prg_rom_<name>`, the linker section
+ * this mapper's script (vrc1.ld) maps into a real PRG-ROM region. It is a
+ * builder, not a keyword itself: the preprocessor can't register a new macro
+ * name from inside another macro's expansion, so a call like
+ * `CREATE_SEGMENT_KEYWORD(fixed)` can only ever be the *right-hand side* of a
+ * keyword's definition, e.g.
+ *
+ *     #define fixed CREATE_SEGMENT_KEYWORD(fixed)
+ *
+ * — one such line per segment name, after which the bare word (`fixed`) is
+ * usable everywhere in VRC1 code as a ::direct / ::absolute-style qualifier.
+ *
+ * Expands to nothing off-NES.
+ */
+#define CREATE_SEGMENT_KEYWORD(name) __attribute__((section(name)))
+#else
+#define CREATE_SEGMENT_KEYWORD(name)
+#endif
+
+
 #ifdef __cplusplus
 /**
  * @brief Reads one byte from a memory-mapped I/O address.
