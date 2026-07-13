@@ -1,5 +1,5 @@
-video.h
-=======
+video.hpp
+=========
 
-.. doxygenfile:: video.h
+.. doxygenfile:: video.hpp
    :project: api

@@ -19,6 +19,14 @@
 
 using namespace demo;
 
+// On NES, IRQ ids are purely textual (pasted into `irq<id>` / an asm jump
+// target), so ::FAST_LOCKED_IRQ_CHAINED and ::IRQ never evaluate `HUD` as a
+// value there. Off NES both macros *do* evaluate it (RegisterIRQHandler's
+// argument, the gate's constexpr alias), so it needs to be a real id here.
+#ifndef TARGET_NES
+constexpr u8 HUD = 0;
+#endif
+
 extern "C" __attribute__((used)) volatile bool HUDGateLock = false;
 volatile bool nmi_done;
 
@@ -107,12 +115,15 @@ static oam::oam_t SpriteX2(u16 i);
 static i16  ClampRow(u16 y);
 
 RESET {
-    // init bank state
+#ifdef TARGET_NES
+    // init bank state -- window1Control/2/3 and chr0Control/1 are VRC1
+    // registers, only defined off vrc1.cpp (NES-only, see vrc1.hpp).
     SwitchBank(window1Control, 0);
     SwitchBank(window2Control, 1);
     SwitchBank(window3Control, 2);
     SwitchCHRBank(chr0Control, 0);
     SwitchCHRBank(chr1Control, 1);
+#endif
 
     if (!level::LoadLevel(0)) {
         reset();    // spin reset on NES, exit on SDL3

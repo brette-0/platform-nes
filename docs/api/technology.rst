@@ -1,5 +1,5 @@
-technology.h
-============
+technology.hpp
+==============
 
-.. doxygenfile:: technology.h
+.. doxygenfile:: technology.hpp
    :project: api

@@ -1,5 +1,5 @@
-interrupts.h
-============
+interrupts.hpp
+==============
 
-.. doxygenfile:: interrupts.h
+.. doxygenfile:: interrupts.hpp
    :project: api

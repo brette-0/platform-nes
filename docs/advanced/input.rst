@@ -1,5 +1,5 @@
-input.h
-=======
+input.hpp
+=========
 
-.. doxygenfile:: input.h
+.. doxygenfile:: input.hpp
    :project: advanced

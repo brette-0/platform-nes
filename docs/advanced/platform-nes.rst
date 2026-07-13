@@ -1,5 +1,5 @@
-platform-nes.h
-==============
+platform-nes.hpp
+================
 
-.. doxygenfile:: platform-nes.h
+.. doxygenfile:: platform-nes.hpp
    :project: advanced

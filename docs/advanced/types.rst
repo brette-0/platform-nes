@@ -1,5 +1,5 @@
-types.h
-=======
+types.hpp
+=========
 
-.. doxygenfile:: types.h
+.. doxygenfile:: types.hpp
    :project: advanced

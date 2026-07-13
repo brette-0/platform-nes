@@ -1,5 +1,5 @@
-audio.h
-=======
+audio.hpp
+=========
 
-.. doxygenfile:: audio.h
+.. doxygenfile:: audio.hpp
    :project: api
