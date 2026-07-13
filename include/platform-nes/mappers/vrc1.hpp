@@ -1,3 +1,14 @@
+/**
+ * @file vrc1.hpp
+ * @brief VRC1 mapper: PRG/CHR bank switching and the ::fixed segment keyword.
+ *
+ * VRC1 exposes three switchable 8 KiB PRG-ROM windows (::window1Control,
+ * ::window2Control, ::window3Control) and two independent 4 KiB CHR-ROM
+ * windows (::chr0Control, ::chr1Control, with the shared high bit in
+ * ::chrHighBits). ::Long and ::SwitchCHRBank are the safe entry points for
+ * switching either; ::fixed pins code that must survive a bankswitch into
+ * the mapper's always-mapped $E000-$FFFF window.
+ */
 #pragma once
 
 #include <intsh>
@@ -27,9 +38,9 @@ using namespace br0::intsh;
  * point. Defined (not just declared) in vrc1.cpp, where the default-bank
  * boot-time init also lives.
  */
-extern wo_register<0x8000> window1Control;
-extern wo_register<0xa000> window2Control;
-extern wo_register<0xc000> window3Control;
+extern wo_register<0x8000> window1Control; ///< PRG-select, window 1 ($8000-$9FFF). See above.
+extern wo_register<0xa000> window2Control; ///< PRG-select, window 2 ($A000-$BFFF). See ::window1Control.
+extern wo_register<0xc000> window3Control; ///< PRG-select, window 3 ($C000-$DFFF). See ::window1Control.
 
 /**
  * @brief Writes @p ctx into a VRC1 PRG-select register, banking in that window.
@@ -99,15 +110,24 @@ namespace vrc1_detail {
  * @tparam TReturn Result type of the call; not deducible from @p fn, so
  *                 specify it explicitly at the call site, e.g. `Long<int>(...)`.
  * @param fn     Callable to invoke once the selected window is banked in.
- * @param window Which window to switch: 0, 1, or 2 (default 0).
+ * @param window Which window to switch: 0, 1, or 2 (default 0); ignored off-NES.
+ *
+ * @note Off-NES there is no PRG-ROM to bank -- window1Control/2/3 aren't even
+ *       defined there (vrc1.cpp is an NES-only source file) -- so this
+ *       collapses to a plain `return fn();`, skipping ::vrc1_detail::CallInWindow
+ *       entirely rather than binding a reference to an undefined extern.
  */
 template <typename TReturn, typename TFunc>
 fixed TReturn Long(TFunc fn, const u8 window = 0) {
+#ifdef TARGET_NES
     switch (window) {
         case 1:  return vrc1_detail::CallInWindow<TReturn>(window2Control, 1, fn);
         case 2:  return vrc1_detail::CallInWindow<TReturn>(window3Control, 2, fn);
         default: return vrc1_detail::CallInWindow<TReturn>(window1Control, 0, fn);
     }
+#else
+    return fn();
+#endif
 }
 
 /*
@@ -133,9 +153,9 @@ fixed TReturn Long(TFunc fn, const u8 window = 0) {
  * chr1Control ($F000) hold each table's low 4 bank bits. Not `const`,
  * same reasoning as window1Control etc.
  */
-extern wo_register<0x9000> chrHighBits;
-extern wo_register<0xe000> chr0Control;
-extern wo_register<0xf000> chr1Control;
+extern wo_register<0x9000> chrHighBits; ///< Shared high bank bit for both pattern tables. See above.
+extern wo_register<0xe000> chr0Control; ///< CHR-select, pattern table 0 ($0000-$0FFF). See ::chrHighBits.
+extern wo_register<0xf000> chr1Control; ///< CHR-select, pattern table 1 ($1000-$1FFF). See ::chrHighBits.
 
 /**
  * @brief Selects which 4 KiB CHR-ROM bank appears in a VRC1 pattern table.

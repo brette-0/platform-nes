@@ -195,11 +195,12 @@ extern "C" void (*irqTrampoline)();
 extern "C" void dmc_chain_handler();
 
 /**
- * @brief Defines a fast-path IRQ gate with a constant-time denial path.
+ * @brief Defines a fast-path IRQ gate with a no-op deny path.
  *
  * Emits a naked, C-linkage function `gate_name` suitable for use with ::SetIRQ.
  * The gate is NOT compiled as an interrupt handler by llvm-mos (no imaginary
- * register save/restore), so its entire cost when the lock is clear is:
+ * register save/restore), so its entire cost when the lock is clear (deny
+ * path: `pla; rti`) is:
  *
  *   7 (hw entry) + 3 (pha) + 4 (lda abs) + 2 (bne not-taken) + 4 (pla) + 6 (rti)
  *   = 26 cycles, constant.  (ZP lock: 25 cycles.)
@@ -209,21 +210,16 @@ extern "C" void dmc_chain_handler();
  * generated prologue saves all imaginary registers from the pre-interrupt
  * state and its epilogue + RTI close the interrupt correctly.
  *
+ * Use this variant when there are no intermediate DMC notes to advance on
+ * denial (single-note schedules, or when the chain is managed externally).
+ * For DMC chaining use ::FAST_LOCKED_IRQ_CHAINED instead.
+ *
  * @param gate_name  C identifier for the gate function (e.g. `HUD_GATE`).
  * @param lock       Symbol name of an `atomic bool` (or `volatile bool`)
  *                   readable with a single `lda` — ideally `direct` (ZP, 3 cy)
  *                   or absolute (4 cy).  NOT a pointer; the value itself.
  * @param target     The `id` passed to ::IRQ that defines the success handler
  *                   (e.g. `HUD` expands the jump to `irqHUD`).
- */
-/**
- * @brief Defines a fast-path IRQ gate with a no-op deny path.
- *
- * Deny path does `pla; rti` — 26 cycles total.  Use this variant when
- * there are no intermediate DMC notes to advance on denial (single-note
- * schedules, or when the chain is managed externally).
- *
- * For DMC chaining use ::FAST_LOCKED_IRQ_CHAINED instead.
  */
 #define FAST_LOCKED_IRQ(gate_name, lock, target)          \
     ASM_LINKAGE __attribute__((naked, used))              \
@@ -292,6 +288,10 @@ extern "C" void dmc_chain_handler();
 
 /**
  * @brief Schedule a cycle-counted IRQ on NES using silent DMC note chaining.
+ *
+ * @warning Currently a complete no-op stub on NES (see `src/nes/interrupts.cpp`).
+ * DMC note chaining is prototyped here and in ::FAST_LOCKED_IRQ_CHAINED but not
+ * yet implemented -- calling this does nothing on real NES hardware today.
  *
  * Arms the already-set gate (::SetIRQ) to fire after @p cycles CPU cycles.
  * Intermediate DMC notes are chained until the budget is consumed; each note
@@ -362,6 +362,65 @@ inline static void usr_main ()
 void nmi()
 
 /**
+ * @brief Enables the CPU interrupt line — a no-op off NES.
+ *
+ * @note This function does nothing on non-NES targets: the emu/console
+ * backends dispatch their scanline IRQ synchronously from the renderer, with
+ * no hardware interrupt line to mask in the first place. Declared so a
+ * ::RESET body written once (calling ::EnableInterrupts / ::DisableInterrupts
+ * around setup) compiles unchanged on every target.
+ */
+inline void EnableInterrupts()  {}
+
+/**
+ * @brief Disables the CPU interrupt line — a no-op off NES.
+ *
+ * @note This function does nothing on non-NES targets; see ::EnableInterrupts.
+ */
+inline void DisableInterrupts() {}
+
+/**
+ * @brief Non-NES declaration of ::FAST_LOCKED_IRQ's DMC-chain deny-path
+ *        target.
+ *
+ * @note This function does nothing on non-NES targets: there is no DMC
+ * hardware or cycle-counted IRQ chain to advance off NES. Declared so
+ * ::FAST_LOCKED_IRQ_CHAINED's @p on_deny argument (e.g. a call site passing
+ * `dmc_chain_handler`) resolves the same symbol on every target.
+ */
+extern "C" void dmc_chain_handler();
+
+/**
+ * @brief Non-NES equivalent of ::FAST_LOCKED_IRQ.
+ *
+ * There is no hardware interrupt line to gate off NES, so this collapses
+ * @p gate_name to a compile-time alias for @p target: `SetIRQ(gate_name)`
+ * then arms the same handler the NES gate would have jumped to directly.
+ *
+ * @param gate_name  Identifier usable with ::SetIRQ, same as on NES.
+ * @param lock       Unused on non-NES; accepted for API parity with NES.
+ * @param target     ::IRQ id to dispatch to.
+ */
+#define FAST_LOCKED_IRQ(gate_name, lock, target) \
+    static constexpr u8 gate_name = (target)
+
+/**
+ * @brief Non-NES equivalent of ::FAST_LOCKED_IRQ_CHAINED.
+ *
+ * Same non-NES behavior as ::FAST_LOCKED_IRQ: @p gate_name collapses to a
+ * compile-time alias for @p target. @p lock and @p on_deny are unused — there
+ * is no DMC chain to advance off NES (see ::dmc_chain_handler) — but are
+ * still accepted so a call site written once compiles on every target.
+ *
+ * @param gate_name  Identifier usable with ::SetIRQ, same as on NES.
+ * @param lock       Unused on non-NES; accepted for API parity with NES.
+ * @param target     ::IRQ id to dispatch to.
+ * @param on_deny    Unused on non-NES; accepted for API parity with NES.
+ */
+#define FAST_LOCKED_IRQ_CHAINED(gate_name, lock, target, on_deny) \
+    static constexpr u8 gate_name = (target)
+
+/**
  * @brief Handler id that ::ScheduleInterrupt will fire on non-NES targets.
  *
  * Set once at startup via ::SetIRQ.  ::ScheduleInterrupt combines this id
@@ -386,6 +445,13 @@ extern u8 scheduledIRQId;
 /**
  * @brief Schedule a position-based IRQ on non-NES targets.
  *
+ * @warning DMC-driven cycle scheduling is prototype-stage: the NES
+ * implementation of this function is currently a complete no-op stub, so
+ * nothing calls back through it there yet. This non-NES implementation does
+ * dispatch (by pixel position, as below), but it was written for API parity
+ * with that still-unfinished NES path -- treat the whole function as
+ * unstable until the NES side lands.
+ *
  * Arms the handler registered under ::scheduledIRQId (set by ::SetIRQ) to
  * fire when the renderer reaches pixel @p location.  On emu targets this
  * calls ::SetNextIRQHandler; on GBA/NDS the backend programs the hardware
@@ -403,6 +469,15 @@ void ScheduleInterrupt(irq_pos_t location, u16 cycles, volatile bool* ready = nu
 
 #endif
 
+/**
+ * @brief Soft-resets the application.
+ *
+ * On NES builds, re-enters through the hardware reset vector (`jmp ($FFFC)`),
+ * the same entry point a cold boot uses. On desktop builds, runs ::post to
+ * tear down SDL and audio, then calls `exit(0)`. Lets application code spin
+ * back to ::RESET on NES or quit cleanly on desktop from the same call site,
+ * with no `#ifdef` needed.
+ */
 void reset();
 
 #endif

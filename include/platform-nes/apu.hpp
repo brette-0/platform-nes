@@ -20,8 +20,11 @@
  *   }
  * @endcode
  *
- * Only available on NES builds: these addresses are hardware-mapped on the
- * 2A03 and meaningless on any other target.
+ * The 2A03 register addresses are hardware-mapped and meaningless off NES,
+ * so non-NES targets get an inert stand-in (see the class-level @note on
+ * ::apu below) instead of an absent header — this keeps ::PRESERVE /
+ * ::RESTORE / ::SHADOW call sites and direct `apu::` calls compiling
+ * unchanged on every target.
  */
 #ifndef APU_H
 #define APU_H
@@ -76,11 +79,18 @@ public:
 };
 
 /**
- * @brief PRESERVE/RESTORE family covering all APU write-only registers.
+ * @brief PRESERVE/RESTORE family covering APU registers except DMC timing.
  *
  * Expand this macro wherever ::PRESERVE / ::RESTORE / ::SHADOW expect a
- * comma-separated list of lvalues. It names every field of ::apu in the
- * same order as the struct definition.
+ * comma-separated list of lvalues. It names every field of ::apu except
+ * dmc_freq/dmc_raw/dmc_start/dmc_len, in the same order as the struct
+ * definition.
+ *
+ * DMC registers ($4010–$4013) are intentionally excluded: ::ScheduleInterrupt
+ * arms them mid-frame for split timing and they must survive the SHADOW block
+ * restore.  Callers that need to schedule an IRQ should call
+ * ::ScheduleInterrupt before or after the SHADOW block — the DMC state is
+ * never clobbered by PRESERVE/RESTORE.
  *
  * The companion `APU_REGISTERS_snapshot` array (defined in `src/nes/apu.cpp`,
  * declared `extern` below) is the flat byte storage that ::PRESERVE writes
@@ -88,20 +98,64 @@ public:
  * registers in this list exactly.
  *
  * @code
- *   PRESERVE(APU_REGISTERS);          // snapshot all 20 shadows, no poke
+ *   PRESERVE(APU_REGISTERS);          // snapshot all 16 shadows, no poke
  *   ScheduleInterrupt(loc, cycles, &ready);
  *   // ... in the ISR:
  *   if (*ready) RESTORE(APU_REGISTERS); // replay shadows + poke hardware
  * @endcode
  */
+#define APU_REGISTERS \
+    apu::sq1_vol,   apu::sq1_sweep, apu::sq1_lo,  apu::sq1_hi,  \
+    apu::sq2_vol,   apu::sq2_sweep, apu::sq2_lo,  apu::sq2_hi,  \
+    apu::tri_linear,apu::tri_lo,    apu::tri_hi,                 \
+    apu::noise_vol, apu::noise_lo,  apu::noise_hi,               \
+    apu::snd_chn,   apu::frame_counter
+
+/** @brief Flat snapshot storage for the ::APU_REGISTERS family (16 bytes). */
+extern u8 APU_REGISTERS_snapshot[16];
+
+#else
+
+#include <platform-nes/technology.hpp>
+
 /**
- * @brief PRESERVE/RESTORE family covering APU registers except DMC timing.
+ * @brief Desktop/non-NES stand-in for the 2A03 APU register file.
  *
- * DMC registers ($4010–$4013) are intentionally excluded: ::ScheduleInterrupt
- * arms them mid-frame for split timing and they must survive the SHADOW block
- * restore.  Callers that need to schedule an IRQ should call
- * ::ScheduleInterrupt before or after the SHADOW block — the DMC state is
- * never clobbered by PRESERVE/RESTORE.
+ * @note This class does nothing on non-NES targets: there is no 2A03 (or
+ * equivalent) hardware to address, and the desktop/console audio backends
+ * drive sound through FamiStudio/PCM mixing in audio.hpp instead, so no code
+ * here ever reads these values back. Each member is a plain in-memory byte
+ * with no hardware effect -- present purely so portable call sites (::IRQ
+ * handlers, ::PRESERVE / ::RESTORE / ::SHADOW over ::APU_REGISTERS, and direct
+ * calls like `apu::DisableFrameIRQ()`) compile unchanged across every target.
+ */
+class apu {
+public:
+    static u8 sq1_vol, sq1_sweep, sq1_lo, sq1_hi;
+    static u8 sq2_vol, sq2_sweep, sq2_lo, sq2_hi;
+    static u8 tri_linear, tri_lo, tri_hi;
+    static u8 noise_vol, noise_lo, noise_hi;
+    static u8 dmc_freq, dmc_raw, dmc_start, dmc_len;
+    static u8 snd_chn, frame_counter;
+
+    /** @brief Does nothing on non-NES targets; see the class-level @note. */
+    static void DisableFrameIRQ() {}
+    /** @brief Does nothing on non-NES targets; see the class-level @note. */
+    static void EnableFrameIRQ()  {}
+    /** @brief Does nothing on non-NES targets; see the class-level @note. */
+    static void EnableDMCIRQ()    {}
+    /** @brief Does nothing on non-NES targets; see the class-level @note. */
+    static void DisableDMCIRQ()   {}
+};
+
+/**
+ * @brief PRESERVE/RESTORE family covering APU registers except DMC timing —
+ *        same field list as the NES version, over the inert non-NES ::apu.
+ *
+ * @note Saving/restoring these fields does nothing observable on non-NES
+ * targets: they back no hardware and nothing reads them. Kept in lock-step
+ * with the NES field list so a `PRESERVE(APU_REGISTERS)` / `RESTORE(...)` call
+ * site needs no ifdefs.
  */
 #define APU_REGISTERS \
     apu::sq1_vol,   apu::sq1_sweep, apu::sq1_lo,  apu::sq1_hi,  \

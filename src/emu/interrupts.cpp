@@ -38,6 +38,8 @@ void ScheduleInterrupt(const irq_pos_t location, u16 /*cycles*/, volatile bool* 
     SetNextIRQHandler({ scheduledIRQId, location.x, location.y });
 }
 
+extern "C" void dmc_chain_handler() {}
+
 void reset() {
     post();
     exit(0);
