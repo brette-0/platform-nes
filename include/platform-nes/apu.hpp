@@ -79,18 +79,23 @@ public:
 };
 
 /**
- * @brief PRESERVE/RESTORE family covering APU registers except DMC timing.
+ * @brief PRESERVE/RESTORE family covering APU registers except DMC timing
+ *        and the channel-enable register.
  *
  * Expand this macro wherever ::PRESERVE / ::RESTORE / ::SHADOW expect a
  * comma-separated list of lvalues. It names every field of ::apu except
- * dmc_freq/dmc_raw/dmc_start/dmc_len, in the same order as the struct
- * definition.
+ * dmc_freq/dmc_raw/dmc_start/dmc_len and snd_chn, in the same order as the
+ * struct definition.
  *
- * DMC registers ($4010–$4013) are intentionally excluded: ::ScheduleInterrupt
- * arms them mid-frame for split timing and they must survive the SHADOW block
- * restore.  Callers that need to schedule an IRQ should call
- * ::ScheduleInterrupt before or after the SHADOW block — the DMC state is
- * never clobbered by PRESERVE/RESTORE.
+ * DMC registers ($4010–$4013) and snd_chn ($4015) are intentionally
+ * excluded: ::ScheduleInterrupt arms them mid-frame for split timing (each
+ * DMC chain note re-pokes snd_chn to restart playback) and they must survive
+ * a SHADOW block that happens to be open when a chain note's IRQ fires —
+ * SHADOW's own exit restores its entry-time snapshot of every register it
+ * covers, which would otherwise clobber the DMC-enable bit an in-flight
+ * chain note just set and hang the chain. Callers that need to schedule an
+ * IRQ should call ::ScheduleInterrupt before or after the SHADOW block — the
+ * DMC/snd_chn state is never clobbered by PRESERVE/RESTORE.
  *
  * The companion `APU_REGISTERS_snapshot` array (defined in `src/nes/apu.cpp`,
  * declared `extern` below) is the flat byte storage that ::PRESERVE writes
@@ -98,7 +103,7 @@ public:
  * registers in this list exactly.
  *
  * @code
- *   PRESERVE(APU_REGISTERS);          // snapshot all 16 shadows, no poke
+ *   PRESERVE(APU_REGISTERS);          // snapshot all 15 shadows, no poke
  *   ScheduleInterrupt(loc, cycles, &ready);
  *   // ... in the ISR:
  *   if (*ready) RESTORE(APU_REGISTERS); // replay shadows + poke hardware
@@ -109,10 +114,10 @@ public:
     apu::sq2_vol,   apu::sq2_sweep, apu::sq2_lo,  apu::sq2_hi,  \
     apu::tri_linear,apu::tri_lo,    apu::tri_hi,                 \
     apu::noise_vol, apu::noise_lo,  apu::noise_hi,               \
-    apu::snd_chn,   apu::frame_counter
+    apu::frame_counter
 
-/** @brief Flat snapshot storage for the ::APU_REGISTERS family (16 bytes). */
-extern u8 APU_REGISTERS_snapshot[16];
+/** @brief Flat snapshot storage for the ::APU_REGISTERS family (15 bytes). */
+extern u8 APU_REGISTERS_snapshot[15];
 
 #else
 
@@ -149,8 +154,9 @@ public:
 };
 
 /**
- * @brief PRESERVE/RESTORE family covering APU registers except DMC timing —
- *        same field list as the NES version, over the inert non-NES ::apu.
+ * @brief PRESERVE/RESTORE family covering APU registers except DMC timing
+ *        and snd_chn — same field list as the NES version, over the inert
+ *        non-NES ::apu.
  *
  * @note Saving/restoring these fields does nothing observable on non-NES
  * targets: they back no hardware and nothing reads them. Kept in lock-step
@@ -162,10 +168,10 @@ public:
     apu::sq2_vol,   apu::sq2_sweep, apu::sq2_lo,  apu::sq2_hi,  \
     apu::tri_linear,apu::tri_lo,    apu::tri_hi,                 \
     apu::noise_vol, apu::noise_lo,  apu::noise_hi,               \
-    apu::snd_chn,   apu::frame_counter
+    apu::frame_counter
 
-/** @brief Flat snapshot storage for the ::APU_REGISTERS family (16 bytes). */
-extern u8 APU_REGISTERS_snapshot[16];
+/** @brief Flat snapshot storage for the ::APU_REGISTERS family (15 bytes). */
+extern u8 APU_REGISTERS_snapshot[15];
 
 #endif // TARGET_NES
 #endif // APU_H

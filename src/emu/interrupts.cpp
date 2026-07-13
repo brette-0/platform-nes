@@ -34,7 +34,7 @@ void RegisterIRQHandler(const u8 id, const irq_handler_fn fn) {
     if (static_cast<size_t>(id) + 1 > irqTableCount) irqTableCount = static_cast<size_t>(id) + 1;
 }
 
-void ScheduleInterrupt(const irq_pos_t location, u16 /*cycles*/, volatile bool* /*ready*/) {
+void ScheduleInterrupt(const irq_pos_t location, u32 /*cycles*/, volatile bool* /*ready*/) {
     SetNextIRQHandler({ scheduledIRQId, location.x, location.y });
 }
 

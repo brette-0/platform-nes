@@ -14,20 +14,19 @@
 #include "level/player.hpp"
 
 #include "technology.hpp"
-#include "platform-nes/apu.hpp"
-#include "platform-nes/mappers/vrc1.hpp"
+#include <platform-nes/apu.hpp>
+#include <platform-nes/mappers/vrc1.hpp>
 
 using namespace demo;
 
 // On NES, IRQ ids are purely textual (pasted into `irq<id>` / an asm jump
-// target), so ::FAST_LOCKED_IRQ_CHAINED and ::IRQ never evaluate `HUD` as a
-// value there. Off NES both macros *do* evaluate it (RegisterIRQHandler's
-// argument, the gate's constexpr alias), so it needs to be a real id here.
+// target), so ::IRQ never evaluates `HUD` as a value there. Off NES it
+// *does* evaluate it (RegisterIRQHandler's argument), so it needs to be a
+// real id here.
 #ifndef TARGET_NES
 constexpr u8 HUD = 0;
 #endif
 
-extern "C" __attribute__((used)) volatile bool HUDGateLock = false;
 volatile bool nmi_done;
 
 u8 port1;
@@ -36,7 +35,21 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
-FAST_LOCKED_IRQ_CHAINED(HUD_GATE, HUDGateLock, HUD, dmc_chain_handler);
+#ifdef TARGET_NES
+// Forward-declared so RESET can arm it directly via SetIRQ. No gate: a
+// single DMC note always covers the whole HUD-split wait (see
+// ScheduleInterrupt), so every DMC IRQ that fires is the real one.
+ASM_LINKAGE void irqHUD();
+#endif
+
+// Cycle budget NMI hands to ScheduleInterrupt: a rough estimate of "from the
+// end of NMI's own VRAM-write work to somewhere around the start of the next
+// frame's active picture" -- rudimentary and approximate by design. IRQ(HUD)
+// does the actual precise sync (spin-wait for the real sprite-0 hit) once it
+// fires, so undershooting/overshooting this a bit just changes how long that
+// spin-wait ends up being, not correctness. Tune against hardware if the
+// split lands visibly late.
+constexpr u32 kHudSplitCycles = 2000;
 
 // ---------------------------------------------------------------------------
 // Deferred VRAM tile-write stack (coin pickups)
@@ -129,7 +142,11 @@ RESET {
         reset();    // spin reset on NES, exit on SDL3
     }
 
-    SetIRQ(HUD_GATE);   // fast exit locked IRQ
+#ifdef TARGET_NES
+    SetIRQ(irqHUD);     // single-note DMC IRQ dispatches straight here, no gate
+#else
+    SetIRQ(HUD);
+#endif
 
     ppu::Flush(chrHUDWhitespace_tile, 0x11);
 
@@ -218,26 +235,10 @@ RESET {
 #endif
         }
 
-#if TARGET_NES
-        // Stage 1: wait for the previous frame's hit flag to clear (pre-render scanline).
-        // Without this, NMI exits while the stale flag is still set and the poll
-        // below returns immediately, arming the DMC in VBlank instead of at scanline 1.
-        while (*reinterpret_cast<volatile u8*>(0x2002) & 0x40) {}
-        // Stage 2: wait for this frame's sprite-0 hit.
-        while (!(*reinterpret_cast<volatile u8*>(0x2002) & 0x40)) {}
-#endif
-        // Poll controllers BEFORE arming the DMC — the DMC DMA byte-fetch steal
-        // happens immediately after $4015 is poked and can corrupt a concurrent
-        // $4016/$4017 read, shifting the joypad shift register by one bit.
         lastPort1 = port1; lastPort2 = port2;
         PollControllers(&port1, &port2);
 
-        HUDGateLock = false;
-        ScheduleInterrupt({0, 16}, 1700, &HUDGateLock);
-
         SHADOW (APU_REGISTERS) {
-            spriteZeroHandled = 1;
-
             ppu::SetColorPriority(0x40);   // green band:        player1.Update
             player1.Update();
 #ifdef PLAYER2_SUPPORTED
@@ -249,7 +250,7 @@ RESET {
             level::ColMapTrack(cameraX >> 4);
         }
 
-        OAMBuffer[0] = { 0, chrSprite0_tile, 0, 0 };   // re-assert after player update
+        OAMBuffer[0] = { 7, chrSprite0_tile, 0, 0 };   // re-assert after player update
 
         ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
         //AudioUpdate();
@@ -308,6 +309,11 @@ NMI {
 
     ppu::SetColorPriority(0);
 
+    // Arm the HUD-split IRQ from here, so it fires (via IRQ(HUD)) sometime
+    // in the upcoming frame; IRQ(HUD) itself spin-waits for the precise
+    // sprite-0 hit once it fires, then applies the split.
+    ScheduleInterrupt({0, 16}, kHudSplitCycles);
+
     nmi_done = true;
 }
 
@@ -331,9 +337,9 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-IRQ (HUD) {
-    HUDGateLock = false;
-    apu::DisableDMCIRQ();
+// Reaction passed to ::WaitThenReactToSpriteZero below: the actual HUD
+// split, applied once the beam is confirmed at (0, 16).
+static void ApplyHudSplit() {
     #if defined(TARGET_NDS) || defined(TARGET_GBA)
         // --- cropped-panel vertical follow camera --------------------------------
         // The DS (256x192) and GBA (240x160) panels are shorter than the NES frame
@@ -357,4 +363,14 @@ IRQ (HUD) {
     #else
         ppu::SetScroll(cameraX, 16);
     #endif
+}
+
+IRQ (HUD) {
+    apu::DisableDMCIRQ();
+
+    // The DMC note only gets us close; WaitThenReactToSpriteZero does the
+    // precise sync to this frame's real sprite-0 hit before applying the
+    // split. spriteZeroHandled is NMI's latch -- reset to 0 there every
+    // frame, so this runs exactly once per frame.
+    WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
 }

@@ -6,6 +6,14 @@
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-debug/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-release/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-release/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-debug/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-debug/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-release/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-release/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-gba-debug/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-gba-debug/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-gba-release/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-gba-release/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-gc-debug/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-gc-debug/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-gc-release/_deps/intsh-src" vcs="Git" />
@@ -18,10 +26,16 @@
     <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/libusb_cmake-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/sdl3-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nds-debug/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nds-debug/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nds-release/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nds-release/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-nes-debug/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-nes-debug/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-nes-release/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-nes-release/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nes-verify/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-nes-verify/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-switch-debug/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-switch-debug/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-switch-release/_deps/intsh-src" vcs="Git" />

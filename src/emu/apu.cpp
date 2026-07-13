@@ -7,4 +7,4 @@ u8 apu::noise_vol, apu::noise_lo, apu::noise_hi;
 u8 apu::dmc_freq, apu::dmc_raw, apu::dmc_start, apu::dmc_len;
 u8 apu::snd_chn, apu::frame_counter;
 
-u8 APU_REGISTERS_snapshot[16];
+u8 APU_REGISTERS_snapshot[15];

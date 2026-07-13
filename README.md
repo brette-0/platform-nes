@@ -23,6 +23,9 @@ Which will demonstrate how you can easily begin using this project.
 > **SDL3**:
 >   1. SDL3
 >      1. libusb (linux only)
+> 
+> **3ds/dsi/ds/gba/wiiu/3ds/switch**
+>   1. devKitPro 
 
 
 ## Current Targets:
@@ -36,6 +39,10 @@ Which will demonstrate how you can easily begin using this project.
 - Mac
 - Linux
 - Web Assembly
+
+## Supported Cartridges
+- NROM
+- VRC1
 
 
 ## Planned Updates:

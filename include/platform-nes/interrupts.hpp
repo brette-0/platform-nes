@@ -184,13 +184,14 @@ void nmi()
 extern "C" void (*irqTrampoline)();
 
 /**
- * @brief Naked DMC chain advance handler — the deny-path trampoline for
- *        ::FAST_LOCKED_IRQ_CHAINED.
+ * @brief Inert deny-path trampoline for ::FAST_LOCKED_IRQ_CHAINED.
  *
- * Called directly (via `jmp`) from the gate's deny path.  Arms the next
- * queued DMC note, advances the chain index, and on the final note sets
- * the gate's lock flag so the next IRQ dispatches instead of denying.
- * Does NOT touch irqTrampoline — the gate stays armed at all times.
+ * @note ::ScheduleInterrupt always resolves in a single DMC note now (its
+ * sample-length register alone reaches ~13.9M cycles), so a gate armed via
+ * plain ::SetIRQ never denies and this is never actually entered. Kept as a
+ * valid, naked `rti` stub purely so ::FAST_LOCKED_IRQ_CHAINED remains usable
+ * on its own terms — e.g. by something that wants a real note-to-note chain
+ * for its own reasons — without requiring a from-scratch on_deny target.
  */
 extern "C" void dmc_chain_handler();
 
@@ -247,7 +248,7 @@ extern "C" void dmc_chain_handler();
  * gate; all intermediate and final DMC IRQs go through the same deny/dispatch
  * test.
  *
- * Deny path (intermediate):  26 cy (gate) + ~63 cy (chain handler) = ~89 cy.
+ * Deny path (intermediate):  26 cy (gate) + on_deny's own cost.
  * Deny path (final note):     sets lock=true so the NEXT fire dispatches.
  * Dispatch path:              identical to ::FAST_LOCKED_IRQ.
  *
@@ -255,7 +256,9 @@ extern "C" void dmc_chain_handler();
  * @param lock       Symbol of the `volatile bool` gate lock (true = dispatch).
  * @param target     ::IRQ id whose handler fires on dispatch.
  * @param on_deny    C symbol to jump to on denial; must be ::dmc_chain_handler
- *                   or a compatible naked function that saves/restores A and RTIs.
+ *                   or a compatible function safe to enter via `jmp` mid-
+ *                   interrupt (naked and self-managing, or `interrupt_norecurse`
+ *                   like ::dmc_chain_handler) that saves/restores A and RTIs.
  */
 #define FAST_LOCKED_IRQ_CHAINED(gate_name, lock, target, on_deny) \
     ASM_LINKAGE __attribute__((naked, used))              \
@@ -287,28 +290,29 @@ extern "C" void dmc_chain_handler();
 #define SetIRQ(gate) (irqTrampoline = &(gate))
 
 /**
- * @brief Schedule a cycle-counted IRQ on NES using silent DMC note chaining.
+ * @brief Schedule a cycle-counted IRQ on NES using a single silent DMC note.
  *
- * @warning Currently a complete no-op stub on NES (see `src/nes/interrupts.cpp`).
- * DMC note chaining is prototyped here and in ::FAST_LOCKED_IRQ_CHAINED but not
- * yet implemented -- calling this does nothing on real NES hardware today.
- *
- * Arms the already-set gate (::SetIRQ) to fire after @p cycles CPU cycles.
- * Intermediate DMC notes are chained until the budget is consumed; each note
- * fires the gate whose fast-path denial costs 26 cycles and whose ready path
- * jumps into the registered handler.  The optional @p ready flag is set to
- * true by the final note's completion so the gate can distinguish intermediate
- * chain pops from the real target scanline.
+ * @note Rudimentary by design: the note's duration is picked from the 2A03's
+ * 16-entry rate table (one byte) or, for longer waits, by stretching the
+ * sample length (full 8-bit $4013, up to ~13.9M cycles total) in coarse
+ * 16-byte steps — either way @p cycles is approximated, not hit exactly. One
+ * note always covers the whole budget (no chaining), so call sites arm the
+ * target handler directly via plain ::SetIRQ — no gate, no lock flag.
+ * Because of the approximation, the usual pattern is to call this from
+ * ::NMI with a budget that gets things roughly to where they need to be, and
+ * have the target ::IRQ handler do its own precise sync (e.g. a sprite-0
+ * spin-wait) once it fires — see the demo's HUD-split IRQ for a worked
+ * example.
  *
  * @p location is unused on NES (the cycle count controls timing); it is
  * present for API parity with non-NES targets so call sites need no ifdefs.
  *
  * @param location  Target scanline position {x, y} in pixels (non-NES only).
  * @param cycles    CPU cycle budget from now until the IRQ should fire.
- * @param ready     Optional lock flag set true when the final note fires.
- *                  The gate tests this to decide deny vs. dispatch.
+ * @param ready     Optional flag set true once the note is armed; purely
+ *                  informational now that dispatch has no gate to test it.
  */
-void ScheduleInterrupt(irq_pos_t location, u16 cycles, volatile bool* ready = nullptr);
+void ScheduleInterrupt(irq_pos_t location, u32 cycles, volatile bool* ready = nullptr);
 
 #else
 
@@ -445,12 +449,9 @@ extern u8 scheduledIRQId;
 /**
  * @brief Schedule a position-based IRQ on non-NES targets.
  *
- * @warning DMC-driven cycle scheduling is prototype-stage: the NES
- * implementation of this function is currently a complete no-op stub, so
- * nothing calls back through it there yet. This non-NES implementation does
- * dispatch (by pixel position, as below), but it was written for API parity
- * with that still-unfinished NES path -- treat the whole function as
- * unstable until the NES side lands.
+ * @note Written for API parity with the NES implementation, which drives
+ * timing from a single rudimentary DMC note (see the NES overload's docs)
+ * rather than this function's pixel-position dispatch.
  *
  * Arms the handler registered under ::scheduledIRQId (set by ::SetIRQ) to
  * fire when the renderer reaches pixel @p location.  On emu targets this
@@ -462,10 +463,9 @@ extern u8 scheduledIRQId;
  *
  * @param location  Target pixel coordinate {x, y} at which the IRQ fires.
  * @param cycles    CPU cycle budget (NES only; ignored here).
- * @param ready     Unused on non-NES (no gate lock needed); accepted for
- *                  API parity.
+ * @param ready     Unused on non-NES; accepted for API parity.
  */
-void ScheduleInterrupt(irq_pos_t location, u16 cycles, volatile bool* ready = nullptr);
+void ScheduleInterrupt(irq_pos_t location, u32 cycles, volatile bool* ready = nullptr);
 
 #endif
 
