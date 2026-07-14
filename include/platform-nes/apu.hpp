@@ -11,13 +11,10 @@
  *
  * @code
  *   PRESERVE(APU_REGISTERS);
- *   ScheduleInterrupt(loc, steps, &ready);
- *   // ... APU is now free for timing use ...
+ *   // ... APU is now free for other use ...
  *
  *   // inside the IRQ handler:
- *   if (*ready) {
- *       RESTORE(APU_REGISTERS);
- *   }
+ *   RESTORE(APU_REGISTERS);
  * @endcode
  *
  * The 2A03 register addresses are hardware-mapped and meaningless off NES,
@@ -85,17 +82,9 @@ public:
  * Expand this macro wherever ::PRESERVE / ::RESTORE / ::SHADOW expect a
  * comma-separated list of lvalues. It names every field of ::apu except
  * dmc_freq/dmc_raw/dmc_start/dmc_len and snd_chn, in the same order as the
- * struct definition.
- *
- * DMC registers ($4010–$4013) and snd_chn ($4015) are intentionally
- * excluded: ::ScheduleInterrupt arms them mid-frame for split timing (each
- * DMC chain note re-pokes snd_chn to restart playback) and they must survive
- * a SHADOW block that happens to be open when a chain note's IRQ fires —
- * SHADOW's own exit restores its entry-time snapshot of every register it
- * covers, which would otherwise clobber the DMC-enable bit an in-flight
- * chain note just set and hang the chain. Callers that need to schedule an
- * IRQ should call ::ScheduleInterrupt before or after the SHADOW block — the
- * DMC/snd_chn state is never clobbered by PRESERVE/RESTORE.
+ * struct definition. DMC/snd_chn are kept out of this family since they're
+ * hardware-distinct from the melodic channels (sample playback and channel
+ * enables, not tone generation) and are managed directly where needed.
  *
  * The companion `APU_REGISTERS_snapshot` array (defined in `src/nes/apu.cpp`,
  * declared `extern` below) is the flat byte storage that ::PRESERVE writes
@@ -103,10 +92,9 @@ public:
  * registers in this list exactly.
  *
  * @code
- *   PRESERVE(APU_REGISTERS);          // snapshot all 15 shadows, no poke
- *   ScheduleInterrupt(loc, steps, &ready);
+ *   PRESERVE(APU_REGISTERS);   // snapshot all 15 shadows, no poke
  *   // ... in the ISR:
- *   if (*ready) RESTORE(APU_REGISTERS); // replay shadows + poke hardware
+ *   RESTORE(APU_REGISTERS);    // replay shadows + poke hardware
  * @endcode
  */
 #define APU_REGISTERS \

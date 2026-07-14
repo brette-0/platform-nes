@@ -27,31 +27,9 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
-// Forward-declared so the gate below and RESET can both see it.
-interrupt HUD_IRQ();
-
-// A single one-byte DMC note fires almost immediately regardless of rate
-// (see ScheduleInterrupt's doc for why), so hitting a useful multi-thousand-
-// cycle budget needs an actual chain of notes -- this gate is the dispatch
-// side of that chain. On denial (chain not finished) it jumps to
-// dmc_chain_handler, which re-arms the next note; once ScheduleInterrupt's
-// `steps` count of links is exhausted, dmcChainLock is set and the next
-// fire dispatches straight to HUD_IRQ.
-FAST_LOCKED_IRQ_CHAINED(HUD_GATE, dmcChainLock, HUD_IRQ, dmc_chain_handler);
-
-// Step budget NMI hands to ScheduleInterrupt: how many one-byte DMC notes to
-// chain before HUD_GATE dispatches to HUD_IRQ. HUD_IRQ's
-// WaitThenReactToSpriteZero always fires at the exact same hardware instant
-// (the real sprite-0 hit) no matter when it starts polling for it, so this
-// value does NOT move where the split visually lands -- it only controls how
-// much of the frame gets wasted busy-polling before the hit (undershoot) or
-// whether polling starts too late and misses the hit entirely, which stalls
-// nearly a full extra frame waiting for the stale flag to clear (overshoot).
-// Each link costs roughly 280-320 DMA-dominated cycles plus re-arm overhead;
-// this starting value is an estimate, not a measured constant -- tune it by
-// watching hudIrqSpinCount (see below) shrink toward a couple of scanlines'
-// worth of iterations, not zero.
-constexpr u8 kHudSplitSteps = 4;
+// Forward-declared so NMI can call it directly once the real sprite-0 hit
+// lands (see WaitThenReactToSpriteZero in NMI).
+static void ApplyHudSplit();
 
 // ---------------------------------------------------------------------------
 // Deferred VRAM tile-write stack (coin pickups)
@@ -144,16 +122,14 @@ RESET {
         reset();    // spin reset on NES, exit on SDL3
     }
 
-    SetIRQ(HUD_GATE);    // chained-note DMC IRQ dispatches to HUD_IRQ once the chain completes
-
     ppu::Flush(chrHUDWhitespace_tile, 0x11);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
     // Sprite-0 hit anchor: placed at OAM (0,0) → renders at scanline 1 pixel 1
-    // due to the OAM Y+1 offset.  The hit fires at a fixed PPU dot each frame,
-    // giving ScheduleInterrupt a cycle-accurate arm point independent of game
-    // logic duration.  Requires a non-transparent BG pixel at nametable (0,0).
+    // due to the OAM Y+1 offset.  The hit fires at a fixed PPU dot each frame;
+    // NMI spin-waits for it directly (see WaitThenReactToSpriteZero below).
+    // Requires a non-transparent BG pixel at nametable (0,0).
     OAMBuffer[0] = { 0, chrSprite0_tile, 0, 0 };
 
     // fill in with mario metatiles
@@ -233,9 +209,6 @@ RESET {
 #endif
         }
 
-        lastPort1 = port1; lastPort2 = port2;
-        PollControllers(&port1, &port2);
-
         ppu::SetColorPriority(0x40);   // green band:        player1.Update
         player1.Update();
 #ifdef PLAYER2_SUPPORTED
@@ -249,10 +222,7 @@ RESET {
         OAMBuffer[0] = { 7, chrSprite0_tile, 0, 0 };   // re-assert after player update
 
         ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
-        //AudioUpdate();
-        // fms does not shadow apu regs in a standarized way
-        // meaning that its not compatible with our wo reg shadow model
-        // need to look into this in a big way
+        AudioUpdate();
         ppu::SetColorPriority(0);
 
         video::WaitForPresent();
@@ -265,10 +235,8 @@ RESET {
 }
 
 NMI {
-    // Arm the HUD-split IRQ from here, so it fires (via HUD_IRQ) sometime
-    // in the upcoming frame; HUD_IRQ itself spin-waits for the precise
-    // sprite-0 hit once it fires, then applies the split.
-    ScheduleInterrupt({0, 16}, kHudSplitSteps);
+    lastPort1 = port1; lastPort2 = port2;
+    PollControllers(&port1, &port2);
     oam::RefreshSprites(OAMBuffer);
 
     spriteZeroHandled = 0;
@@ -309,6 +277,13 @@ NMI {
 
     ppu::SetColorPriority(0);
 
+    // Plain, synchronous wait for the real sprite-0 hit (fires at a fixed PPU
+    // dot every frame), then apply the HUD split. Blocks NMI well past
+    // vblank into the active picture -- that's fine, the PPU keeps rendering
+    // with whatever scroll is currently set regardless of what the CPU is
+    // doing, and the main loop is already just polling nmi_done.
+    WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
+
     nmi_done = true;
 }
 
@@ -332,35 +307,8 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-// The actual HUD split -- called directly from HUD_IRQ the instant its DMC
-// note fires, so ScheduleInterrupt's step count is the only thing that
-// decides when this runs.
-#ifdef TARGET_NES
-// Diagnostic: counts busy-poll iterations spent waiting for the real
-// sprite-0 hit after this frame's DMC IRQ fires. If a higher `steps` really
-// does move the DMC note's completion later in the frame (which is the
-// whole point of ScheduleInterrupt's argument), this count should shrink as
-// kHudSplitSteps rises -- HUD_IRQ starts polling later, closer to the real
-// hit -- independent of the split's on-screen position, which WaitThen-
-// ReactToSpriteZero deliberately pins to the same scanline regardless.
-// Watch hudIrqSpinCount directly (RAM watch / debugger) to confirm the DMC
-// timing is actually changing without depending on anything visual.
-u16 hudIrqSpinCount;
-
-static void WaitThenReactToSpriteZeroCounted(void (*fn)(), atomic u8* latch) {
-    while (!*latch) {
-        u16 count = 0;
-        while (  peek(ppu::raw::PPUSTATUS) & 0x40)  { ++count; }  // wait for pre-render to clear stale hit
-        while (!(peek(ppu::raw::PPUSTATUS) & 0x40)) { ++count; }  // wait for actual sprite 0 hit
-        hudIrqSpinCount = count;
-        fn();
-        *latch = true;
-    }
-}
-#endif
-
-// Reaction passed to ::WaitThenReactToSpriteZero below: the actual HUD
-// split, applied once the beam is confirmed at (0, 16).
+// Reaction passed to ::WaitThenReactToSpriteZero (called directly from NMI):
+// the actual HUD split, applied once the beam is confirmed at (0, 16).
 static void ApplyHudSplit() {
     #if defined(TARGET_NDS) || defined(TARGET_GBA)
         // --- cropped-panel vertical follow camera --------------------------------
@@ -387,17 +335,3 @@ static void ApplyHudSplit() {
     #endif
 }
 
-
-interrupt HUD_IRQ() {
-    apu::DisableDMCIRQ();
-
-    // The DMC note only gets us close; WaitThenReactToSpriteZero does the
-    // precise sync to this frame's real sprite-0 hit before applying the
-    // split. spriteZeroHandled is NMI's latch -- reset to 0 there every
-    // frame, so this runs exactly once per frame.
-#ifdef TARGET_NES
-    WaitThenReactToSpriteZeroCounted(ApplyHudSplit, &spriteZeroHandled);
-#else
-    WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
-#endif
-}

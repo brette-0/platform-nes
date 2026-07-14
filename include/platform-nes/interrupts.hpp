@@ -46,9 +46,6 @@ using namespace br0::intsh;
 #define interrupt void
 #endif
 
-/** @brief Pixel coordinate used by ::ScheduleInterrupt (x, y in pixels). */
-struct irq_pos_t { u16 x; u16 y; };
-
 #ifndef TARGET_NES
 
 /** @brief Signature of an IRQ handler (no arguments, no return value). */
@@ -151,31 +148,6 @@ void nmi()
 extern "C" void (*irqTrampoline)();
 
 /**
- * @brief Deny-path target for ::FAST_LOCKED_IRQ_CHAINED: advances the DMC
- *        chain ::ScheduleInterrupt uses to build up a multi-note delay.
- *
- * @note A single-byte DMC note's IRQ fires almost immediately after arming
- * (bytes-remaining hits zero at DMA fetch time, not after the byte's
- * rate-gated playback), independent of the rate register — so one note
- * alone can't produce a useful, tunable delay. This re-arms a fresh
- * one-byte note and counts down a caller-set budget (::ScheduleInterrupt's
- * `steps`); once the count reaches zero it sets ::dmcChainLock so the next
- * fire dispatches to the real handler instead of denying again.
- */
-extern "C" void dmc_chain_handler();
-
-/**
- * @brief Chain lock read by a ::FAST_LOCKED_IRQ_CHAINED gate armed via
- *        ::ScheduleInterrupt.
- *
- * Clear while ::dmc_chain_handler is still re-arming notes; set once the
- * requested chain length is reached, so the gate dispatches to its target
- * on the next DMC IRQ. Pass this symbol as a ::FAST_LOCKED_IRQ_CHAINED
- * gate's `lock` argument.
- */
-extern "C" volatile bool dmcChainLock;
-
-/**
  * @brief Defines a fast-path IRQ gate with a no-op deny path.
  *
  * Emits a naked, C-linkage function `gate_name` suitable for use with ::SetIRQ.
@@ -191,11 +163,7 @@ extern "C" volatile bool dmcChainLock;
  * saves all imaginary registers from the pre-interrupt state and its
  * epilogue + RTI close the interrupt correctly.
  *
- * Use this variant when there are no intermediate DMC notes to advance on
- * denial (single-note schedules, or when the chain is managed externally).
- * For DMC chaining use ::FAST_LOCKED_IRQ_CHAINED instead.
- *
- * @param gate_name  C identifier for the gate function (e.g. `HUD_GATE`).
+ * @param gate_name  C identifier for the gate function (e.g. `MY_GATE`).
  * @param lock       Symbol name of an `atomic bool` (or `volatile bool`)
  *                   readable with a single `lda` — ideally `direct` (ZP, 3 cy)
  *                   or absolute (4 cy).  NOT a pointer; the value itself.
@@ -220,45 +188,6 @@ extern "C" volatile bool dmcChainLock;
     }
 
 /**
- * @brief Defines a fast-path IRQ gate whose deny path advances a DMC chain.
- *
- * Same dispatch path as ::FAST_LOCKED_IRQ.  On denial (lock not set), instead
- * of `rti`, restores A and jumps to ::dmc_chain_handler, which arms the next
- * note, advances the chain index, and — on the final note — sets the lock so
- * the next fire dispatches.  irqTrampoline is NEVER redirected away from the
- * gate; all intermediate and final DMC IRQs go through the same deny/dispatch
- * test.
- *
- * Deny path (intermediate):  26 cy (gate) + on_deny's own cost.
- * Deny path (final note):     sets lock=true so the NEXT fire dispatches.
- * Dispatch path:              identical to ::FAST_LOCKED_IRQ.
- *
- * @param gate_name  C identifier for the gate function.
- * @param lock       Symbol of the `volatile bool` gate lock (true = dispatch).
- * @param target     C identifier of the handler that fires on dispatch (see
- *                   ::FAST_LOCKED_IRQ).
- * @param on_deny    C symbol to jump to on denial; must be ::dmc_chain_handler
- *                   or a compatible function safe to enter via `jmp` mid-
- *                   interrupt (naked and self-managing, or `interrupt_norecurse`
- *                   like ::dmc_chain_handler) that saves/restores A and RTIs.
- */
-#define FAST_LOCKED_IRQ_CHAINED(gate_name, lock, target, on_deny) \
-    ASM_LINKAGE __attribute__((naked, used))              \
-    void gate_name() {                                    \
-        __asm__ (                                         \
-            "pha\n\t"              /* 3 cy: save A        */ \
-            "lda $4015\n\t"        /* 4 cy: ack DMC IRQ   */ \
-            "lda " #lock "\n\t"    /* 3-4 cy: read lock   */ \
-            "bne 1f\n\t"           /* 2 cy: not ready     */ \
-            "pla\n\t"              /* 4 cy: restore A     */ \
-            "jmp " #on_deny "\n\t" /* 3 cy: advance chain */ \
-            "1:\n\t"                                         \
-            "pla\n\t"              /* 4 cy: restore A     */ \
-            "jmp " #target         /* 3 cy: jump in       */ \
-        );                                                \
-    }
-
-/**
  * @brief Arms a ::FAST_LOCKED_IRQ gate (or any naked IRQ function) as the
  *        target of the hardware IRQ vector for this frame.
  *
@@ -270,38 +199,6 @@ extern "C" volatile bool dmcChainLock;
  *              C-linkage IRQ function) to arm.
  */
 #define SetIRQ(gate) (irqTrampoline = &(gate))
-
-/**
- * @brief Schedule a chained-DMC-note IRQ on NES.
- *
- * @note A single one-byte DMC note's IRQ fires almost immediately after
- * arming — bytes-remaining hits zero at DMA fetch time, not after the
- * byte's rate-gated playback — so the rate register can't move it, and the
- * length register can't express anything between 1 byte and 17 (16*L+1),
- * whose minimum delay (7344+ cycles) is too coarse for a few-thousand-cycle
- * budget. So @p steps is not a rate index: it's how many one-byte notes to
- * chain back to back via ::FAST_LOCKED_IRQ_CHAINED / ::dmc_chain_handler
- * before dispatching to the real handler. Each link costs roughly the same
- * small, DMA-dominated ~280-320 cycles plus the chain handler's own re-arm
- * overhead, so total delay is approximately linear in @p steps but not an
- * exact hardware constant — calibrate empirically against the target (see
- * the demo's HUD-split IRQ, which exposes a spin-wait iteration count for
- * exactly this). The call site must arm ::SetIRQ with a
- * ::FAST_LOCKED_IRQ_CHAINED gate (lock = ::dmcChainLock, on_deny =
- * ::dmc_chain_handler), not the plain target handler directly — see the
- * demo's HUD-split IRQ for a worked example.
- *
- * @p location is unused on NES (the step count controls timing); it is
- * present for API parity with non-NES targets so call sites need no ifdefs.
- *
- * @param location  Target scanline position {x, y} in pixels (non-NES only).
- * @param steps     Number of one-byte DMC notes to chain before dispatching
- *                  to the real handler (0 = dispatch on the very first
- *                  note, no chaining).
- * @param ready     Optional flag set true once the note is armed; purely
- *                  informational now that dispatch has no gate to test it.
- */
-void ScheduleInterrupt(irq_pos_t location, u8 steps, volatile bool* ready = nullptr);
 
 #else
 
@@ -373,17 +270,6 @@ inline void EnableInterrupts()  {}
 inline void DisableInterrupts() {}
 
 /**
- * @brief Non-NES declaration of ::FAST_LOCKED_IRQ's DMC-chain deny-path
- *        target.
- *
- * @note This function does nothing on non-NES targets: there is no DMC
- * hardware or cycle-counted IRQ chain to advance off NES. Declared so
- * ::FAST_LOCKED_IRQ_CHAINED's @p on_deny argument (e.g. a call site passing
- * `dmc_chain_handler`) resolves the same symbol on every target.
- */
-extern "C" void dmc_chain_handler();
-
-/**
  * @brief Non-NES equivalent of ::FAST_LOCKED_IRQ.
  *
  * There is no hardware interrupt line to gate off NES, so this collapses
@@ -398,60 +284,22 @@ extern "C" void dmc_chain_handler();
     static constexpr irq_handler_fn gate_name = (target)
 
 /**
- * @brief Non-NES equivalent of ::FAST_LOCKED_IRQ_CHAINED.
+ * @brief Handler armed via ::SetIRQ on non-NES targets.
  *
- * Same non-NES behavior as ::FAST_LOCKED_IRQ: @p gate_name collapses to a
- * compile-time alias for @p target. @p lock and @p on_deny are unused — there
- * is no DMC chain to advance off NES (see ::dmc_chain_handler) — but are
- * still accepted so a call site written once compiles on every target.
- *
- * @param gate_name  Identifier usable with ::SetIRQ, same as on NES.
- * @param lock       Unused on non-NES; accepted for API parity with NES.
- * @param target     Handler function to dispatch to.
- * @param on_deny    Unused on non-NES; accepted for API parity with NES.
- */
-#define FAST_LOCKED_IRQ_CHAINED(gate_name, lock, target, on_deny) \
-    static constexpr irq_handler_fn gate_name = (target)
-
-/**
- * @brief Handler ::ScheduleInterrupt will fire on non-NES targets.
- *
- * Set once at startup via ::SetIRQ.  ::ScheduleInterrupt combines this
- * pointer with the pixel position it receives to arm the pending IRQ event
- * (or the platform's own scanline-IRQ mechanism on GBA/NDS/etc.).
+ * Set once at startup via ::SetIRQ. Available for a call site that wants
+ * position-based scanline dispatch (see ::SetNextIRQHandler / ::irqPending)
+ * without needing NES-specific gate machinery.
  */
 extern irq_handler_fn scheduledIRQHandler;
 
 /**
- * @brief Registers the handler that ::ScheduleInterrupt will fire.
+ * @brief Registers the handler armed via ::SetIRQ on non-NES targets.
  *
- * Non-NES equivalent of the NES ::SetIRQ(gate) macro.  Call once at startup
- * with the handler function for the split.
+ * Non-NES equivalent of the NES ::SetIRQ(gate) macro.
  *
  * @param fn  Handler function to arm.
  */
 #define SetIRQ(fn) (scheduledIRQHandler = (fn))
-
-/**
- * @brief Schedule a position-based IRQ on non-NES targets.
- *
- * @note Written for API parity with the NES implementation, which drives
- * timing from a single rudimentary DMC note (see the NES overload's docs)
- * rather than this function's pixel-position dispatch.
- *
- * Arms the handler set by ::SetIRQ to fire when the renderer reaches pixel
- * @p location.  On emu targets this calls ::SetNextIRQHandler; on GBA/NDS
- * the backend programs the hardware HBlank counter to the requested
- * scanline instead.
- *
- * @p steps is unused on non-NES targets; it exists for API parity with the
- * NES implementation so call sites need no ifdefs.
- *
- * @param location  Target pixel coordinate {x, y} at which the IRQ fires.
- * @param steps     DMC chain length (NES only; ignored here).
- * @param ready     Unused on non-NES; accepted for API parity.
- */
-void ScheduleInterrupt(irq_pos_t location, u8 steps, volatile bool* ready = nullptr);
 
 #endif
 

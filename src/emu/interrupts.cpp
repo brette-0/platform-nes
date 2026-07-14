@@ -14,12 +14,6 @@ irq_t GetCurrentIRQHandler() {
     return irqPendingValid ? irqPending : irq_t{};
 }
 
-void ScheduleInterrupt(const irq_pos_t location, u8 /*steps*/, volatile bool* /*ready*/) {
-    SetNextIRQHandler({ scheduledIRQHandler, location.x, location.y });
-}
-
-extern "C" void dmc_chain_handler() {}
-
 void reset() {
     post();
     exit(0);
