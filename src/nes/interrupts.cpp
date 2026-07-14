@@ -20,26 +20,29 @@ void reset() {
 }
 
 // ---------------------------------------------------------------------------
-// DMC cycle-interrupt scheduling. See interrupts.hpp for the documented
+// DMC chained-note scheduling. See interrupts.hpp for the documented
 // contract of ScheduleInterrupt().
 //
-// One note, one completion IRQ -- no chaining, no gate. $4013 (sample
-// length) is a full 8-bit register: bytes = L*16 + 1, up to 4081 bytes, and
-// at the slowest rate (428 cycles/bit, 3424 cycles/byte) that reaches
-// ~13.9M cycles, roughly 466 NTSC frames. That's far beyond anything a
-// single scheduled IRQ needs, so there's no reason to split the wait across
-// multiple notes: SetIRQ points straight at the target handler (see the
-// demo's HUD IRQ), and every DMC IRQ that fires is the real one.
+// A single-byte DMC note's IRQ fires almost immediately after arming:
+// bytes-remaining hits zero at DMA FETCH time (the lone byte is fetched
+// right away, since the sample buffer starts empty), not after that byte's
+// rate-gated playback finishes -- confirmed empirically, every rate fired
+// at the same ~280-320 cycles. The rate register is therefore irrelevant at
+// this note length. The length register can't express "2 bytes" either
+// (16*L+1 jumps straight from 1 to 17 bytes), and 17 bytes' minimum delay
+// (16*8*period, 7344+ cycles even at the fastest rate) overshoots this
+// call site's few-thousand-cycle budget by a wide margin.
+//
+// The workaround: chain several 1-byte notes back to back. `steps` picks
+// how many links to chain; each link is one DMA-fetch-dominated fire
+// (~280-320 cycles) plus this handler's own re-arm overhead, so total delay
+// is roughly (steps+1) times that fixed per-link cost -- not rate-selected,
+// since rate can't move it at len=0. Calibrate `steps` empirically against
+// the target (see the demo's HUD-split IRQ and its spin-wait iteration
+// counter) -- the per-link cost isn't an exact hardware constant, just a
+// small, repeatable one.
 // ---------------------------------------------------------------------------
 namespace {
-    // NTSC DMC rate-table periods (NESDev), scaled to cycles-per-byte: a
-    // byte is 8 bits, i.e. 8x the per-bit period. Index == the 4-bit rate
-    // written to $4010.
-    constexpr u32 kDmcByteCycles[16] = {
-        3424, 3040, 2720, 2560, 2288, 2032, 1808, 1712,
-        1520, 1280, 1136, 1024,  848,  672,  576,  432
-    };
-
     // The DMC always plays from ROM, so arming needs one real byte to point
     // its sample-start register at. On bankswitched builds this must stay
     // reachable regardless of which bank is currently paged in -- same
@@ -50,38 +53,43 @@ namespace {
     __attribute__((section(".prg_rom_fixed"), aligned(64)))
 #endif
     constexpr u8 kDmcSilentSample = 0xAA;
+
+    atomic u8 dmcChainRemaining;
+
+    // Rate is irrelevant at len=0 (see file comment) -- always use the
+    // fastest, purely so any background DAC output from the note-in-flight
+    // dies out as quickly as possible.
+    void ArmOneByteNote() {
+        apu::dmc_start = static_cast<u8>((reinterpret_cast<u16>(&kDmcSilentSample) - 0xC000) >> 6);
+        apu::dmc_len  = 0;                                              // single byte, always
+        apu::dmc_freq = 0x80 | 15;                                      // IRQ enable, loop off, fastest rate
+        apu::snd_chn  = static_cast<u8>(apu::snd_chn.get() | 0x10);     // re-enable DMC only; other channels untouched
+    }
 } // namespace
 
-// ScheduleInterrupt below always resolves in a single note (see the file
-// comment), so nothing ever denies into this. Kept as a valid, inert deny
-// target so ::FAST_LOCKED_IRQ_CHAINED remains usable on its own terms if
-// something else ever wants real note-to-note chaining.
-ASM_LINKAGE __attribute__((naked, used))
-void dmc_chain_handler() {
-    __asm__ ("rti");
+// Cross-TU chain lock for ::FAST_LOCKED_IRQ_CHAINED (see interrupts.hpp) --
+// defined here with external linkage so a caller's gate macro expansion can
+// reference it by raw symbol name.
+volatile bool dmcChainLock;
+
+// Deny-path target for ::FAST_LOCKED_IRQ_CHAINED. While dmcChainRemaining is
+// nonzero, re-arms a fresh 1-byte note and counts down; once it hits zero,
+// sets dmcChainLock so the gate dispatches to the real handler on the next
+// fire. See the file comment above for why this exists and what it's
+// working around.
+interrupt dmc_chain_handler() {
+    if (dmcChainRemaining) {
+        dmcChainRemaining = dmcChainRemaining - 1;   // avoids -Wdeprecated-volatile on atomic --
+        ArmOneByteNote();
+        if (dmcChainRemaining == 0) dmcChainLock = true;
+    }
 }
 
-void ScheduleInterrupt(const irq_pos_t /*location*/, const u32 cycles,
+void ScheduleInterrupt(const irq_pos_t /*location*/, const u8 steps,
                        volatile bool* const ready) {
-    apu::dmc_start = static_cast<u8>((reinterpret_cast<u16>(&kDmcSilentSample) - 0xC000) >> 6);
-
-    // Largest per-byte rate that still fits within the budget in a single
-    // byte; for anything longer than that, stretch the sample length
-    // instead (rounded to the nearest 16-byte step -- coarse, but this is
-    // rudimentary by design and "close enough" for a multi-frame wait).
-    u8 rate = 15;
-    for (u8 i = 0; i < 15; ++i) {
-        if (cycles >= kDmcByteCycles[i]) { rate = i; break; }
-    }
-
-    const u32 perByte = kDmcByteCycles[rate];
-    u32 bytesWanted = cycles / perByte;
-    if (bytesWanted < 1) bytesWanted = 1;
-    const u32 l = (bytesWanted - 1 + 8) / 16;    // round to nearest step
-    apu::dmc_len = static_cast<u8>(l > 255 ? 255 : l);
-
-    apu::dmc_freq = 0x80 | rate;                                   // IRQ enable, loop off
-    apu::snd_chn  = static_cast<u8>(apu::snd_chn.get() | 0x10);    // re-enable DMC only; other channels untouched
+    dmcChainLock      = (steps == 0);
+    dmcChainRemaining = steps;
+    ArmOneByteNote();
 
     if (ready) *ready = true;
 }

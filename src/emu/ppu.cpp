@@ -39,12 +39,10 @@ const u8 *patternTable = CHR_ROM;
 
 static int yScroll_written;
 
-#define SPRITE_ZERO_IRQ_ID 0xFF
 static spriteZeroHandler_t sprite0_zero;
 
 void SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
     sprite0_zero = (spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
-    RegisterIRQHandler(SPRITE_ZERO_IRQ_ID, fn);
 }
 
 static constexpr u32 nes_rgb[64] = {
@@ -272,8 +270,7 @@ void GenerateFrame(u32 *fb, const int stride) {
              * starts at seg_end) will derive wy from the updated counter. */
             if (fire) {
                 irq_fired = true;
-                if (irqPending.id < irqTableCount && irqTable[irqPending.id])
-                    irqTable[irqPending.id]();
+                if (irqPending.fn) irqPending.fn();
                 if (yScroll_written) {
                     ppu_y = static_cast<int>(yScroll);
                     yScroll_written = 0;
@@ -323,7 +320,7 @@ void GenerateBands(const band_emit_fn emit) {
                     emit(band_start, py, cur_xs, cur_ys);
                     band_start = py;
                 }
-                if (ev.id < irqTableCount && irqTable[ev.id]) irqTable[ev.id]();
+                if (ev.fn) ev.fn();
                 if (yScroll_written) {
                     cur_xs = xScroll;
                     cur_ys = yScroll;
@@ -523,5 +520,5 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     *latch = true;
     SetSpriteZeroHandler(px, py, fn);
-    SetNextIRQHandler((irq_t){ .id = SPRITE_ZERO_IRQ_ID, .px = px, .py = py });
+    SetNextIRQHandler((irq_t){ .fn = fn, .px = px, .py = py });
 }

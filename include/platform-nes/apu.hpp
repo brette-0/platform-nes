@@ -11,7 +11,7 @@
  *
  * @code
  *   PRESERVE(APU_REGISTERS);
- *   ScheduleInterrupt(loc, cycles, &ready);
+ *   ScheduleInterrupt(loc, steps, &ready);
  *   // ... APU is now free for timing use ...
  *
  *   // inside the IRQ handler:
@@ -104,7 +104,7 @@ public:
  *
  * @code
  *   PRESERVE(APU_REGISTERS);          // snapshot all 15 shadows, no poke
- *   ScheduleInterrupt(loc, cycles, &ready);
+ *   ScheduleInterrupt(loc, steps, &ready);
  *   // ... in the ISR:
  *   if (*ready) RESTORE(APU_REGISTERS); // replay shadows + poke hardware
  * @endcode
