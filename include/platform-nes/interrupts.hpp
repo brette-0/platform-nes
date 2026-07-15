@@ -3,10 +3,12 @@
  * @brief IRQ registration and dispatch.
  *
  * The NES target relies on the MMC3-style scanline IRQ; the desktop
- * target simulates the same semantics from the renderer. In both cases
- * the application defines a handler function directly (tagged with
- * ::interrupt on NES) and arms it by address with ::SetIRQ, then arms a
- * specific handler for the next scanline event via ::SetNextIRQHandler.
+ * target simulates the same semantics from the renderer. On NES the
+ * application defines the single hardware IRQ handler directly with
+ * ::IRQ, placed at the hardware vector exactly like ::NMI -- there is no
+ * runtime arming. On desktop, which has no hardware vector to place code
+ * at, the renderer instead schedules a scanline event with
+ * ::SetNextIRQHandler and fires it by calling the given function pointer.
  *
  * On desktop builds the armed handler is a plain function pointer, and
  * the pending IRQ is held in ::irqPending for the renderer to drain once
@@ -24,19 +26,21 @@ using namespace br0::intsh;
  * @brief Tags a function as an interrupt entry point.
  *
  * On NES this expands to `ASM_LINKAGE __attribute__((used, interrupt_norecurse))
- * void`: `ASM_LINKAGE` (extern "C") keeps the symbol name stable so it can be
- * jumped to by raw name (e.g. from a ::FAST_LOCKED_IRQ gate), `used` stops LTO
- * from discarding a function nothing calls via ordinary C++ call syntax (it's
- * only ever reached via `jmp`/a stored function pointer), and
+ * void`: `ASM_LINKAGE` (extern "C") keeps the symbol name stable so the linker
+ * script (nes.ld) can place it directly at the hardware vector by raw symbol
+ * name (`nmi`/`irq`), `used` stops LTO from discarding a function nothing
+ * calls via ordinary C++ call syntax -- that raw-symbol reference from the
+ * vector table is invisible to the compiler's call-graph analysis -- and
  * `interrupt_norecurse` makes llvm-mos emit the full imaginary-register
  * save/restore prologue and epilogue, ending with RTI. Off NES it's just
  * `void` — there's no hardware vector or register file to protect.
  *
- * Use it in place of a return type:
+ * Use it in place of a return type. ::NMI and ::IRQ expand to this same
+ * attribute set, pinned to the two hardware vector symbol names:
  *
  * @code
- *   interrupt HUD_IRQ() {
- *     // runs when armed via SetIRQ(HUD_IRQ) and the scanline fires
+ *   interrupt MyHandler() {
+ *     // full imaginary-register save/restore, ending in RTI
  *   }
  * @endcode
  */
@@ -132,73 +136,152 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
  *
  * The resulting function is tagged `used` so the linker keeps it, and
  * `interrupt_norecurse` so the compiler emits a hardware-safe
- * prologue/epilogue. Follow with the handler body.
+ * prologue/epilogue. Follow with the handler body. The function is placed
+ * directly at the hardware NMI vector (mos-platform's nes.ld: `.vector
+ * 0xfffa : { SHORT(nmi) ... }`) by raw symbol name -- there is no
+ * indirection and no runtime rearming; NMI has exactly one handler, chosen
+ * at compile time.
+ *
+ * Takes an optional attribute-specifier-seq, spliced in right after the
+ * `extern "C"` this expands to -- the same position real-world code uses
+ * for e.g. `extern "C" [[noreturn]] void abort();`. That position (not a
+ * leading prefix on the macro invocation) is required: `extern "C" void
+ * nmi()` is a *linkage-specification* wrapping a declaration, not an
+ * ordinary declaration itself, and a leading attribute-specifier-seq is only
+ * grammatically valid at the start of an ordinary declaration --
+ * `[[noreturn]] extern "C" void nmi();` is not valid C++. Write:
+ *
+ * @code
+ *   NMI() {
+ *     ...   // ordinary handler: falls through, compiler-generated RTI returns
+ *   }
+ *
+ *   NMI([[noreturn]]) {
+ *     for (;;) { ... }   // body genuinely never falls off the end
+ *   }
+ * @endcode
+ *
+ * `[[noreturn]]` is only correct if the body truly never reaches its closing
+ * brace by falling through (an infinite loop, or a tail transfer via ::JUMP
+ * into something else that itself never returns) -- if it does return
+ * normally every call, the compiler-generated RTI is exactly what hands
+ * control back to the interrupted code, and `[[noreturn]]` is a lie about
+ * that.
+ *
+ * @note Unverified: whether llvm-mos's `interrupt_norecurse` lowering
+ * actually drops the RTI epilogue for a `[[noreturn]]`-marked, genuinely
+ * non-falling-through body, or unconditionally emits it regardless (RTI
+ * insertion may be tied to the interrupt calling convention itself, not to
+ * the generic noreturn/unreachable codegen path that ordinary functions
+ * use). If you need a vector-placed function with *guaranteed* zero
+ * compiler-generated epilogue, don't rely on `[[noreturn]]` here -- use
+ * ::NAKED_NMI / ::NAKED_IRQ instead, which sidestep the question entirely by
+ * never asking llvm-mos to generate interrupt bookkeeping in the first
+ * place.
  */
-#define NMI                                 \
-ASM_LINKAGE __attribute__((used, interrupt_norecurse))  \
+#define NMI(...)                                       \
+ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))  \
 void nmi()
 
 /**
- * @brief Active IRQ gate function pointer, dispatched from the hardware IRQ vector.
+ * @brief Declares the IRQ handler on NES builds.
  *
- * Set via ::SetIRQ. Stored in absolute BSS; the naked `irq()` dispatcher
- * jumps through it with `jmp (irqTrampoline)` — no compiler prologue, no register
- * save — so whatever the gate does first is what the CPU does first.
+ * Same shape as ::NMI: the resulting function is placed directly at the
+ * hardware IRQ vector (nes.ld: `SHORT(irq)`) by raw symbol name, tagged
+ * `used`/`interrupt_norecurse`. There is exactly one IRQ handler, chosen at
+ * compile time -- no gate, no lock, no runtime arming. Whatever IRQ sources
+ * are enabled (e.g. the MMC3 scanline counter) all vector here; the handler
+ * itself is responsible for telling them apart if more than one is active.
+ * Follow with the handler body: `IRQ()` for an ordinary handler,
+ * `IRQ([[noreturn]])` composes the same way as on ::NMI, with the same
+ * caveat -- only correct if the body never falls through.
  */
-extern "C" void (*irqTrampoline)();
+#define IRQ(...)                                       \
+ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))  \
+void irq()
 
 /**
- * @brief Defines a fast-path IRQ gate with a no-op deny path.
+ * @brief Declares the NMI handler on NES builds with zero compiler-generated
+ *        interrupt bookkeeping.
  *
- * Emits a naked, C-linkage function `gate_name` suitable for use with ::SetIRQ.
- * The gate is NOT compiled as an interrupt handler by llvm-mos (no imaginary
- * register save/restore), so its entire cost when the lock is clear (deny
- * path: `pla; rti`) is:
+ * Same vector placement as ::NMI (raw symbol name `nmi`, nes.ld: `SHORT(nmi)`
+ * at $fffa), but tagged `naked` instead of `interrupt_norecurse`: llvm-mos
+ * emits NO prologue or epilogue at all for this function -- no
+ * imaginary-register save/restore, no compiler-generated RTI, nothing.
+ * Whatever asm the body contains is *exactly* what ends up at the vector,
+ * verbatim. The tradeoff for that certainty is that `naked` function bodies
+ * may contain only `asm` statements -- ::JUMP / ::JUMP_INDIRECT are plain
+ * single `asm` statements with no wrapper, so they're fine here, but nothing
+ * else (no C++ statements at all) is, and the body is entirely responsible
+ * for its own interrupt housekeeping if it doesn't tail-jump straight into
+ * something else that handles that itself.
  *
- *   7 (hw entry) + 3 (pha) + 4 (lda abs) + 2 (bne not-taken) + 4 (pla) + 6 (rti)
- *   = 26 cycles, constant.  (ZP lock: 25 cycles.)
+ * The canonical use is a bare tail-jump trampoline into a real, separately
+ * defined ::interrupt handler -- that handler's own prologue/epilogue does
+ * all the actual register save/restore and RTI, so the vector-placed
+ * function needs to do nothing but jump:
  *
- * If the lock is set the gate restores A and jumps directly into the target
- * handler, which IS `interrupt_norecurse` — its compiler-generated prologue
- * saves all imaginary registers from the pre-interrupt state and its
- * epilogue + RTI close the interrupt correctly.
+ * @code
+ *   interrupt nmiHandler() { ... }   // real logic, own save/restore + RTI
  *
- * @param gate_name  C identifier for the gate function (e.g. `MY_GATE`).
- * @param lock       Symbol name of an `atomic bool` (or `volatile bool`)
- *                   readable with a single `lda` — ideally `direct` (ZP, 3 cy)
- *                   or absolute (4 cy).  NOT a pointer; the value itself.
- * @param target     C identifier of the success handler (e.g. a function
- *                   defined with ::interrupt). Must be `ASM_LINKAGE` (extern
- *                   "C") so this can jump to it by raw symbol name.
+ *   NAKED_NMI {
+ *     JUMP(nmiHandler);
+ *   }
+ * @endcode
+ *
+ * Prefer plain ::NMI unless you specifically need the guarantee that no
+ * compiler-generated code exists at the vector at all -- see the `@note` on
+ * ::NMI's `[[noreturn]]` for why that guarantee isn't otherwise available.
  */
-#define FAST_LOCKED_IRQ(gate_name, lock, target)          \
-    ASM_LINKAGE __attribute__((naked, used))              \
-    void gate_name() {                                    \
-        __asm__ (                                         \
-            "pha\n\t"           /* 3 cy: save A        */ \
-            "lda $4015\n\t"     /* 4 cy: ack DMC IRQ   */ \
-            "lda " #lock "\n\t" /* 3-4 cy: read lock   */ \
-            "bne 1f\n\t"        /* 2 cy: not ready (not taken = faster) */ \
-            "pla\n\t"           /* 4 cy: restore A     */ \
-            "rti\n\t"           /* 6 cy: deny          */ \
-            "1:\n\t"                                      \
-            "pla\n\t"           /* 4 cy: restore A     */ \
-            "jmp " #target      /* 3 cy: jump in       */ \
-        );                                                \
-    }
+#define NAKED_NMI                            \
+ASM_LINKAGE __attribute__((naked, used))     \
+void nmi()
 
 /**
- * @brief Arms a ::FAST_LOCKED_IRQ gate (or any naked IRQ function) as the
- *        target of the hardware IRQ vector for this frame.
+ * @brief Declares the IRQ handler on NES builds with zero compiler-generated
+ *        interrupt bookkeeping.
  *
- * Stores the function pointer into ::irqTrampoline; the naked `irq()` dispatcher
- * (which lives at the hardware IRQ vector) jumps through it immediately,
- * with no intervening saves or overhead.
- *
- * @param gate  Function defined by ::FAST_LOCKED_IRQ (or another naked
- *              C-linkage IRQ function) to arm.
+ * Same relationship to ::IRQ as ::NAKED_NMI has to ::NMI: `naked` instead of
+ * `interrupt_norecurse`, raw symbol name `irq` (nes.ld: `SHORT(irq)` at
+ * $fffe), body must be pure `asm` (::JUMP / ::JUMP_INDIRECT are fine; nothing
+ * else is). Same canonical use: a bare tail-jump into a separately defined
+ * ::interrupt handler that does the real save/restore and RTI itself.
  */
-#define SetIRQ(gate) (irqTrampoline = &(gate))
+#define NAKED_IRQ                            \
+ASM_LINKAGE __attribute__((naked, used))     \
+void irq()
+
+/**
+ * @brief Direct unconditional jump to `target`, a function (a fixed,
+ *        link-time-known entry point, e.g. another ::interrupt-tagged
+ *        handler). Never falls through.
+ *
+ * Nothing more than `__asm__ volatile ("jmp " #target)` -- a single inline
+ * `asm` statement, no wrapper, no runtime or compile-time branch. That
+ * means it's usable anywhere plain `asm` is, including inside a `naked`
+ * function body (which may contain only `asm` statements):
+ *
+ * @code
+ *   interrupt nmiHandler() { ... }   // real logic, own save/restore + RTI
+ *
+ *   NAKED_NMI {
+ *     JUMP(nmiHandler);
+ *   }
+ * @endcode
+ */
+#define JUMP(target) __asm__ volatile ("jmp " #target)
+
+/**
+ * @brief Indirect unconditional jump through `target`, a `void(*)()`-typed
+ *        variable holding a runtime-chosen entry point (e.g. ::irqTrampoline
+ *        elsewhere). Never falls through.
+ *
+ * Nothing more than `__asm__ volatile ("jmp (" #target ")")` -- same
+ * single-statement, zero-overhead shape as ::JUMP, just through the
+ * variable's contents instead of straight to a fixed address. Also usable
+ * inside a `naked` function body.
+ */
+#define JUMP_INDIRECT(target) __asm__ volatile ("jmp (" #target ")")
 
 #else
 
@@ -268,38 +351,6 @@ inline void EnableInterrupts()  {}
  * @note This function does nothing on non-NES targets; see ::EnableInterrupts.
  */
 inline void DisableInterrupts() {}
-
-/**
- * @brief Non-NES equivalent of ::FAST_LOCKED_IRQ.
- *
- * There is no hardware interrupt line to gate off NES, so this collapses
- * @p gate_name to a compile-time alias for @p target: `SetIRQ(gate_name)`
- * then arms the same handler the NES gate would have jumped to directly.
- *
- * @param gate_name  Identifier usable with ::SetIRQ, same as on NES.
- * @param lock       Unused on non-NES; accepted for API parity with NES.
- * @param target     Handler function to dispatch to.
- */
-#define FAST_LOCKED_IRQ(gate_name, lock, target) \
-    static constexpr irq_handler_fn gate_name = (target)
-
-/**
- * @brief Handler armed via ::SetIRQ on non-NES targets.
- *
- * Set once at startup via ::SetIRQ. Available for a call site that wants
- * position-based scanline dispatch (see ::SetNextIRQHandler / ::irqPending)
- * without needing NES-specific gate machinery.
- */
-extern irq_handler_fn scheduledIRQHandler;
-
-/**
- * @brief Registers the handler armed via ::SetIRQ on non-NES targets.
- *
- * Non-NES equivalent of the NES ::SetIRQ(gate) macro.
- *
- * @param fn  Handler function to arm.
- */
-#define SetIRQ(fn) (scheduledIRQHandler = (fn))
 
 #endif
 

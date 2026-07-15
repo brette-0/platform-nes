@@ -46,6 +46,7 @@ enum class eLevelStreamCommands : u8 {
     STREAM_LEVEL_SWAP  = 0x04,
 };
 
+interrupt nmiHandler();
 extern atomic enum_flags<eLevelStreamCommands> levelStreamCommand;
 
 // Deferred VRAM write queue (coin pickups -> NMI drain).

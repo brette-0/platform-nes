@@ -27,7 +27,8 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
-// Forward-declared so NMI can call it directly once the real sprite-0 hit
+// Forward-declared so NMI can call it directly once the real sp
+// rite-0 hit
 // lands (see WaitThenReactToSpriteZero in NMI).
 static void ApplyHudSplit();
 
@@ -234,7 +235,7 @@ RESET {
     }
 }
 
-NMI {
+interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
     PollControllers(&port1, &port2);
     oam::RefreshSprites(OAMBuffer);
@@ -335,3 +336,4 @@ static void ApplyHudSplit() {
     #endif
 }
 
+NAKED_NMI { JUMP(nmiHandler); }
