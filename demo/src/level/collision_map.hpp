@@ -5,7 +5,7 @@
 #include "../graphics/metatiles.hpp"   // MetatileCollision (query decodes per cell)
 #include <platform-nes/video.hpp>      // video::viewport_tx (window width tracks the viewport)
 #include <intsh>
-
+#include "../types.hpp"
 using namespace br0::intsh;
 
 namespace demo::level {
@@ -106,7 +106,7 @@ void ColMapSlideLeft(const Cursor &newLeftStat, DynamicCursor newLeftDyn);
 // ColMapStamp packed it.  `collectBlocks` decides the audience: true for the
 // player (coins block, pending pickup), false for enemies (coins pass).  Columns
 // outside the window or rows outside [0,levelHeight) read as air.
-bool Blocked(u16 px, u16 py, u8 w, u8 h, bool collectBlocks);
+bool Blocked(u16 px, u16 py, vec2<u8> dimensions, bool collectBlocks);
 
 // One collected coin: its world metatile cell and the static metatile revealed
 // underneath (what the cell shows now that the coin is gone).  The caller turns
@@ -120,7 +120,7 @@ struct CoinPick { u16 col; u8 row; u8 reveal; };
 // The picks (cell + reveal) are written to `out` (up to `maxOut`); returns the count
 // (which may exceed maxOut if the AABB straddles more coins than the caller budgeted).
 // Same world-pixel / HUD-strip convention as Blocked.
-u8 CollectCoins(u16 px, u16 py, u8 w, u8 h, CoinPick* out, u8 maxOut);
-u8 CollectCoins2(u16 px, u16 py, u8 w, u8 h, CoinPick* out, u8 maxOut);
+u8 CollectCoins(u16 px, u16 py, vec2<u8> dimensions, CoinPick* out, u8 maxOut);
+u8 CollectCoins2(u16 px, u16 py, vec2<u8> dimensions, CoinPick* out, u8 maxOut);
 
 }   // namespace demo::level

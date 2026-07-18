@@ -19,6 +19,20 @@ namespace demo::level {
     u8 AttributeBuffer[8];
     u8 attr_column = 0xFF;
 
+    // pal is a 2-bit palette index (MetatilePaletteMask) and shift is always one
+    // of {0,2,4,6} (an attribute-byte nibble position), so `pal << shift` only
+    // ever takes 16 distinct values. The shift amount isn't a compile-time
+    // constant at any one call site (it's chosen by a runtime parity/half
+    // branch), so `pal << shift` as written compiles to a call to __ashlqi3 --
+    // a loop of up to 6 ASLs plus call overhead -- once per metatile row.
+    // Indexing this instead is a handful of cycles regardless of shift amount.
+    static constexpr u8 kPalShifted[4][4] = {
+        { 0,  0,   0,   0 },
+        { 1,  4,  16,  64 },
+        { 2,  8,  32, 128 },
+        { 3, 12,  48, 192 },
+    };
+
     // --- Attribute-half parity correction for odd-width viewports -------------
     // One NES attribute byte spans 32px = two metatile columns (a left/right
     // nibble pair), so a column's half is its absolute metatile-column parity.
@@ -107,7 +121,7 @@ namespace demo::level {
             const u8 shift     = attr_column & 1
                                     ? (is_bottom ? 6 : 2)
                                     : is_bottom ? 4 : 0;
-            AttributeBuffer[attr_idx] |= pal << shift;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
         }
         const u8 m = MetatileBuffer[step >> 1];
         return step & 1 ? Metatiles_UR[m] : Metatiles_UL[m];
@@ -132,7 +146,7 @@ namespace demo::level {
             const u8 shift     = (attr_column + prev_parity_fix()) & 1
                                     ? (is_bottom ? 4 : 0)
                                     : is_bottom ? 6 : 2;
-            AttributeBuffer[attr_idx] |= pal << shift;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
         }
         const u8 m = MetatileBuffer[step >> 1];
         return step & 1 ? Metatiles_UL[m] : Metatiles_UR[m];
@@ -168,7 +182,7 @@ namespace demo::level {
             const u8 is_bottom = tile_row >> 1 & 1;
             const u8 shift     = attr_column & 1 ? (is_bottom ? 6 : 2)
                                                  : (is_bottom ? 4 : 0);
-            AttributeBuffer[attr_idx] |= pal << shift;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
 
             buf[step]          = Metatiles_UL[m];
             buf[step + 1]      = Metatiles_UR[m];
@@ -196,7 +210,7 @@ namespace demo::level {
             const u8 is_bottom = tile_row >> 1 & 1;
             const u8 shift     = ap ? (is_bottom ? 4 : 0)
                                     : (is_bottom ? 6 : 2);
-            AttributeBuffer[attr_idx] |= pal << shift;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
 
             buf[54 - step] = Metatiles_UL[m];
             buf[55 - step] = Metatiles_UR[m];

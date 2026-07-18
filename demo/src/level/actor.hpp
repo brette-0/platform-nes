@@ -3,6 +3,18 @@
 #include "types.hpp"
 #include "../types.hpp"
 
+namespace demo {
+    enum eActorType {
+        Player,
+        Mushlet
+    };
+
+    enum eActorState {
+        Normal,     // default for that object (alive, moving whatever)
+    };
+
+}
+
 class Actor {
     public:
     // Collision is now a shared composite-metatile window read (see collision_map.hpp
@@ -12,9 +24,13 @@ class Actor {
     // false) so coins pass; the player passes true so coins stop it (pending pickup).
     vec2<u16> worldSpace;          // top-left origin, sub-pixel: bottom 3 bits = subpx, so >>3 = px
     vec2<oam::oam_t> screen;       // on-screen sprite position (OAM coords)
-    vec2<u8> size;                 // AABB extents in pixels
     vec2<i8> moveForce;            // subpixel movement force (8 subpx = 1px)
     i8 gravity;                    // accumulated downward accel (subpx/frame); 0 when grounded
+    demo::eActorType actorType;
+    demo::eActorState actorState;
+    u8 animationFrame;
+
+    vec2<u8> GetSize() const;
 
     void (*start)(Actor* self);    // behaviour hooks: plain fn pointers, no vtable
     void (*update)(Actor* self);   // null for now

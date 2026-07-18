@@ -169,11 +169,9 @@ RESET {
     // already centred; ColMapTrack slides it as the camera scrolls.
     level::ColMapSeed(0, { level::TileData }, { level::DynLengths, level::DynData, 0 });
 
-    player1.actor.size = { 16, 16 };
     player1.Reset();
 
 #ifdef PLAYER2_SUPPORTED
-    player2.actor.size = { 16, 16 };
     player2.Reset();
 #endif
     oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */

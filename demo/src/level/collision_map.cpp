@@ -4,6 +4,7 @@
 #include "../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
 
 #include <array>
+#include "../types.hpp"
 
 using namespace br0::intsh;
 
@@ -244,7 +245,8 @@ const u8* ColMapColumn(const u16 col) {
 // variable shift.  `collectBlocks` picks the audience: the player (true) bonks on coins
 // (Collect) as well as walls (Solid); enemies (false) only stop on Solid, passing coins.
 // Columns outside the held window read as air, so the sweep needs no X region clamp.
-bool Blocked(const u16 px, const u16 py, const u8 w, const u8 h, const bool collectBlocks) {
+bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, const bool collectBlocks) {
+    const u8 w = dimensions.x; const u8 h = dimensions.y;
     i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
     i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
     if (rowBot < 0 || rowTop >= levelHeight) return false;   // AABB entirely off-field
@@ -288,8 +290,9 @@ bool Blocked(const u16 px, const u16 py, const u8 w, const u8 h, const bool coll
 // from the player and never has to be rebuilt.  Blank the run in DynData (permanent:
 // any later re-stamp of this column composites air) and overwrite the window cell with
 // the reveal (immediate: collision + render see static).
-u8 CollectCoins(const u16 px, const u16 py, const u8 w, const u8 h,
+u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
                 CoinPick* out, const u8 maxOut) {
+    const u8 w = dimensions.x; const u8 h = dimensions.y;
     i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
     i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
     if (rowBot < 0 || rowTop >= levelHeight) return 0;
@@ -389,8 +392,9 @@ u8 CollectCoins(const u16 px, const u16 py, const u8 w, const u8 h,
 // Player 2 coin collection.  Identical logic to CollectCoins but uses the
 // independent colPlayer2* anchor so P1 and P2 each pay a tiny per-frame step
 // rather than bouncing the shared cursor across the inter-player gap every frame.
-u8 CollectCoins2(const u16 px, const u16 py, const u8 w, const u8 h,
+u8 CollectCoins2(const u16 px, const u16 py, const vec2<u8> dimensions,
                  CoinPick* out, const u8 maxOut) {
+    const u8 w = dimensions.x; const u8 h = dimensions.y;
     i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
     i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
     if (rowBot < 0 || rowTop >= levelHeight) return 0;

@@ -43,7 +43,7 @@ static void PlayerRefreshX(const Player* p) {
 static u16 ActorTX(const Actor* self) { return self->worldSpace.x >> 3; }
 
 static bool IsBlocked(const Actor* self, const u16 wx, const u16 wy) {
-    return level::Blocked(wx, wy, self->size.x, self->size.y, /*collectBlocks=*/false);
+    return level::Blocked(wx, wy, self->GetSize(), /*collectBlocks=*/false);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,8 +75,8 @@ static void PushCoinVram(const CoinPick& pick) {
 static void CollectCoinsFor(const Actor* self, const Player* p) {
     CoinPick picks[4];
     const u8 n = (p == &player1)
-        ? CollectCoins( ActorTX(self), self->screen.y, self->size.x, self->size.y, picks, 4)
-        : CollectCoins2(ActorTX(self), self->screen.y, self->size.x, self->size.y, picks, 4);
+        ? CollectCoins( ActorTX(self), self->screen.y, self->GetSize(), picks, 4)
+        : CollectCoins2(ActorTX(self), self->screen.y, self->GetSize(), picks, 4);
     for (u8 i = 0; i < n && i < 4; i++) PushCoinVram(picks[i]);
 }
 
