@@ -13,7 +13,6 @@
 #include "level/dynamic.hpp"
 #include "level/player.hpp"
 
-#include "technology.hpp"
 #include <platform-nes/apu.hpp>
 #include <platform-nes/mappers/vrc1.hpp>
 
@@ -32,19 +31,6 @@ u8 lastPort2;
 // lands (see WaitThenReactToSpriteZero in NMI).
 static void ApplyHudSplit();
 
-// ---------------------------------------------------------------------------
-// Deferred VRAM tile-write stack (coin pickups)
-//
-// Collection runs in the UPDATE (mid-frame, rendering on), but nametable writes are
-// only legal in vblank -- so a pickup pushes its tile writes here and NMI drains them.
-// Each entry is {addrHi, addrLo, value}: a PRECOMPUTED VRAM address (ppu::Cartesian
-// ToAddress, the (x,y)->address projection -- a /30 + %30 for the row -- paid once HERE,
-// off the hot path) plus the CHR tile.  The NMI then replays each write as three register
-// pokes with NO arithmetic, through the address overload of WriteSingleToNameTable (still
-// the library, so SDL3 -- which has no raw PPUADDR port -- works too).  Drained by the
-// CoinVramLen byte count, NOT an in-band terminator: CartesianToAddress is $2000-based on
-// NES but 0-based on SDL3, where a top-of-playfield cell's high byte is legitimately 0, so
-// a "high byte == 0 terminates" sentinel would falsely stop the desktop drain.
 constexpr u8 kCoinVramCap = 48;            // 16 tile writes = 4 coins (2x2 each)
 static u8 CoinVram[kCoinVramCap];
 static u8 CoinVramLen;                      // bytes used
@@ -168,12 +154,6 @@ RESET {
         ppu::WriteFromBufferToAttributeTable(i & ~3, 2, level::AttributeBuffer, 8, 1);
     }
 
-    // Seed the left edge at reset so it is valid from the first frame -- no lazy
-    // first-left-stream re-walk spike.  The fill above leaves edgeR 17 columns in
-    // (metatile (1+viewport_mx())*levelHeight), still short of the steady-state
-    // kEdgeGap, so edgeL clamps to the level start and closes the startup gap over
-    // the first couple of right-streams -- each step is the same +levelHeight Move
-    // it always does, so there is no extra cost and never an O(n) walk.
     edgeRAbs     = (1 + viewport_mx()) * level::levelHeight;
     level::edgeL = { level::TileData };
     level::dynEdgeL = { level::DynLengths, level::DynData, 0 }; // dyn backward edge, lockstep w/ edgeL
@@ -258,12 +238,6 @@ interrupt nmiHandler() {
         }
     }
 
-    // Drain coin pickups collected this frame into the nametable.  Like the level-stream
-    // block above, the writes touch VRAM, so disable rendering across them via SHADOW
-    // (PPUMASK snapshot/restore) -- without it, a write that slips past the vblank window
-    // lands mid-scanline and tears the screen.  Addresses were projected at pickup time,
-    // so the body is pure register pokes ({addrHi,addrLo,value} triples).  BEFORE SetScroll:
-    // these share the PPUADDR latch, which would otherwise clobber the scroll set next.
     if (CoinVramLen) SHADOW(ppu::PPUMASK) {
         ppu::PPUMASK = 0;
         for (u8 i = 0; i < CoinVramLen; i += 3)
@@ -277,12 +251,6 @@ interrupt nmiHandler() {
     }
 
     ppu::SetColorPriority(0);
-
-    // Plain, synchronous wait for the real sprite-0 hit (fires at a fixed PPU
-    // dot every frame), then apply the HUD split. Blocks NMI well past
-    // vblank into the active picture -- that's fine, the PPU keeps rendering
-    // with whatever scroll is currently set regardless of what the CPU is
-    // doing, and the main loop is already just polling nmi_done.
     WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
 
     nmi_done = true;
@@ -312,20 +280,6 @@ static i16 ClampRow(const u16 y) {
 // the actual HUD split, applied once the beam is confirmed at (0, 16).
 static void ApplyHudSplit() {
     #if defined(TARGET_NDS) || defined(TARGET_GBA)
-        // --- cropped-panel vertical follow camera --------------------------------
-        // The DS (256x192) and GBA (240x160) panels are shorter than the NES frame
-        // (240px), so they cannot show the whole vertical slice the NES game renders.
-        // While the player is low we bottom-anchor -- scroll Y bumped by the shortfall
-        // (240 - viewport_py(): 48 on DS, 80 on GBA) so the ground sits on the panel
-        // bottom. Once the player climbs to the middle of the viewport we pan up with
-        // them, easing the bump from that maximum down to 0 (top-anchored) as they rise,
-        // so they never clip off the top edge. The bump is just the player's height above
-        // the viewport midpoint, clamped to [0, 240 - viewport_py()]. The math reads
-        // viewport_py() so it adapts to either panel. Sprites are kept locked to this
-        // varying scroll by the backend (build_sprites offsets every OBJ by the live band
-        // scroll), so the whole vertical-follow policy lives here in one place. Every
-        // full-height target renders the full 240 lines and needs no vertical camera
-        // (the #else branch).
         const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
         const i16 anchor = static_cast<i16>(240 - video::viewport_py());
         const i16 raw    = static_cast<i16>(player1.actor.screen.y) - mid;
