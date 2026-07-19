@@ -34,7 +34,7 @@ namespace demo::level {
 // Max dynamic RUNS held in RAM. The dynamic plane is sparse (mostly air), so a
 // long level still compresses to well under this. Overflow becomes a build-time
 // check once real export exists.
-constexpr u16 DynRunCapacity = 512;
+constexpr u8 DynRunCapacity = 128;
 
 // Mutable, RAM-resident copy of the dynamic plane's run-data bytes (metatile
 // ids; 0 = air = "no dynamic tile here"). Indexed by run, exactly like the
@@ -98,6 +98,6 @@ void RemoveDynamic(const DynHit& h, const Cursor &under);
 // Copy the active level's dynamic ROM run-data into DynData and point DynLengths
 // at the level's dynamic lengths. STUB: call from LoadLevel once a level ships a
 // dynamic layer (pass nullptrs / 0 for a level that has none).
-void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u16 runCount);
+void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u8 runCount);
 
 }   // namespace demo::level

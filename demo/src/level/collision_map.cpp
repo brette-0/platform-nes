@@ -66,6 +66,8 @@ namespace {
     colmap_cold Cursor        colPlayerStat;
     colmap_cold DynamicCursor colPlayerDyn;
     colmap_cold u16           colPlayerCell;
+    colmap_cold u16           colPlayerColR;   // rightmost column of last AABB, for early-exit guard
+    colmap_cold u8            colPlayerRowB;   // bottom row of last AABB, for early-exit guard
 
     // Independent anchor for player 2.  Same invariants as the P1 set; keeping
     // them separate means each player tracks their own AABB with a tiny per-frame
@@ -74,6 +76,8 @@ namespace {
     colmap_cold Cursor        colPlayer2Stat;
     colmap_cold DynamicCursor colPlayer2Dyn;
     colmap_cold u16           colPlayer2Cell;
+    colmap_cold u16           colPlayer2ColR;
+    colmap_cold u8            colPlayer2RowB;
 }
 
 // Stamp one column's composite metatiles into ring slot `slot`.  `stat`/`dyn` are
@@ -117,9 +121,13 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
     colPlayerStat = stat;          // collector anchor: parked on (leftCol, row 0) now;
     colPlayerDyn  = dyn;           //   the first CollectCoins re-anchors it to the player
     colPlayerCell = static_cast<u16>(leftCol) * levelHeight;
+    colPlayerColR = leftCol;
+    colPlayerRowB = 0;
     colPlayer2Stat = stat;         // P2 anchor seeded identically; diverges as P2 moves
     colPlayer2Dyn  = dyn;
     colPlayer2Cell = static_cast<u16>(leftCol) * levelHeight;
+    colPlayer2ColR = leftCol;
+    colPlayer2RowB = 0;
     const auto width = ColMapWidth();
     for (u8 i = 0; i < width; i++) {
         if (i == width - 1) {          // rightmost held, row 0
@@ -282,28 +290,6 @@ bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, const bool c
 // from the player and never has to be rebuilt.  Blank the run in DynData (permanent:
 // any later re-stamp of this column composites air) and overwrite the window cell with
 // the reveal (immediate: collision + render see static).
-//
-// Collects AT MOST ONE coin per call, even if the AABB straddles several (a dense
-// coin layout can pack multiple Collect cells into one 2x2-metatile AABB). This is
-// the "one pickup per frame" technique from Super Ale Bros Redux (world A, hi --
-// this is Brette) -- Alejandro used it there to bound the per-frame VRAM-queue burst
-// (PushCoinVram queues 4 writes per coin; several coins in one frame can blow the
-// queue), and it turns out to bound the CPU burst the same way: the expensive part
-// per coin (blank + reveal-fetch + reveal-write + queue push) now happens at most
-// once per call instead of once per coin found. A frame is 1/60s -- spreading a
-// multi-coin cluster's collection over a few consecutive frames as the player
-// passes through it is not perceptible.
-//
-// This REMOVES the old "same cell as last frame -> already consumed, skip the walk"
-// shortcut. That shortcut assumed a call always drained every coin in the AABB, which
-// stopped being true the moment collection is capped at one -- a second coin left
-// behind in an unmoving AABB would have been wrongly treated as already handled next
-// frame (this broke exactly this way once already). The shortcut turns out to not be
-// needed for correctness in the first place: pd.Fetch()!=0 already skips any cell
-// whose coin was already collected (the byte reads 0), so a fresh scan every frame is
-// safe regardless of how many calls it takes to fully drain a cell cluster. The
-// mandatory re-anchor below is UNCHANGED and still runs every call regardless -- only
-// the early-return that sat after it is gone.
 u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
                 CoinPick* out, const u8 maxOut) {
     const u8 w = dimensions.x; const u8 h = dimensions.y;
@@ -325,7 +311,16 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
     // exact one-frame spike that gating produced).  Cheap every frame >> occasional huge spike.
     const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
     const i16 step      = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayerCell);
+    const u8   rowB     = static_cast<u8>(rowBot);
+    const bool sameColR = (colR == colPlayerColR);
+    const bool sameRowB = (rowB == colPlayerRowB);
     colPlayerCell = anchorCell;
+    colPlayerColR = colR;
+    colPlayerRowB = rowB;
+    // Same cells as last frame → any coins there were already consumed; skip the walk.
+    // Guard all four AABB edges: step covers colL+rowTop; colR and rowB change independently
+    // when px%16 or py%16 crosses 0↔1 without the top-left anchor moving.
+    if (step == 0 && sameColR && sameRowB) return 0;
     // After level load step is bounded to ±(levelHeight+1) ≤ 15; use the i8 path
     // (single-byte loop counter on 6502) except on the first call after ColMapSeed
     // where the player may be far from the seed point.
@@ -361,11 +356,9 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
 
     // ONE probe pair copied off the persistent anchor, walked monotonically column-major
     // through the AABB.  pd/ps sit on cell (c, r) at each step, so a coin is removed with a
-    // bare *pd.dp write /ps.Fetch() -- no per-coin re-walk from the anchor (that quadratic
-    // re-walk was the cost).  When a column is outside the window we still step the probe
-    // across it (no read) to keep it aligned to the cells. Stops at the FIRST coin found
-    // (see the two-cap comment above) -- any others in the AABB are untouched (still
-    // present, still block-checkable, still visible) and get picked up on a later call.
+    // bare pd.Run()/ps.Fetch() -- no per-coin re-walk from the anchor (that quadratic re-walk
+    // was the cost).  When a column is outside the window we still step the probe across it
+    // (no read) to keep it aligned to the cells.
     DynamicCursor pd   = colPlayerDyn;
     Cursor        ps   = colPlayerStat;
     const i16     rows = rowBot - rowTop;       // 0-based row span of the AABB
@@ -381,21 +374,15 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
         }
         for (i16 r = rowTop; r <= rowBot; r++) {
             if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
-                // *pd.dp = 0 is DynData[pd.Run()] = 0 (Run() is just dp-DynData)
-                // without the round trip: pd.dp already points at that DynData
-                // byte, so this skips a 16-bit subtract (Run()) immediately
-                // followed by a 16-bit re-add (indexing back into DynData) --
-                // 64 bytes -> 30 bytes measured in isolation.
-                *pd.dp = 0;                     // permanent removal (length-1 coin run)
+                DynData[pd.Run()] = 0;          // permanent removal (length-1 coin run)
                 const u8 reveal = ps.Fetch();   // static metatile to expose
                 colp[r] = reveal;               // window now shows the static cell
                 if (n < maxOut) out[n] = { c, static_cast<u8>(r), reveal };
                 n++;
-                break;   // one coin per call -- see the comment above CollectCoins
             }
             if (r != rowBot) { pd.Move(1); ps.Move(1); }   // step down to the next row
         }
-        if (n || c == colR) break;
+        if (c == colR) break;
         pd.Move(levelHeight - rows);            // cross to the next column's top row
         ps.Move(levelHeight - rows);
     }
@@ -419,7 +406,13 @@ u8 CollectCoins2(const u16 px, const u16 py, const vec2<u8> dimensions,
 
     const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
     const i16 step       = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayer2Cell);
+    const u8   rowB      = static_cast<u8>(rowBot);
+    const bool sameColR  = (colR == colPlayer2ColR);
+    const bool sameRowB  = (rowB == colPlayer2RowB);
     colPlayer2Cell = anchorCell;
+    colPlayer2ColR = colR;
+    colPlayer2RowB = rowB;
+    if (step == 0 && sameColR && sameRowB) return 0;
     if (step >= -128 && step <= 127) {
         colPlayer2Dyn.Move(static_cast<i8>(step));
         colPlayer2Stat.Move(static_cast<i8>(step));
@@ -459,16 +452,15 @@ u8 CollectCoins2(const u16 px, const u16 py, const vec2<u8> dimensions,
         }
         for (i16 r = rowTop; r <= rowBot; r++) {
             if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
-                *pd.dp = 0;   // see the comment on the equivalent line in CollectCoins
+                DynData[pd.Run()] = 0;
                 const u8 reveal = ps.Fetch();
                 colp[r] = reveal;
                 if (n < maxOut) out[n] = { c, static_cast<u8>(r), reveal };
                 n++;
-                break;   // one coin per call -- see the comment above CollectCoins
             }
             if (r != rowBot) { pd.Move(1); ps.Move(1); }
         }
-        if (n || c == colR) break;
+        if (c == colR) break;
         pd.Move(levelHeight - rows);
         ps.Move(levelHeight - rows);
     }

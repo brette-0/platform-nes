@@ -72,15 +72,12 @@ static void PushCoinVram(const CoinPick& pick) {
 #endif
 }
 
-// CollectCoins/CollectCoins2 remove at most one coin per call (the "one pickup
-// per frame" technique -- see the comment above CollectCoins in
-// collision_map.cpp), so picks only ever needs room for one.
 static void CollectCoinsFor(const Actor* self, const Player* p) {
-    CoinPick picks[1];
+    CoinPick picks[4];
     const u8 n = (p == &player1)
-        ? CollectCoins( ActorTX(self), self->screen.y, self->GetSize(), picks, 1)
-        : CollectCoins2(ActorTX(self), self->screen.y, self->GetSize(), picks, 1);
-    if (n) PushCoinVram(picks[0]);
+        ? CollectCoins( ActorTX(self), self->screen.y, self->GetSize(), picks, 4)
+        : CollectCoins2(ActorTX(self), self->screen.y, self->GetSize(), picks, 4);
+    for (u8 i = 0; i < n && i < 4; i++) PushCoinVram(picks[i]);
 }
 
 // ---------------------------------------------------------------------------

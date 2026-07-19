@@ -33,19 +33,6 @@ namespace demo::level {
         { 3, 12,  48, 192 },
     };
 
-    // BuildNextColumn/BuildPrevColumn walk a fixed 14-row column with
-    // tile_row = 2+2*mt (Next) / 29-2*mt (Prev), so attr_idx (tile_row>>2) is
-    // fully determined by the loop counter mt -- not something that needs
-    // recomputing (add + 2 shifts) every row. Likewise is_bottom (tile_row>>1&1)
-    // reduces to a plain function of mt's parity (Next: 1 on even mt, 0 on odd;
-    // Prev: 0 on even mt, 1 on odd), so the two shift-index values a call can
-    // ever produce are known before the loop starts, not per row. Tabling
-    // attr_idx and hoisting the shift-index pair out of the loop turns each
-    // row's bookkeeping into one indexed load + one already-computed pick,
-    // instead of an add, three shifts, and a nested branch every iteration.
-    static constexpr u8 kNextAttrIdx[14] = {0,1,1,2,2,3,3,4,4,5,5,6,6,7};
-    static constexpr u8 kPrevAttrIdx[14] = {7,6,6,5,5,4,4,3,3,2,2,1,1,0};
-
     // --- Attribute-half parity correction for odd-width viewports -------------
     // One NES attribute byte spans 32px = two metatile columns (a left/right
     // nibble pair), so a column's half is its absolute metatile-column parity.
@@ -185,17 +172,18 @@ namespace demo::level {
         const u8* col = ColMapColumn(worldCol);
         if (!col) return;                            // out of window (never in steady scroll)
 
-        // mt even -> is_bottom=1, mt odd -> is_bottom=0 (see kNextAttrIdx comment).
-        const u8 shiftIdxEven = attr_column & 1 ? 3 : 2;
-        const u8 shiftIdxOdd  = attr_column & 1 ? 1 : 0;
-
         for (u8 mt = 0; mt < 14; ++mt) {
-            const u8 m   = col[mt];                  // top-to-bottom, slot s row mt
-            const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
-            const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
-            AttributeBuffer[kNextAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
+            const u8 m = col[mt];                    // top-to-bottom, slot s row mt
 
-            const u8 step      = mt << 1;             // even tile-step: 0,2,..,26
+            const u8 step      = mt << 1;            // even tile-step: 0,2,..,26
+            const u8 tile_row  = 2 + step;
+            const u8 attr_idx  = tile_row >> 2;
+            const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 is_bottom = tile_row >> 1 & 1;
+            const u8 shift     = attr_column & 1 ? (is_bottom ? 6 : 2)
+                                                 : (is_bottom ? 4 : 0);
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
+
             buf[step]          = Metatiles_UL[m];
             buf[step + 1]      = Metatiles_UR[m];
             buf[28 + step]     = Metatiles_BL[m];
@@ -212,17 +200,18 @@ namespace demo::level {
         const u8* col = ColMapColumn(worldCol);
         if (!col) return;                            // out of window (never in steady scroll)
 
-        // mt even -> is_bottom=0, mt odd -> is_bottom=1 (see kPrevAttrIdx comment).
-        const u8 shiftIdxEven = ap ? 0 : 1;
-        const u8 shiftIdxOdd  = ap ? 2 : 3;
-
         for (u8 mt = 0; mt < 14; ++mt) {
-            const u8 m   = col[13 - mt];              // bottom-to-top, mirroring edgeL's walk
-            const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
-            const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
-            AttributeBuffer[kPrevAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
+            const u8 m = col[13 - mt];               // bottom-to-top, mirroring edgeL's walk
 
-            const u8 step  = mt << 1;
+            const u8 step      = mt << 1;
+            const u8 tile_row  = 29 - step;
+            const u8 attr_idx  = tile_row >> 2;
+            const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 is_bottom = tile_row >> 1 & 1;
+            const u8 shift     = ap ? (is_bottom ? 4 : 0)
+                                    : (is_bottom ? 6 : 2);
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
+
             buf[54 - step] = Metatiles_UL[m];
             buf[55 - step] = Metatiles_UR[m];
             buf[26 - step] = Metatiles_BL[m];
