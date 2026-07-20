@@ -23,9 +23,7 @@ inline constexpr u8 MetatilePaletteMask   = 0b0000'0011;
 enum class MetatileCollision : u8 {
     None    = 0x00,   // no collision
     Solid   = 0x04,   // blocks the actor
-    Collect = 0x08,   // collectable (coin); mapped to Solid for now.  Must sit in
-                      // the collision field (bits 7..2) -- 0x08 = class 2 << 2.
-                      // (0x03 would land in the palette bits and mask to None.)
+    Collect = 0x08,   // collectable
 };
 
 // Pack a collision class with a 2-bit palette index into one AT byte.

@@ -30,45 +30,58 @@ namespace demo::level {
 
     // Hot-path walk: i8 covers ±levelHeight.  lp/dp hoisted to locals (ZP).
     // Floor guard mirrors Cursor::Move: stop at level start, don't underflow.
+    //
+    // Counts an unsigned magnitude down to zero instead of testing signed `amt`
+    // against zero each iteration: 6502 has no signed-compare instruction, so a
+    // `>0`/`<0` test costs an extra branch+eor (N/V overflow correction) per
+    // iteration that a plain dec+bne countdown doesn't pay. Mirrors the unsigned
+    // countdown AdvancePairForward/AdvancePairBackward (collision_map.cpp) already
+    // use for the same RLE-walk shape. `0 - static_cast<u8>(amt)` is the
+    // wraparound two's-complement magnitude of a negative amt (defined, no UB),
+    // including the i8::min edge.
     void DynamicCursor::Move(i8 amt) {
         const u8* dlp = lp;
         u8*       ddp = dp;
         u8 p = progress;
-        #pragma clang loop unroll(disable)
-        while (amt > 0) {
-            if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
-            --amt;
-        }
-        #pragma clang loop unroll(disable)
-        while (amt < 0) {
-            if (p == 0) {
-                if (dlp == DynLengths) break;
-                --dlp; --ddp; p = *dlp;
+        if (amt > 0) {
+            #pragma clang loop unroll(disable)
+            for (u8 n = static_cast<u8>(amt); n != 0; --n) {
+                if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
             }
-            --p;
-            ++amt;
+        } else if (amt < 0) {
+            #pragma clang loop unroll(disable)
+            for (u8 n = static_cast<u8>(0 - static_cast<u8>(amt)); n != 0; --n) {
+                if (p == 0) {
+                    if (dlp == DynLengths) break;
+                    --dlp; --ddp; p = *dlp;
+                }
+                --p;
+            }
         }
         lp = dlp; dp = ddp; progress = p;
     }
 
     // Large-displacement walk (re-anchor, seek): same engine, i16 counter.
+    // See DynamicCursor::Move for why the loop counts an unsigned magnitude
+    // instead of testing signed `amt` against zero each iteration.
     void DynamicCursor::Seek(i16 amt) {
         const u8* dlp = lp;
         u8*       ddp = dp;
         u8 p = progress;
-        #pragma clang loop unroll(disable)
-        while (amt > 0) {
-            if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
-            --amt;
-        }
-        #pragma clang loop unroll(disable)
-        while (amt < 0) {
-            if (p == 0) {
-                if (dlp == DynLengths) break;
-                --dlp; --ddp; p = *dlp;
+        if (amt > 0) {
+            #pragma clang loop unroll(disable)
+            for (u16 n = static_cast<u16>(amt); n != 0; --n) {
+                if (++p >= *dlp) { ++dlp; ++ddp; p = 0; }
             }
-            --p;
-            ++amt;
+        } else if (amt < 0) {
+            #pragma clang loop unroll(disable)
+            for (u16 n = static_cast<u16>(0 - static_cast<u16>(amt)); n != 0; --n) {
+                if (p == 0) {
+                    if (dlp == DynLengths) break;
+                    --dlp; --ddp; p = *dlp;
+                }
+                --p;
+            }
         }
         lp = dlp; dp = ddp; progress = p;
     }
@@ -159,10 +172,10 @@ namespace demo::level {
     // ROM->RAM load for a level's dynamic plane.  STUB: uncalled until a level ships
     // a dynamic layer -- LoadLevel will call this with the level's dynamic lengths /
     // data (or nullptr / 0 for a level that has none).
-    void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u8 runCount) {
+    void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u16 runCount) {
         DynLengths = dynLengthsROM;
         DynDataROM = dynDataROM;
-        for (u8 i = 0; i < runCount; ++i)
+        for (u16 i = 0; i < runCount; ++i)
             DynData[i] = dynDataROM ? dynDataROM[i] : 0;
     }
 

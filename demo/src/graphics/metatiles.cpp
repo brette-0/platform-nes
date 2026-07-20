@@ -295,7 +295,7 @@ extern constexpr std::array<u8, 256> Metatiles_UL   = MetatilePlane(0);   // top
 extern constexpr std::array<u8, 256> Metatiles_BL   = MetatilePlane(1);   // bottom-left
 extern constexpr std::array<u8, 256> Metatiles_UR   = MetatilePlane(2);   // top-right
 extern constexpr std::array<u8, 256> Metatiles_BR   = MetatilePlane(3);   // bottom-right
-extern constexpr std::array<u8, 256> Metatiles_ATTR = MetatilePlane(4); // collision (7..2) | palette (1..0)
+extern constexpr std::array<u8, 256> Metatiles_ATTR = MetatilePlane(4);   // collision (7..2) | palette (1..0)
 
 // GetMetatileCollisions is defined inline in metatiles.hpp so every call site
 // can emit a direct indexed load + mask with no JSR/RTS overhead.
