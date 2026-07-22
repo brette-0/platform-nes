@@ -16,8 +16,7 @@
  * - ::PopulateFromBuffer / ::PopulateFromProvider — generic strided
  *   byte copies used by the video and audio subsystems.
  */
-#ifndef TECHNOLOGY_H
-#define TECHNOLOGY_H
+#pragma once
 
 #include <intsh>
 using namespace br0::intsh;
@@ -604,7 +603,3 @@ void PopulateFromProvider(u8* target, const u16 offset,
     for (Count i = 0; i < amt; ++i)
         base[static_cast<int>(i) * step] = fn(static_cast<Idx>(i));
 }
-
-
-
-#endif

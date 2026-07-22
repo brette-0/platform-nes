@@ -3,20 +3,28 @@
 #include "types.hpp"
 #include "../types.hpp"
 
-namespace demo {
-    enum eActorType {
+class Actor {
+    public:
+    enum class eActorType {
         Player,
-        Mushlet
+        Mushlet,
+
+        End
+    };
+
+    struct ActorTypeMetadata_t {
+        vec2<u8> collisionShape;
+    };
+
+    static constexpr ActorTypeMetadata_t ActorTypeMetadata[static_cast<size_t>(eActorType::End)] = {
+        { {16, 16} }, // player
+        { {16, 16} }, // mushlet
     };
 
     enum eActorState {
         Normal,     // default for that object (alive, moving whatever)
     };
 
-}
-
-class Actor {
-    public:
     // Collision is now a shared composite-metatile window read (see collision_map.hpp
     // / Blocked), so the actor no longer carries any per-actor collision cursors.  The
     // old surround constellation (four static column cursors + a dynamic anchor) lived
@@ -26,13 +34,21 @@ class Actor {
     vec2<oam::oam_t> screen;       // on-screen sprite position (OAM coords)
     vec2<i8> moveForce;            // subpixel movement force (8 subpx = 1px)
     i8 gravity;                    // accumulated downward accel (subpx/frame); 0 when grounded
-    demo::eActorType actorType;
-    demo::eActorState actorState;
+    eActorType actorType;
+    eActorState actorState;
     u8 animationFrame;
 
-    vec2<u8> GetSize() const;
+    static constexpr vec2<u8> GetSize(const eActorType actorType) {
+        return actorType < eActorType::End
+            ? ActorTypeMetadata[static_cast<size_t>(actorType)].collisionShape
+            : vec2<u8>{16, 16};
+    }
 
-    void (*start)(Actor* self);    // behaviour hooks: plain fn pointers, no vtable
+    [[nodiscard]] constexpr vec2<u8> GetSize() const {
+        return GetSize(this->actorType);
+    }
+
+    void (*start)(Actor* self);    // behavior hooks: plain fn pointers, no vtable
     void (*update)(Actor* self);   // null for now
 
     void Start();

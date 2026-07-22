@@ -1,5 +1,5 @@
 /*
- * NES-VRC1 (mapper 75) iNES file linker script.
+ * NES-VRC1 (mapper 75) NES2.0 file linker script.
  *
  * Real VRC1 hardware addressing:
  *   $8000-$9FFF  8 KiB PRG-ROM, switchable  (PRG Select 0, write $8000-$8FFF)
@@ -21,7 +21,7 @@
  * switchable window has only one physical bank it could ever show once
  * boot-time PRG Select 0/1/2 initialization (see _reset, below) has run --
  * so every existing call still behaves like an ordinary same-bank call with
- * zero source changes, while the physical ROM image, iNES header (mapper
+ * zero source changes, while the physical ROM image, NES2.0 header (mapper
  * 75) and per-window addressing are genuine VRC1.
  *
  * RESET VECTOR: real VRC1 hardware powers up with the PRG-select registers
@@ -82,13 +82,27 @@ MEMORY {
   /* Hardwired to the last physical bank on real hardware, regardless of any
    * PRG-select register's value. .prg_rom_fixed-tagged content only. */
   prg_rom_fixed       : ORIGIN = 0xe000, LENGTH = 0x2000
+  /* The 16-byte NES2.0 header prefixed to the ROM file itself -- never CPU-
+   * or PPU-addressed, so (like nes.ld's chr_rom region at 0x01000000) the
+   * origin is a fake address that exists only for FULL()'s bookkeeping
+   * below. Filled by header.hpp's NES2_HEADER() macro (see nes2.cpp). */
+  nes2_header         : ORIGIN = 0x02000000, LENGTH = 16
 }
 
 REGION_ALIAS("c_readonly", prg_rom_switchable)
 
 SECTIONS {
   .prg_rom_fixed : { *(.prg_rom_fixed .prg_rom_fixed.*) } >prg_rom_fixed
+  .nes2_header   : { KEEP(*(.nes2_header)) } >nes2_header
 }
+
+/* _nes2_header (see header.hpp's NES2_HEADER()) is otherwise never referenced
+ * by any code -- nothing in the executable calls into nes2.cpp -- so without
+ * this the linker would never pull that object out of libplatform-nes.a and
+ * .nes2_header above would stay empty (silently zero-padded by FULL(), below).
+ * Naming the symbol here forces extraction, exactly like the .vector table's
+ * direct SHORT(nmi)/SHORT(_reset)/SHORT(irq) references do for those objects. */
+EXTERN(_nes2_header)
 
 INCLUDE rompoke-table.ld
 INCLUDE dpcm.ld
@@ -108,7 +122,7 @@ SECTIONS {
 }
 
 OUTPUT_FORMAT {
-  INCLUDE ines-header.ld
+  FULL(nes2_header)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)
   FULL(chr_rom)

@@ -5,15 +5,6 @@
 
 static void TranslateWorldSpace(vec2<u16>& worldSpace, vec2<i8> delta);
 
-vec2<u8> Actor::GetSize() const {
-    switch (this->actorType) {
-        case demo::Player:
-            return {16, 16};
-        default:
-            return {16, 16};    // default size
-    }
-}
-
 void Actor::Move(const vec2<i8> delta /* sub px */) {
     TranslateWorldSpace(worldSpace, delta);
 
