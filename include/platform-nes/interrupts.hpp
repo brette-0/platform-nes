@@ -335,6 +335,48 @@ inline static void usr_main ()
 void nmi()
 
 /**
+ * @brief Declares the IRQ handler on non-NES builds.
+ *
+ * Non-NES equivalent of ::NMI, for symmetry with NES source that defines
+ * both vectors; not currently driven by any renderer backend.
+ */
+#define IRQ                     \
+void irq()
+
+/**
+ * @brief Non-NES equivalent of ::NAKED_NMI.
+ *
+ * There is no hardware vector or naked-function restriction off NES --
+ * ::nmi() is just an ordinary function the renderer calls once per
+ * simulated VBlank -- so this collapses to the same thing as ::NMI. Exists
+ * so shared source (e.g. a trampoline written once as `NAKED_NMI { JUMP(x); }`)
+ * compiles unchanged on every target.
+ */
+#define NAKED_NMI               \
+void nmi()
+
+/**
+ * @brief Non-NES equivalent of ::NAKED_IRQ. See ::NAKED_NMI.
+ */
+#define NAKED_IRQ               \
+void irq()
+
+/**
+ * @brief Non-NES equivalent of ::JUMP: an ordinary tail call.
+ *
+ * There's no `naked` body restriction to a single `asm` statement off NES,
+ * so this is just `target();` -- a normal call, immediately followed by
+ * the compiler-generated return from ::NAKED_NMI / ::NAKED_IRQ.
+ */
+#define JUMP(target) target()
+
+/**
+ * @brief Non-NES equivalent of ::JUMP_INDIRECT: an ordinary call through
+ *        a function-pointer variable.
+ */
+#define JUMP_INDIRECT(target) (target)()
+
+/**
  * @brief Enables the CPU interrupt line — a no-op off NES.
  *
  * @note This function does nothing on non-NES targets: the emu/console
