@@ -33,13 +33,13 @@
  */
 #include "internal.hpp"
 
-#include <platform-nes/video.hpp>
-#include <platform-nes/interrupts.hpp>
-#include "../emu/emu.hpp"
-
 #include <3ds.h>
 #include <citro2d.h>
 #include <citro3d.h>
+
+#include <platform-nes/video.hpp>
+#include <platform-nes/interrupts.hpp>
+#include "../emu/emu.hpp"
 #include <cstring>
 
 // ---------------------------------------------------------------------------
