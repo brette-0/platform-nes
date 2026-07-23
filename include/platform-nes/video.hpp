@@ -548,22 +548,60 @@ extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
 extern u8 scale;
 #endif
+#if defined(TARGET_OGC)
+/** @brief World columns visible this run (tiles). The GameCube/Wii TV output
+ *         resolution is runtime-only, so this is computed once at init from the
+ *         real TV pixel width (VIDEO_GetPreferredMode) rather than being a
+ *         compile-time constant. GC/Wii backend only. */
+extern u16 ogc_world_tx;
+#endif
 
 namespace video {
-#if defined(TARGET_NES) || defined(TARGET_OGC) || defined(TARGET_CTR)
-    // NES, the libogc (GameCube/Wii) backend, and the 3DS (citro2d) backend all
-    // present a fixed 32x30-tile NES frame. On NES this is the hardware PPU; on
-    // OGC the emulated framebuffer is a fixed 256x240 surface that GX scales to
-    // the TV; on 3DS the emulated 256x240 frame is uploaded as one texture and
-    // citro2d scales it to the top screen. In every case the viewport is
-    // constant (no window/display-mode dependency like the SDL backend has).
-    /** @brief Viewport width in tiles (NES/OGC/CTR: fixed 32). */
+#if defined(TARGET_NES)
+    // Real NES PPU hardware: physically fixed at 32x30 tiles (256x240px). There
+    // is no "cover a bigger screen" here -- the console IS the screen.
+    /** @brief Viewport width in tiles (NES: fixed 32, hardware PPU). */
     constexpr u16 viewport_tx() { return 32; }
-    /** @brief Viewport height in tiles (NES/OGC/CTR: fixed 30). */
+    /** @brief Viewport height in tiles (NES: fixed 30, hardware PPU). */
     constexpr u16 viewport_ty() { return 30; }
     /** @brief Viewport width in pixels (tiles * 8). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
     /** @brief Viewport height in pixels (tiles * 8). */
+    constexpr u16 viewport_py() { return viewport_ty() << 3; }
+#elif defined(TARGET_OGC)
+    // The GameCube/Wii TV output resolution (NTSC/PAL, 4:3/16:9,
+    // interlace/progressive) is known only at runtime, unlike the fixed 3DS
+    // panel below. Height stays pinned to the NES's 30 rows/240px; width is
+    // ogc_world_tx, computed once at init (src/ogc/video.cpp) from the real TV
+    // pixel width, so GX renders more of the game world to fill a wider screen
+    // instead of stretching a fixed 256px image -- the same "render more world"
+    // model the SDL LANDSCAPE desktop path uses. A tiny/unusual TV mode simply
+    // crops the camera (ogc_world_tx can resolve below 32); the underlying
+    // nametable VRAM is sized separately to never go below the NES's own
+    // 2-page/0x800-byte minimum (see the InitMemory call in src/ogc/video.cpp).
+    /** @brief Viewport width in tiles (GC/Wii: runtime, covers the real TV width). */
+    constexpr u16 viewport_tx() { return ogc_world_tx; }
+    /** @brief Viewport height in tiles (GC/Wii: fixed 30, matching the NES). */
+    constexpr u16 viewport_ty() { return 30; }
+    /** @brief Viewport width in pixels (tiles * 8). */
+    constexpr u16 viewport_px() { return viewport_tx() << 3; }
+    /** @brief Viewport height in pixels (tiles * 8). */
+    constexpr u16 viewport_py() { return viewport_ty() << 3; }
+#elif defined(TARGET_CTR)
+    // The 3DS top screen is a fixed 400x240 panel: exactly the NES's 240px
+    // height (scale 1), but 144px (18 tiles) wider than the NES's 256px. Render
+    // 50 tiles (400px) of actual game world at native 1:1 scale instead of
+    // non-integer-stretching a fixed 256-wide image across 400px -- the same
+    // "render more world" model as the other non-hardware backends. Known at
+    // compile time because, unlike the GameCube/Wii TV, the 3DS panel
+    // resolution never varies.
+    /** @brief Viewport width in tiles (3DS: fixed 50, covers the 400px top screen). */
+    constexpr u16 viewport_tx() { return 50; }
+    /** @brief Viewport height in tiles (3DS: fixed 30, matching the NES). */
+    constexpr u16 viewport_ty() { return 30; }
+    /** @brief Viewport width in pixels (tiles * 8 = 400). */
+    constexpr u16 viewport_px() { return viewport_tx() << 3; }
+    /** @brief Viewport height in pixels (tiles * 8 = 240). */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
 #elif defined(TARGET_NDS)
     // The Nintendo DS (and DSi) main engine is a fixed 256x192 panel -- the same
@@ -644,6 +682,24 @@ namespace video {
     /** @brief Viewport height in pixels (tiles * 8) — runtime, follows ::video::viewport_ty. */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
 #endif
+
+    /** @brief Nametable VRAM size in bytes required for this run.
+     *
+     * Mirrors the NES hardware's own fixed 2-nametable VRAM. A single
+     * viewport's worth of tiles needs ceil(tx/32) * ceil(ty/30) banks (0x400
+     * bytes each, one real NES nametable per bank); this always allocates
+     * exactly TWO such copies -- one for what's on screen, one headroom bank
+     * to scroll ahead into -- the same double-buffering the NES itself always
+     * has. A viewport at or under the NES's own 32x30 resolves to the
+     * hardware's stock 2 banks / 0x800 bytes; a larger-than-native viewport
+     * (wider in LANDSCAPE, taller in PORTRAIT) scales up proportionally, but
+     * is still always exactly double -- never a continuously-growing amount.
+     */
+    constexpr unsigned vram_bytes() {
+        const unsigned banks_x = (static_cast<unsigned>(viewport_tx()) + 31) / 32;
+        const unsigned banks_y = (static_cast<unsigned>(viewport_ty()) + 29) / 30;
+        return 2u * banks_x * banks_y * 0x400u;
+    }
 }
 
 

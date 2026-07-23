@@ -417,9 +417,10 @@ void init() {
     for (int s = 0; s < 128; s++) g_oam_shadow[s].a0 = ATTR0_DISABLE;
     dmaCopy(g_oam_shadow, oam_mem(), sizeof g_oam_shadow);
 
-    // Two-page (0x800-byte) nametable VRAM, like the NES hardware and the
-    // OGC/3DS/DS backends -- the viewport is a constant window, no window sizing.
-    emu::InitMemory(0x800);
+    // video::vram_bytes() (video.hpp): the GBA's 30x20 viewport is at or under
+    // the NES's native 32x30, so this resolves to the NES-hardware minimum
+    // (2 pages/0x800 bytes), like the NES hardware itself.
+    emu::InitMemory(video::vram_bytes());
 
     // Display on: mode 0, BG0 + OBJ enabled, 1D OBJ tile mapping.
     REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_OBJ | DCNT_OBJ_1D;

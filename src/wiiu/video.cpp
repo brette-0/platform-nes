@@ -101,10 +101,10 @@ void WaitForPresent() {
 }   // namespace video
 
 void init() {
-    // The core owns VideoRAM/paletteRAM; the Wii U uses the same fixed two-page
-    // VRAM policy as the other emulated-PPU consoles -- the widescreen viewport
-    // is still <512px wide, so two nametable pages suffice.
-    emu::InitMemory(0x800);
+    // The core owns VideoRAM/paletteRAM. video::vram_bytes() (video.hpp): the
+    // 52-tile-wide widescreen viewport is wider than the NES's native 32, so
+    // this resolves to double the NES-hardware minimum (4 pages/0x1000 bytes).
+    emu::InitMemory(video::vram_bytes());
 
     // The demo owns main() (the RESET macro), so SDL2main must not hijack it;
     // SDL_MAIN_HANDLED (above) + SDL_SetMainReady() tell SDL we did the startup.

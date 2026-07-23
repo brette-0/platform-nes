@@ -49,7 +49,18 @@ endif()
 # Name produces a "-x86_64.AppImage" argument that mksquashfs rejects as a flag.
 # project() does not touch GAME_NAME, so it survives to the linux block below.
 set(GAME_NAME "${PROJECT_NAME}")
-add_compile_definitions(LANDSCAPE)
+
+# Nametable mirroring orientation: platform-nes.hpp requires exactly one of
+# LANDSCAPE or PORTRAIT to be defined. Set ORIENTATION in local.cmake to
+# override per-developer; defaults to LANDSCAPE when left unset.
+if(NOT ORIENTATION)
+    set(ORIENTATION "LANDSCAPE")
+endif()
+if(NOT ORIENTATION STREQUAL "LANDSCAPE" AND NOT ORIENTATION STREQUAL "PORTRAIT")
+    message(FATAL_ERROR
+        "ORIENTATION must be LANDSCAPE or PORTRAIT, got: \"${ORIENTATION}\"")
+endif()
+add_compile_definitions(${ORIENTATION})
 add_compile_definitions(PROJECT_NAME="${PROJECT_NAME}")
 
 # The library and demo are compiled as C++23. C++20 would cover the
@@ -283,7 +294,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # silencer must be set explicitly to match the demo target. -x c++
             # forces the C++ frontend for the source inputs.
             -std=gnu++23 -Wno-c23-extensions -x c++
-            -Os ${PLATFORM_DEFINE_FLAGS} -DLANDSCAPE
+            -Os ${PLATFORM_DEFINE_FLAGS} -D${ORIENTATION}
             # Reserve 10 ZP bytes for FamiStudio (8 vars + 2 alignment slack).
             # mos-nes.cfg defaults to -mlto-zp=224 (the full region); capping at
             # 214 prevents mos-zero-page-alloc from filling the last 10 bytes and

@@ -57,6 +57,11 @@ static void       *gp_fifo = nullptr;     // GX command FIFO
 static constexpr u32 FIFO_SIZE = 256 * 1024;
 static int         efbH, fbW;             // EFB dimensions (scissor / overlay)
 
+// World columns visible this run (tiles) -- declared in video.hpp, computed
+// once in init() below from the real TV pixel width. NOT static: video.hpp's
+// video::viewport_tx() reads it from every other translation unit.
+u16 ogc_world_tx;
+
 // Projections, built once at init. NES-space (256x240) for the GX-native
 // tiles/sprites; screen-space for the profiler overlay.
 static Mtx44       proj_nes;
@@ -546,8 +551,19 @@ void init() {
     GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLORNULL);
     GX_SetTevOp(GX_TEVSTAGE0, GX_REPLACE);
 
+    // World columns needed to fill the real TV width when the fixed 30 rows
+    // map 1:1 to the real TV height -- i.e. render more world instead of
+    // stretching a 256px image over a wider screen (see video::viewport_tx()
+    // in video.hpp). Aligned to a multiple of 4 tiles (32px attribute grid),
+    // matching the SDL LANDSCAPE desktop formula. Derived from the same
+    // rmode->fbWidth/efbHeight pair GX_SetViewport above already uses, so the
+    // projection below stays self-consistent regardless of the actual TV mode.
+    const u32 ogc_scale = rmode->efbHeight >= 240 ? rmode->efbHeight / 240 : 1;
+    ogc_world_tx = static_cast<u16>(((rmode->fbWidth / ogc_scale) >> 3) & ~3u);
+
     // Both orthographic projections, built once; identity modelview.
-    // NES-space (256x240): GX tiles/sprites. Screen-space: profiler overlay.
+    // NES-space (256 x variable-width x240): GX tiles/sprites. Screen-space:
+    // profiler overlay.
     guOrtho(proj_nes,    0, video::viewport_py(), 0, video::viewport_px(), 0, 300);
 #if defined(OGC_PROFILER)
     guOrtho(proj_screen, 0, rmode->efbHeight - 1, 0, rmode->fbWidth - 1, 0, 300);
@@ -561,10 +577,11 @@ void init() {
     efbH = rmode->efbHeight;
     fbW  = rmode->fbWidth;
 
-    // The OGC backend uses a fixed two-page (0x800-byte) nametable VRAM, like
-    // the NES hardware -- the viewport is constant 32x30, so there is no
-    // window-derived sizing as on SDL.
-    emu::InitMemory(0x800);
+    // video::vram_bytes() (video.hpp) sizes this to the NES-hardware minimum
+    // (2 pages/0x800 bytes) when ogc_world_tx resolves to 32 or less (e.g. a
+    // tiny/unusual TV mode), or double the banks a wide TV's viewport needs
+    // otherwise (see nt_cols in draw_bg_band below).
+    emu::InitMemory(video::vram_bytes());
 
     // --- GX-NATIVE resources ----------------------------------------------
     chr_atlas = static_cast<u8 *>(memalign(32, ATLAS_W * ATLAS_H / 2));

@@ -156,14 +156,17 @@ void init() {
     const SDL_DisplayID display = SDL_GetPrimaryDisplay();
     mode = SDL_GetCurrentDisplayMode(display);
 
+    // A tiny monitor crops the camera (scale/viewport_tx()/ty() can resolve
+    // below the NES's own 32x30); video::vram_bytes() (video.hpp) never sizes
+    // the nametable VRAM below the NES-hardware minimum regardless.
 #ifdef LANDSCAPE
     scale = mode->h / 240;
-    const unsigned vram = mode->w / scale < 512 ? 0x800 : mode->w / scale * 0x400;
 #endif
 #if PORTRAIT
     scale = mode->w / 256;
-    const unsigned vram = mode->h / scale < 480 ? 0x800 : mode->w / scale * 0x400;
 #endif
+    if (scale < 1) scale = 1;
+    const unsigned vram = video::vram_bytes();
 
     // The core owns VideoRAM/paletteRAM; the VRAM size policy is the backend's
     // (window-derived on SDL, fixed two pages on OGC), so size it here.

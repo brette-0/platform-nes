@@ -47,22 +47,14 @@
 // PPUCTRL/PPUMASK, the OAM snapshot, CHR_ROM, ...) is owned by src/emu; only the
 // genuine citro2d/citro3d objects live here.
 // ---------------------------------------------------------------------------
-static constexpr int NES_W = 256;
 static constexpr int NES_H = 240;
 
-// Top screen is 400x240. The 256x240 NES frame is presented at a 4:3 aspect
-// (320x240, matching a CRT), centred horizontally with symmetric side bars. The
-// horizontal upscale is non-integer (320/256 = 1.25), so tiles/sprites are
-// positioned and scaled in one C2D_DrawImageAt; 1.25*8 = 10 px per tile lands on
-// integer boundaries, so full tiles stay seamless. Everything is clipped to the
-// NES 256x240 window first (see draw_bg_cell / draw_spr_tile) so partial edge
-// tiles never bleed into the side bars.
-static constexpr float SCREEN_W = 400.0f;
-static constexpr float DRAW_W   = 320.0f;                      // 4:3 on a 240px-tall screen
-static constexpr float DRAW_SX  = DRAW_W / NES_W;              // 1.25
-static constexpr float DRAW_SY  = 1.0f;                        // 240 fills the height
-static constexpr float DRAW_OX  = (SCREEN_W - DRAW_W) / 2.0f;  // 40
-static constexpr float DRAW_OY  = 0.0f;
+// Top screen is a fixed 400x240 panel: exactly the NES's 240px height (scale
+// 1), so video::viewport_tx() (video.hpp) resolves to 50 tiles/400px instead of
+// the NES's native 32 -- the extra 18 tile columns are real game world, drawn
+// native 1:1 like every other tile, so no stretch and no side bars are needed.
+// Everything is still clipped to the viewport window first (see draw_bg_cell /
+// draw_spr_tile) so partial edge tiles cut clean at the panel edge.
 
 // CHR atlas geometry: 512 tiles, 16 per row -> 128x256 RGBA8 texels, one NES
 // tile per 8x8 block. POT in both axes (PICA textures must be power-of-two).
@@ -178,8 +170,11 @@ static inline float row_v(const int texel_row) {
     return 1.0f - (float)texel_row / ATLAS_H;
 }
 
-// Draw one background cell (already clipped to its band and the NES window;
-// never flipped). c0/w select the visible texel columns, r0/h the visible rows.
+// Draw one background cell (already clipped to its band and the viewport
+// window; never flipped). c0/w select the visible texel columns, r0/h the
+// visible rows. Drawn at native 1:1 scale -- the viewport already spans the
+// full 400px panel width (see video::viewport_tx() in video.hpp), so no
+// stretch or centring offset is needed.
 static inline void draw_bg_cell(C3D_Tex *tex, const Cell &c) {
     const int ax = (c.tile & 15) * 8 + c.c0;
     const int ay = (c.tile >> 4) * 8;
@@ -192,18 +187,17 @@ static inline void draw_bg_cell(C3D_Tex *tex, const Cell &c) {
     sub.top    = row_v(top_row);
     sub.bottom = row_v(top_row + c.h);
     C2D_Image img{ tex, &sub };
-    C2D_DrawImageAt(img, DRAW_OX + c.sx * DRAW_SX, DRAW_OY + c.vy0 * DRAW_SY,
-                    0.0f, nullptr, DRAW_SX, DRAW_SY);
+    C2D_DrawImageAt(img, (float)c.sx, (float)c.vy0, 0.0f);
 }
 
-// Draw one 8x8 sprite tile, clipped to the NES 256x240 window; flipH/flipV swap
+// Draw one 8x8 sprite tile, clipped to the viewport window; flipH/flipV swap
 // the UVs. The visible screen sub-rectangle is mapped back to UVs by linear
 // interpolation so a partial edge sprite shows exactly its on-window columns/rows
-// (correct under flips too) without bleeding into the side bars.
+// (correct under flips too). Drawn at native 1:1 scale, like draw_bg_cell.
 static inline void draw_spr_tile(C3D_Tex *tex, const int tile, const int sx,
                                  const int sy, const bool flipH, const bool flipV) {
     const int vx0 = sx < 0 ? 0 : sx;
-    const int vx1 = (sx + 8) > NES_W ? NES_W : (sx + 8);
+    const int vx1 = (sx + 8) > video::viewport_px() ? video::viewport_px() : (sx + 8);
     const int vy0 = sy < 0 ? 0 : sy;
     const int vy1 = (sy + 8) > NES_H ? NES_H : (sy + 8);
     if (vx1 <= vx0 || vy1 <= vy0) return;
@@ -227,8 +221,7 @@ static inline void draw_spr_tile(C3D_Tex *tex, const int tile, const int sx,
     sub.top    = vt + (vb - vt) * fyl;
     sub.bottom = vt + (vb - vt) * fyr;
     C2D_Image img{ tex, &sub };
-    C2D_DrawImageAt(img, DRAW_OX + vx0 * DRAW_SX, DRAW_OY + vy0 * DRAW_SY,
-                    0.0f, nullptr, DRAW_SX, DRAW_SY);
+    C2D_DrawImageAt(img, (float)vx0, (float)vy0, 0.0f);
 }
 
 // ::emu::band_emit_fn: draw the nametable for screen rows [y0,y1) at the given
@@ -405,10 +398,10 @@ void init() {
 
     atlas_scratch = (u32 *)linearAlloc(ATLAS_W * ATLAS_H * sizeof(u32));
 
-    // The 3DS backend uses a fixed two-page (0x800-byte) nametable VRAM, like
-    // the NES hardware and the OGC backend -- the viewport is constant 32x30, so
-    // there is no window-derived sizing as on SDL.
-    emu::InitMemory(0x800);
+    // video::vram_bytes() (video.hpp): the 3DS's 50-tile-wide viewport is wider
+    // than the NES's native 32, so this resolves to double the NES-hardware
+    // minimum (4 pages/0x1000 bytes), not the stock 2.
+    emu::InitMemory(video::vram_bytes());
 }
 
 void post() {

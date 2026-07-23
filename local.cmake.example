@@ -10,6 +10,10 @@
 # default if this is left unset.
 set(PROJECT_NAME "My Super Game")
 
+# Nametable mirroring orientation: LANDSCAPE or PORTRAIT. Optional --
+# CMakeLists.txt falls back to LANDSCAPE if this is left unset.
+set(ORIENTATION "LANDSCAPE")
+
 # Path to your llvm-mos-sdk install root, used by the NES build. Only required
 # if you build the NES target. CMakeLists derives the cross-toolchain and
 # CMAKE_PREFIX_PATH from this one value. The SDK does NOT need to be on your

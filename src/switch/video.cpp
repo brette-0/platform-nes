@@ -112,10 +112,10 @@ void WaitForPresent() {
 }   // namespace video
 
 void init() {
-    // The core owns VideoRAM/paletteRAM; the Switch uses the same fixed two-page
-    // VRAM policy as the other emulated-PPU consoles (OGC/3DS) -- the widescreen
-    // viewport is still <512px wide, so two nametable pages suffice.
-    emu::InitMemory(0x800);
+    // The core owns VideoRAM/paletteRAM. video::vram_bytes() (video.hpp): the
+    // 52-tile-wide widescreen viewport is wider than the NES's native 32, so
+    // this resolves to double the NES-hardware minimum (4 pages/0x1000 bytes).
+    emu::InitMemory(video::vram_bytes());
 
     // Build the nearest-neighbour scale maps once. Vertically this is exact 3x
     // (240*3 == 720); horizontally it is a near-3x stretch (416 -> 1280).

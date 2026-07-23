@@ -314,9 +314,10 @@ void init() {
     dmaCopy(g_chr4, bgGetGfxPtr(g_bg),            sizeof g_chr4);
     dmaCopy(g_chr4, oamGetGfxPtr(&oamMain, 0),    sizeof g_chr4);
 
-    // Two-page (0x800-byte) nametable VRAM, like the NES hardware and the OGC/3DS
-    // backends -- the viewport is a constant window, no window-derived sizing.
-    emu::InitMemory(0x800);
+    // video::vram_bytes() (video.hpp): the DS's 32x24 viewport is at or under
+    // the NES's native 32x30, so this resolves to the NES-hardware minimum
+    // (2 pages/0x800 bytes), like the NES hardware itself.
+    emu::InitMemory(video::vram_bytes());
 
     // The per-scanline raster mechanism: an HBlank ISR programs the scroll for
     // each upcoming line from the band table (this is what reproduces mid-frame
