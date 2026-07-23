@@ -42,15 +42,16 @@
  * reset-banked-8.o, which does the equivalent for MMC3's own bank-select
  * registers).
  *
- * PRECONDITION: __mapper is deliberately left to this script (set below),
- * not to crt0. nes-nrom's own crt0.o hardcodes __mapper = 0 as a non-weak
- * symbol, so linking this script against that particular crt0.o will fail
- * with a multiple-definition error on __mapper. This script must be linked
- * against a crt0 that leaves __mapper undefined (e.g. the generic nes
- * platform's crt0.o, not nes-nrom's).
+ * NOTE ON __mapper: earlier revisions of this script set the linker symbol
+ * __mapper here, for llvm-mos's own ines-header.ld generator. This project's
+ * NES2.0 header is now built entirely by header.hpp's HEADER() macro from
+ * the MAPPER/SUBMAPPER compiler defines (see CMakeLists.txt and nes2.cpp),
+ * which ines-header.ld never sees -- this script doesn't INCLUDE it -- so
+ * __mapper is dead weight and is no longer defined here.
  *
- * COROLLARY: that same crt0 swap also drops nes-nrom crt0.o's weak
- * __prg_rom_size/__chr_rom_size defaults (32/8) -- it's the only crt0 that
+ * COROLLARY: using the generic nes platform (rather than nes-nrom) also
+ * drops nes-nrom crt0.o's weak __prg_rom_size/__chr_rom_size defaults
+ * (32/8) -- it's the only crt0 that
  * happens to define them, as a side effect of being NROM-specific. The
  * generic nes platform's crt0.o leaves both undefined, so this script must
  * PROVIDE its own defaults below (matching nes-nrom's values, since that's
@@ -64,8 +65,6 @@
 
 INCLUDE nes.ld
 INCLUDE c-in-ram.ld
-
-__mapper = 75;
 
 PROVIDE(__prg_rom_size = 32);
 PROVIDE(__chr_rom_size = 8);

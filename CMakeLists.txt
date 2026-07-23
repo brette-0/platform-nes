@@ -98,9 +98,10 @@ FetchContent_Declare(
 # ----------------------------------------------------------------------
 if(TARGET_PLATFORM STREQUAL "nes")
     # Mapper 75 (VRC1), not NROM: linked against the generic nes-platform
-    # crt0 (LLVM_MOS_PLATFORM=nes, not nes-nrom) per vrc1.ld's own
-    # precondition note -- nes-nrom's crt0.o hardcodes __mapper=0 as a
-    # non-weak symbol, which conflicts with vrc1.ld's own __mapper=75.
+    # crt0 (LLVM_MOS_PLATFORM=nes, not nes-nrom), since nes-nrom's own
+    # crt0.o/link.ld hardcode NROM-specific __prg_rom_size/__chr_rom_size
+    # defaults that this VRC1 build must supply itself (see vrc1.ld's
+    # COROLLARY comment).
     #
     # The generic nes platform has no default link.ld (unlike nes-nrom and
     # the other mapper subtargets), so -T must be supplied explicitly. This
@@ -135,6 +136,13 @@ if(TARGET_PLATFORM STREQUAL "nes")
     if(NOT LLVM_MOS_PLATFORM STREQUAL "nes-nrom")
         list(APPEND PLATFORM_DEFINE NES_MAPPER_BANKSWITCHED)
     endif()
+
+    # Mapper/submapper number for header.hpp's HEADER() macro (see
+    # nes2.cpp). This is the only mapper subtarget this branch currently
+    # builds (VRC1_LD is hardcoded above), so it's unconditional for now --
+    # becomes an if/elseif alongside VRC1_LD once a second mapper subtarget
+    # exists, one MAPPER/SUBMAPPER pair per board.
+    list(APPEND PLATFORM_DEFINE "MAPPER=75" "SUBMAPPER=0")
     # -D-prefixed form for the pass-1 custom command below, which invokes the
     # compiler directly and so doesn't pick up target_compile_definitions.
     list(TRANSFORM PLATFORM_DEFINE PREPEND "-D" OUTPUT_VARIABLE PLATFORM_DEFINE_FLAGS)

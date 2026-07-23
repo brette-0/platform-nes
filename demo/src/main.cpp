@@ -1,4 +1,5 @@
 ﻿#include <platform-nes>
+#include "header.hpp"
 #include "main.hpp"
 
 #include "graphics/colours.hpp"
