@@ -39,10 +39,10 @@ const u8 *patternTable = CHR_ROM;
 
 static int yScroll_written;
 
-static spriteZeroHandler_t sprite0_zero;
+static video::spriteZeroHandler_t sprite0_zero;
 
-void SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
-    sprite0_zero = (spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
+void video::SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
+    sprite0_zero = (video::spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
 }
 
 static constexpr u32 nes_rgb[64] = {
@@ -138,8 +138,8 @@ void GenerateFrame(u32 *fb, const int stride) {
             /* Check whether the single pending IRQ falls on this scanline. */
             int seg_end = vpw;
             int fire    = 0;
-            if (!irq_fired && irqPendingValid) {
-                const irq_t& ev = irqPending;
+            if (!irq_fired && irq::irqPendingValid) {
+                const irq::irq_t& ev = irq::irqPending;
                 if (static_cast<int>(ev.py) < py
                     || (static_cast<int>(ev.py) == py && static_cast<int>(ev.px) < seg_start)) {
                     /* Already past — treat as fired without calling the handler. */
@@ -270,7 +270,7 @@ void GenerateFrame(u32 *fb, const int stride) {
              * starts at seg_end) will derive wy from the updated counter. */
             if (fire) {
                 irq_fired = true;
-                if (irqPending.fn) irqPending.fn();
+                if (irq::irqPending.fn) irq::irqPending.fn();
                 if (yScroll_written) {
                     ppu_y = static_cast<int>(yScroll);
                     yScroll_written = 0;
@@ -310,8 +310,8 @@ void GenerateBands(const band_emit_fn emit) {
          * scanline granularity (the px within a line is irrelevant to a tile
          * renderer), but still run the handler so game logic and the scroll
          * write happen at the right raster position. */
-        if (!irq_fired && irqPendingValid) {
-            const irq_t& ev = irqPending;
+        if (!irq_fired && irq::irqPendingValid) {
+            const irq::irq_t& ev = irq::irqPending;
             if (static_cast<int>(ev.py) < py) {
                 irq_fired = true;   // stale — past without firing
             } else if (static_cast<int>(ev.py) == py) {
@@ -517,8 +517,8 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 
 }   // namespace ppu
 
-void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
+void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     *latch = true;
-    SetSpriteZeroHandler(px, py, fn);
-    SetNextIRQHandler((irq_t){ .fn = fn, .px = px, .py = py });
+    video::SetSpriteZeroHandler(px, py, fn);
+    irq::SetNextIRQHandler((irq::irq_t){ .fn = fn, .px = px, .py = py });
 }

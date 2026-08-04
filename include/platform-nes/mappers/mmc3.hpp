@@ -118,8 +118,8 @@ public:
     u8   get() const     { return shadow_; }                          ///< read  = shadow
     void set(const u8 v) { shadow_ = v; poke_only(v); }               ///< write = shadow + hardware
     void poke_only(const u8 v) const {                                 ///< write hardware only, no shadow update
-        poke(0x8000, detail::kModeBits | Index);
-        poke(0x8001, v);
+        tech::poke(0x8000, detail::kModeBits | Index);
+        tech::poke(0x8001, v);
     }
 
     operator u8() const { return shadow_; }
@@ -161,19 +161,19 @@ extern mmc3_register<5> chr5Control; ///< CHR-select R5, 1 KiB @ PPU $1C00.
  *        horizontal. Plain direct-address register, unlike the indexed
  *        R0-R7 family above.
  */
-extern wo_register<0xa000> mirroring;
+extern tech::wo_register<0xa000> mirroring;
 
 /**
  * @brief PRG-RAM enable/write-protect ($A001). Bit 6 = RAM enable, bit 7 =
  *        write-protect. mmc3.cpp's ::_reset enables RAM, writable, at boot.
  */
-extern wo_register<0xa001> prgRamProtect;
+extern tech::wo_register<0xa001> prgRamProtect;
 
 /**
  * @brief Scanline IRQ reload latch ($C000) -- the value the counter is set
  *        to whenever it reloads. See ::ScheduleScanlineIRQ.
  */
-extern wo_register<0xc000> irqLatch;
+extern tech::wo_register<0xc000> irqLatch;
 
 /**
  * @brief Writes @p ctx into an MMC3 bank register, banking in that

@@ -31,49 +31,48 @@
 #include <platform-nes/technology.hpp>
 
 /**
- * @brief 2A03 APU register file as a static class namespace.
+ * @brief 2A03 APU register file as a namespace.
  *
- * All members are static; access as `apu::sq1_vol`, `apu::DisableFrameIRQ()`, etc.
+ * Access as `apu::sq1_vol`, `apu::DisableFrameIRQ()`, etc.
  * Addresses $4009 and $400D are unused by the 2A03 and are omitted.
  */
-class apu {
-public:
-    static wo_register<0x4000> sq1_vol;       ///< Pulse 1 — duty / envelope / volume
-    static wo_register<0x4001> sq1_sweep;     ///< Pulse 1 — sweep unit
-    static wo_register<0x4002> sq1_lo;        ///< Pulse 1 — timer low 8 bits
-    static wo_register<0x4003> sq1_hi;        ///< Pulse 1 — length counter + timer high
+namespace apu {
+    extern tech::wo_register<0x4000> sq1_vol;       ///< Pulse 1 — duty / envelope / volume
+    extern tech::wo_register<0x4001> sq1_sweep;     ///< Pulse 1 — sweep unit
+    extern tech::wo_register<0x4002> sq1_lo;        ///< Pulse 1 — timer low 8 bits
+    extern tech::wo_register<0x4003> sq1_hi;        ///< Pulse 1 — length counter + timer high
 
-    static wo_register<0x4004> sq2_vol;       ///< Pulse 2 — duty / envelope / volume
-    static wo_register<0x4005> sq2_sweep;     ///< Pulse 2 — sweep unit
-    static wo_register<0x4006> sq2_lo;        ///< Pulse 2 — timer low 8 bits
-    static wo_register<0x4007> sq2_hi;        ///< Pulse 2 — length counter + timer high
+    extern tech::wo_register<0x4004> sq2_vol;       ///< Pulse 2 — duty / envelope / volume
+    extern tech::wo_register<0x4005> sq2_sweep;     ///< Pulse 2 — sweep unit
+    extern tech::wo_register<0x4006> sq2_lo;        ///< Pulse 2 — timer low 8 bits
+    extern tech::wo_register<0x4007> sq2_hi;        ///< Pulse 2 — length counter + timer high
 
-    static wo_register<0x4008> tri_linear;    ///< Triangle — linear counter control
-    static wo_register<0x400A> tri_lo;        ///< Triangle — timer low 8 bits
-    static wo_register<0x400B> tri_hi;        ///< Triangle — length counter + timer high
+    extern tech::wo_register<0x4008> tri_linear;    ///< Triangle — linear counter control
+    extern tech::wo_register<0x400A> tri_lo;        ///< Triangle — timer low 8 bits
+    extern tech::wo_register<0x400B> tri_hi;        ///< Triangle — length counter + timer high
 
-    static wo_register<0x400C> noise_vol;     ///< Noise — envelope / volume
-    static wo_register<0x400E> noise_lo;      ///< Noise — mode + period
-    static wo_register<0x400F> noise_hi;      ///< Noise — length counter
+    extern tech::wo_register<0x400C> noise_vol;     ///< Noise — envelope / volume
+    extern tech::wo_register<0x400E> noise_lo;      ///< Noise — mode + period
+    extern tech::wo_register<0x400F> noise_hi;      ///< Noise — length counter
 
-    static wo_register<0x4010> dmc_freq;      ///< DMC — IRQ enable, loop, rate index
-    static wo_register<0x4011> dmc_raw;       ///< DMC — direct load (7-bit DAC level)
-    static wo_register<0x4012> dmc_start;     ///< DMC — sample start address ($C000 base)
-    static wo_register<0x4013> dmc_len;       ///< DMC — sample byte count
+    extern tech::wo_register<0x4010> dmc_freq;      ///< DMC — IRQ enable, loop, rate index
+    extern tech::wo_register<0x4011> dmc_raw;       ///< DMC — direct load (7-bit DAC level)
+    extern tech::wo_register<0x4012> dmc_start;     ///< DMC — sample start address ($C000 base)
+    extern tech::wo_register<0x4013> dmc_len;       ///< DMC — sample byte count
 
-    static wo_register<0x4015> snd_chn;       ///< Channel enable / length counter status
-    static wo_register<0x4017> frame_counter; ///< Frame counter mode + IRQ inhibit
+    extern tech::wo_register<0x4015> snd_chn;       ///< Channel enable / length counter status
+    extern tech::wo_register<0x4017> frame_counter; ///< Frame counter mode + IRQ inhibit
 
     /** @brief Inhibit the frame counter IRQ — forces 5-step mode ($4017 bits 7+6). */
-    static void DisableFrameIRQ() { frame_counter = static_cast<u8>(frame_counter) | 0xC0; }
+    inline void DisableFrameIRQ() { frame_counter = static_cast<u8>(frame_counter) | 0xC0; }
     /** @brief Allow the frame counter IRQ ($4017 bit 6 clear). */
-    static void EnableFrameIRQ()  { frame_counter = static_cast<u8>(frame_counter) & ~0x40; }
+    inline void EnableFrameIRQ()  { frame_counter = static_cast<u8>(frame_counter) & ~0x40; }
 
     /** @brief Enable the DMC IRQ ($4010 bit 7). */
-    static void EnableDMCIRQ()    { dmc_freq = static_cast<u8>(dmc_freq) | 0x80; }
+    inline void EnableDMCIRQ()    { dmc_freq = static_cast<u8>(dmc_freq) | 0x80; }
     /** @brief Disable the DMC IRQ ($4010 bit 7 clear). */
-    static void DisableDMCIRQ()   { dmc_freq = static_cast<u8>(dmc_freq) & ~0x80; }
-};
+    inline void DisableDMCIRQ()   { dmc_freq = static_cast<u8>(dmc_freq) & ~0x80; }
+}
 
 /**
  * @brief PRESERVE/RESTORE family covering APU registers except DMC timing
@@ -122,24 +121,23 @@ extern u8 APU_REGISTERS_snapshot[15];
  * handlers, ::PRESERVE / ::RESTORE / ::SHADOW over ::APU_REGISTERS, and direct
  * calls like `apu::DisableFrameIRQ()`) compile unchanged across every target.
  */
-class apu {
-public:
-    static u8 sq1_vol, sq1_sweep, sq1_lo, sq1_hi;
-    static u8 sq2_vol, sq2_sweep, sq2_lo, sq2_hi;
-    static u8 tri_linear, tri_lo, tri_hi;
-    static u8 noise_vol, noise_lo, noise_hi;
-    static u8 dmc_freq, dmc_raw, dmc_start, dmc_len;
-    static u8 snd_chn, frame_counter;
+namespace apu {
+    extern u8 sq1_vol, sq1_sweep, sq1_lo, sq1_hi;
+    extern u8 sq2_vol, sq2_sweep, sq2_lo, sq2_hi;
+    extern u8 tri_linear, tri_lo, tri_hi;
+    extern u8 noise_vol, noise_lo, noise_hi;
+    extern u8 dmc_freq, dmc_raw, dmc_start, dmc_len;
+    extern u8 snd_chn, frame_counter;
 
-    /** @brief Does nothing on non-NES targets; see the class-level @note. */
-    static void DisableFrameIRQ() {}
-    /** @brief Does nothing on non-NES targets; see the class-level @note. */
-    static void EnableFrameIRQ()  {}
-    /** @brief Does nothing on non-NES targets; see the class-level @note. */
-    static void EnableDMCIRQ()    {}
-    /** @brief Does nothing on non-NES targets; see the class-level @note. */
-    static void DisableDMCIRQ()   {}
-};
+    /** @brief Does nothing on non-NES targets; see the namespace-level @note. */
+    inline void DisableFrameIRQ() {}
+    /** @brief Does nothing on non-NES targets; see the namespace-level @note. */
+    inline void EnableFrameIRQ()  {}
+    /** @brief Does nothing on non-NES targets; see the namespace-level @note. */
+    inline void EnableDMCIRQ()    {}
+    /** @brief Does nothing on non-NES targets; see the namespace-level @note. */
+    inline void DisableDMCIRQ()   {}
+}
 
 /**
  * @brief PRESERVE/RESTORE family covering APU registers except DMC timing

@@ -141,13 +141,13 @@ void WaitForPresent() {
     }
     /* Clear the pending IRQ slot between frames so a handler that was not
      * reached this frame (e.g. fired too late) does not re-fire next frame. */
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 }   // namespace video
 
-void init() {
+void irq::init() {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return;
@@ -179,7 +179,7 @@ void init() {
     timer_id = SDL_AddTimer(16, vblank_tick, nullptr);
 }
 
-void post() {
+void irq::post() {
     SDL_RemoveTimer(timer_id);
     if (bgTexture) SDL_DestroyTexture(bgTexture);
     SDL_DestroyRenderer(renderer);

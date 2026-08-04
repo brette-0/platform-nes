@@ -83,7 +83,7 @@ atomic u8 spriteZeroHandled;
 
 oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
-atomic enum_flags<eLevelStreamCommands> levelStreamCommand;
+atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
 u8 TileBuffer[56];
 
 static oam::oam_t Clear(u16 _);
@@ -143,7 +143,7 @@ RESET {
 #endif
 
     if (!level::LoadLevel(0)) {
-        reset();    // spin reset on NES, exit on SDL3
+        irq::reset();    // spin reset on NES, exit on SDL3
     }
 
     ppu::Flush(chrHUDWhitespace_tile, 0x11);
@@ -197,8 +197,8 @@ RESET {
 
     ppu::SetScroll(0, 0);
 
-    AudioInit();
-    TrackPlay(0);
+    audio::AudioInit();
+    audio::TrackPlay(0);
 
     // Seed the shared composite-metatile window over columns [0..kColMapWidth-1]
     // from the level start: a static Cursor and a dynamic Cursor both parked on
@@ -216,10 +216,10 @@ RESET {
 
     apu::DisableFrameIRQ();
     apu::DisableDMCIRQ();
-    EnableInterrupts();
+    irq::EnableInterrupts();
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
-        if (port1 & START) {
+        if (port1 & input::START) {
 #ifndef  TARGET_NES
             quit = 1;
 #endif
@@ -238,7 +238,7 @@ RESET {
         OAMBuffer[0] = { 7, chrSprite0_tile, 0, 0 };   // re-assert after player update
 
         ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
-        AudioUpdate();
+        audio::AudioUpdate();
         ppu::SetColorPriority(0);
 
         video::WaitForPresent();
@@ -252,7 +252,7 @@ RESET {
 
 interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
-    PollControllers(&port1, &port2);
+    input::PollControllers(&port1, &port2);
     oam::RefreshSprites(OAMBuffer);
 
     spriteZeroHandled = 0;
@@ -286,7 +286,7 @@ interrupt nmiHandler() {
     }
 
     ppu::SetColorPriority(0);
-    WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
+    video::WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
 
     nmi_done = true;
 }

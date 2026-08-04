@@ -3,20 +3,20 @@
 #include <intsh>
 using namespace br0::intsh;
 
-const u16 PatternTables        = 0;
+const u16 video::PatternTables = 0;
 constexpr u16 NameTables       = 0x2000;
 constexpr u16 PaletteTables    = 0x3f00;
 constexpr u16 nVideoRam        = 0x800;
 atomic u16 xScroll = 0;
 atomic u16 yScroll = 0;
 namespace ppu {
-wo_register<raw::PPUCTRL>   PPUCTRL;
-wo_register<raw::PPUMASK>   PPUMASK;
+tech::wo_register<raw::PPUCTRL>   PPUCTRL;
+tech::wo_register<raw::PPUMASK>   PPUMASK;
 }   // namespace ppu
 
 namespace oam {
-wo_register<ppu::raw::OAMADDR> OAMADDR;
-wo_register<ppu::raw::OAMDMA>  OAMDMA;
+tech::wo_register<ppu::raw::OAMADDR> OAMADDR;
+tech::wo_register<ppu::raw::OAMDMA>  OAMDMA;
 }   // namespace oam
 
 inline static u16 xy_to_nt_addr(const u16 x, const u16 y) {
@@ -62,22 +62,22 @@ void EnableRendering(const u8 ppuCtrl_, const u8 ppuMask_) {
 }
 
 void Flush(const u8 nt, const u8 at) {
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, NameTables >> 8);
-    poke(raw::PPUADDR, NameTables & 0xFF);
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, NameTables >> 8);
+    tech::poke(raw::PPUADDR, NameTables & 0xFF);
 
     for (auto page = 0; page < nVideoRam / 0x400; page++) {
         for (auto nt_hunk = 0; nt_hunk < 0xf0; nt_hunk++) {
-            poke(raw::PPUDATA, nt);
-            poke(raw::PPUDATA, nt);
-            poke(raw::PPUDATA, nt);
-            poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
         }
         for (u8 at_hunk = 0; at_hunk < 0x10; at_hunk++) {
-            poke(raw::PPUDATA, at);
-            poke(raw::PPUDATA, at);
-            poke(raw::PPUDATA, at);
-            poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
 
         }
     }
@@ -104,8 +104,8 @@ void SetScroll(const u16 x, u16 y) {
 
     PPUCTRL = PPUCTRL & 0xFC | nt;
 
-    poke(raw::PPUSCROLL, static_cast<u8>(x & 0xFF));
-    poke(raw::PPUSCROLL, static_cast<u8>(y & 0xFF));
+    tech::poke(raw::PPUSCROLL, static_cast<u8>(x & 0xFF));
+    tech::poke(raw::PPUSCROLL, static_cast<u8>(y & 0xFF));
 }
 
 void DeltaScroll(const i8 x, const i8 y) {
@@ -121,22 +121,22 @@ void WriteFromBufferToNameTable(
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
 
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
 
     for (auto i = 0; i < sBuffer; i++) {
-        poke(raw::PPUDATA, source[i]);
+        tech::poke(raw::PPUDATA, source[i]);
     }
 }
 
 __attribute__((hot))
 void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_nt_addr(x, y);
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
-    poke(raw::PPUDATA, value);
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUDATA, value);
 }
 
 // Address overload: the caller already projected (x,y) -> a $2000-based PPU address
@@ -145,10 +145,10 @@ void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
 // (x,y) form is the cost worth hoisting out.
 __attribute__((hot))
 void WriteSingleToNameTable(const int address, const u8 value) {
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(address >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
-    poke(raw::PPUDATA, value);
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
+    tech::poke(raw::PPUDATA, value);
 }
 
 template <typename Idx>
@@ -161,12 +161,12 @@ void WriteFromProviderToNameTable(
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
 
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
 
     for (Idx i = 0; i < amt; ++i) {
-        poke(raw::PPUDATA, fn(i));
+        tech::poke(raw::PPUDATA, fn(i));
     }
 }
 
@@ -191,19 +191,19 @@ void WriteFromBufferToAttributeTable(
         const u8 hi = static_cast<u8>(offset >> 8);
         const u8 lo = static_cast<u8>(offset & 0xFF);
         for (u8 i = 0; i < sBuffer; i++) {
-            peek(raw::PPUSTATUS);
-            poke(raw::PPUADDR, hi);
-            poke(raw::PPUADDR, static_cast<u8>(lo + (i << 3)));
-            poke(raw::PPUDATA, source[i]);
+            tech::peek(raw::PPUSTATUS);
+            tech::poke(raw::PPUADDR, hi);
+            tech::poke(raw::PPUADDR, static_cast<u8>(lo + (i << 3)));
+            tech::poke(raw::PPUDATA, source[i]);
         }
         return;
     }
 
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
     for (u8 i = 0; i < sBuffer; i++) {
-        poke(raw::PPUDATA, source[i]);
+        tech::poke(raw::PPUDATA, source[i]);
     }
 }
 
@@ -211,10 +211,10 @@ __attribute__((always_inline))
 void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_at_addr(x, y);
 
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
-    poke(raw::PPUDATA, value);
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUDATA, value);
 }
 
 u16 CartesianToAddress(const u16 x, const u16 y) {
@@ -242,21 +242,21 @@ namespace pal {
 
 __attribute__((hot))
 void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuffer) {
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
 
     for (auto i = 0; i < sBuffer; i++) {
-        poke(raw::PPUDATA, source[i]);
+        tech::poke(raw::PPUDATA, source[i]);
     }
 }
 
 __attribute__((always_inline))
 void WriteSingle(const u8 offset, const u8 value) {
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
-    poke(raw::PPUDATA, value);
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
+    tech::poke(raw::PPUDATA, value);
 }
 
 }   // namespace pal
@@ -269,7 +269,7 @@ __attribute__((always_inline))
 void RefreshSprites(const sprite_t *oam) {
     u16 addr;
     __builtin_memcpy(&addr, &oam, sizeof addr);
-    poke(ppu::raw::OAMDMA, static_cast<u8>(addr >> 8));
+    tech::poke(ppu::raw::OAMDMA, static_cast<u8>(addr >> 8));
 }
 
 void OAMFromBuffer(sprite_t *oam, const u8 slot, const u16 off,
@@ -294,23 +294,23 @@ void OAMFromProvider(sprite_t *oam, const u8 slot, const u16 off,
 namespace ppu {
 
 void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
-    peek(raw::PPUSTATUS);
-    poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
     for (auto i = 0; i < size; i++) {
-        target[i] = peek(raw::PPUDATA);
+        target[i] = tech::peek(raw::PPUDATA);
     }
 }
 
 }   // namespace ppu
 
 __attribute__((hot))
-void WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
+void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     (void)px; (void)py;
 
     while (!*latch) {
-        while (  peek(ppu::raw::PPUSTATUS) & 0x40)  { }  // wait for pre-render to clear stale hit
-        while (!(peek(ppu::raw::PPUSTATUS) & 0x40)) { }  // wait for actual sprite 0 hit
+        while (  tech::peek(ppu::raw::PPUSTATUS) & 0x40)  { }  // wait for pre-render to clear stale hit
+        while (!(tech::peek(ppu::raw::PPUSTATUS) & 0x40)) { }  // wait for actual sprite 0 hit
         fn();
         *latch = true;
     }

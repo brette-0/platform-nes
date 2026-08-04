@@ -36,7 +36,7 @@ extern "C" FASTCALL famistudio_sfx_play(u8 sfx_index, u8 channel);
 #endif
 extern "C" FASTCALL famistudio_update(void);
 
-void AudioInit() {
+void audio::AudioInit() {
     __asm__ volatile (
         "ldx #<%0\n"
         "ldy #>%0\n"
@@ -59,23 +59,23 @@ void AudioInit() {
 #endif
 }
 
-void TrackPlay(const u8 index) {
+void audio::TrackPlay(const u8 index) {
     famistudio_music_play(index);
 }
 
-void TrackPause(const u8 pause) {
+void audio::TrackPause(const u8 pause) {
     famistudio_music_pause(pause);
 }
 
-void TrackStop() {
+void audio::TrackStop() {
     famistudio_music_stop();
 }
 
-void AudioUpdate() {
+void audio::AudioUpdate() {
     famistudio_update();
 }
 
-void SfxPlay(const u8 index, const u8 channel) {
+void audio::SfxPlay(const u8 index, const u8 channel) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, channel);
 #else
@@ -83,7 +83,7 @@ void SfxPlay(const u8 index, const u8 channel) {
 #endif
 }
 
-void SfxSamplePlay(const u8 index) {
+void audio::SfxSamplePlay(const u8 index) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
     famistudio_sfx_play(index, 1);
 #else

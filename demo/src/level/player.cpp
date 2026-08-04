@@ -238,15 +238,15 @@ void Player::Update() {
 
     const u8   port     = PlayerPort(this);
     const u8   lastPort = PlayerLastPort(this);
-    const bool left     = port & LEFT;
-    const bool right    = port & RIGHT;
+    const bool left     = port & input::LEFT;
+    const bool right    = port & input::RIGHT;
     const i8   dir      = (right && !left) ? 1 : ((left && !right) ? -1 : 0);
 
     // -- horizontal: build speed toward a cap, shed it via friction/skid --
     const i8 vx0 = self->moveForce.x;
     i8       vx  = vx0;
 
-    if ((port & B) && grounded && dir != 0 && (vx == 0 || (vx > 0) == (dir > 0)))
+    if ((port & input::B) && grounded && dir != 0 && (vx == 0 || (vx > 0) == (dir > 0)))
         runTimer = kRunRetain;
     else if (runTimer)
         runTimer--;
@@ -277,7 +277,7 @@ void Player::Update() {
     self->moveForce.x = vx;
 
     // -- vertical: launch on A, then variable gravity until something stops us --
-    if (grounded && (port & ~lastPort & A)) {
+    if (grounded && (port & ~lastPort & input::A)) {
         self->moveForce.y = static_cast<i8>(-(Abs(vx) >= kMaxWalk ? kRunJumpInit : kJumpInit));
         yForce = 0;
         grounded = false;
@@ -288,7 +288,7 @@ void Player::Update() {
     }
 
     const bool rising = self->moveForce.y < 0;
-    yForce += (rising && (port & A)) ? kRiseGravity : kFallGravity;
+    yForce += (rising && (port & input::A)) ? kRiseGravity : kFallGravity;
     i8 vy = self->moveForce.y;
     // yForce is always non-negative; extracting whole-256 ticks is a high-byte
     // load + mask, not a loop.  kFallGravity=896 previously cost 3-4 iterations.

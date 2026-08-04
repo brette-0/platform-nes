@@ -43,8 +43,10 @@ using namespace br0::intsh;
 #include <SDL3/SDL_video.h>
 #endif
 
+namespace video {
 /** @brief Base PPU address of the pattern tables (\$0000 / \$1000). */
 extern const u16 PatternTables;
+} // namespace video
 
 #ifdef TARGET_NES
   /** @brief Assembler `.pushsection` directive for CHR ROM on NES. */
@@ -904,6 +906,7 @@ namespace oam {
     void RefreshSprites(const sprite_t* oam);
 }
 
+namespace video {
 #ifdef TARGET_NES
 /** @brief Sprite-zero-hit handler — NES variant (parameterless). */
 typedef void (*spriteZeroHandler_t)();
@@ -927,8 +930,8 @@ typedef struct {
  * @param fn Callback to invoke when the sprite-zero test trips.
  */
 void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
-/** @brief Convenience wrapper around ::SetSpriteZeroHandler. */
-#define SET_SPRITE_ZERO_HANDLER(px, py, fn) SetSpriteZeroHandler(px, py, fn)
+/** @brief Convenience wrapper around ::video::SetSpriteZeroHandler. */
+#define SET_SPRITE_ZERO_HANDLER(px, py, fn) ::video::SetSpriteZeroHandler(px, py, fn)
 #endif
 
 /**
@@ -945,20 +948,21 @@ void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
  * @param latch Flag written non-zero when @p fn has completed.
  */
 void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
+} // namespace video
 
 #ifdef TARGET_NES
 namespace ppu {
 /** @brief Write-through register+shadow for ::ppu::raw::PPUCTRL (see ::wo_register). */
-extern wo_register<ppu::raw::PPUCTRL>   PPUCTRL;
+extern tech::wo_register<ppu::raw::PPUCTRL>   PPUCTRL;
 /** @brief Write-through register+shadow for ::ppu::raw::PPUMASK (see ::wo_register). */
-extern wo_register<ppu::raw::PPUMASK>   PPUMASK;
+extern tech::wo_register<ppu::raw::PPUMASK>   PPUMASK;
 }   // namespace ppu
 
 namespace oam {
 /** @brief Write-through register+shadow for ::ppu::raw::OAMADDR (see ::wo_register). */
-extern wo_register<ppu::raw::OAMADDR>   OAMADDR;
+extern tech::wo_register<ppu::raw::OAMADDR>   OAMADDR;
 /** @brief Write-through register+shadow for ::ppu::raw::OAMDMA (see ::wo_register). */
-extern wo_register<ppu::raw::OAMDMA>    OAMDMA;
+extern tech::wo_register<ppu::raw::OAMDMA>    OAMDMA;
 }   // namespace oam
 
 #else

@@ -21,7 +21,7 @@
 using namespace br0::intsh;
 
 /** @brief Application-defined NMI handler (the per-frame VBlank callback). */
-extern void nmi();
+extern void nmi_vector();
 /** @brief Quit flag; defined in the shared core (src/emu/ppu.cpp). */
 extern int quit;
 

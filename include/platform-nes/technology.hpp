@@ -51,6 +51,7 @@ using namespace br0::intsh;
 
 
 #ifdef __cplusplus
+namespace tech {
 /**
  * @brief Reads one byte from a memory-mapped I/O address.
  *
@@ -80,6 +81,7 @@ inline __attribute__((always_inline))
 void poke(const u16 addr, const u8 data) {
     *reinterpret_cast<volatile u8 *>(addr) = data;
 }
+} // namespace tech
 #else
 /** @brief C fallback: byte read via a `volatile const` dereference. */
 #define PEEK(addr)       (*(volatile const unsigned char *)(addr))
@@ -163,6 +165,8 @@ void poke(const u16 addr, const u8 data) {
 
 #ifdef __cplusplus
 #include <br0/tuple>
+
+namespace tech {
 
 /**
  * @brief Write-only hardware register with a RAM shadow.
@@ -328,7 +332,7 @@ namespace prsv {
  *
  * @param name Bare identifier of the family macro (e.g. `APU_REGISTERS`).
  */
-#define PRESERVE(name) ::prsv::save(name##_snapshot, name)
+#define PRESERVE(name) ::tech::prsv::save(name##_snapshot, name)
 
 /**
  * @brief Restore a ::PRESERVE-d register family from static storage.
@@ -339,7 +343,7 @@ namespace prsv {
  *
  * @param name Bare identifier of the family macro (e.g. `APU_REGISTERS`).
  */
-#define RESTORE(name) ::prsv::restore(name##_snapshot, name)
+#define RESTORE(name) ::tech::prsv::restore(name##_snapshot, name)
 
 /**
  * @brief Scoped save/restore of N variables — truly variadic.
@@ -386,18 +390,20 @@ struct shadow_scope {
 template <class... Ts>
 shadow_scope(Ts&...) -> shadow_scope<Ts...>;
 
+} // namespace tech
+
 #define SH_CAT_(a, b) a##b
 #define SH_CAT(a, b)  SH_CAT_(a, b)
 
 /**
  * @brief Open a SHADOW scope over the listed lvalues.
  *
- * Expands to a single-iteration `for` whose loop variable is a ::shadow_scope
+ * Expands to a single-iteration `for` whose loop variable is a ::tech::shadow_scope
  * (CTAD deduces the element types). The body runs once; on exit the scope's
  * destructor restores every snapshot.
  */
 #define SHADOW(...)                                              \
-    for (::shadow_scope SH_CAT(_shadow_, __LINE__){__VA_ARGS__}; \
+    for (::tech::shadow_scope SH_CAT(_shadow_, __LINE__){__VA_ARGS__}; \
          SH_CAT(_shadow_, __LINE__);)
 #endif // __cplusplus
 
@@ -428,7 +434,7 @@ shadow_scope(Ts&...) -> shadow_scope<Ts...>;
 /**
  * @brief Compile-time support for ::CHARMAP / ::STRING.
  */
-namespace nes_str {
+namespace tech::nes_str {
     /**
      * @brief Fallback for a character with no ::CM entry.
      *
@@ -497,7 +503,7 @@ namespace nes_str {
 #define CHARMAP(mapname, ...)                   \
 constexpr u8 charmap_##mapname(char _c) {       \
     __VA_ARGS__                                 \
-    return ::nes_str::unmapped(_c);             \
+    return ::tech::nes_str::unmapped(_c);       \
 }
 
 /**
@@ -522,7 +528,7 @@ constexpr u8 charmap_##mapname(char _c) {       \
  * @param chars   Source characters to translate (bareword, not a string).
  */
 #define STRING(mapname, name, chars)            \
-inline constexpr auto name = ::nes_str::encode<charmap_##mapname>(#chars)
+inline constexpr auto name = ::tech::nes_str::encode<charmap_##mapname>(#chars)
 
 /**
  * @brief Defines a string translated through a ::CHARMAP, with a 0x00 terminator.
@@ -535,7 +541,7 @@ inline constexpr auto name = ::nes_str::encode<charmap_##mapname>(#chars)
  * @param chars   Source characters to translate (bareword, not a string).
  */
 #define STRING_NT(mapname, name, chars)         \
-inline constexpr auto name = ::nes_str::encode_nt<charmap_##mapname>(#chars)
+inline constexpr auto name = ::tech::nes_str::encode_nt<charmap_##mapname>(#chars)
 
 /**
  * @brief Expands to `pointer, count` for passing a buffer+length pair.
@@ -545,7 +551,7 @@ inline constexpr auto name = ::nes_str::encode_nt<charmap_##mapname>(#chars)
  *
  * @param obj A C array or `std::array`.
  */
-#define SIZED_OBJ(obj) ::nes_str::data(obj), ::nes_str::size(obj)
+#define SIZED_OBJ(obj) ::tech::nes_str::data(obj), ::tech::nes_str::size(obj)
 
 /**
  * @brief General-purpose byte copy from @p buffer into @p target with stride.
@@ -568,6 +574,7 @@ inline constexpr auto name = ::nes_str::encode_nt<charmap_##mapname>(#chars)
  * @param sBuffer Number of bytes to copy from @p buffer.
  * @param step    Signed stride in @p target between consecutive writes.
  */
+namespace tech {
 template <typename Count, typename Step>
 void PopulateFromBuffer(u8* target, const u16 offset,
                         const u8* buffer, const Count sBuffer, const Step step) {
@@ -603,3 +610,4 @@ void PopulateFromProvider(u8* target, const u16 offset,
     for (Count i = 0; i < amt; ++i)
         base[static_cast<int>(i) * step] = fn(static_cast<Idx>(i));
 }
+} // namespace tech

@@ -30,14 +30,14 @@ void ogc_input_init() {
 static u8 read_pad(const int chan) {
     const u32 held = PAD_ButtonsHeld(chan);
     u8 state = 0;
-    if (held & PAD_BUTTON_A)     state |= A;
-    if (held & PAD_BUTTON_B)     state |= B;
-    if (held & PAD_TRIGGER_Z)    state |= SELECT;  // GC pad has no Select
-    if (held & PAD_BUTTON_START) state |= START;
-    if (held & PAD_BUTTON_UP)    state |= UP;
-    if (held & PAD_BUTTON_DOWN)  state |= DOWN;
-    if (held & PAD_BUTTON_LEFT)  state |= LEFT;
-    if (held & PAD_BUTTON_RIGHT) state |= RIGHT;
+    if (held & PAD_BUTTON_A)     state |= input::A;
+    if (held & PAD_BUTTON_B)     state |= input::B;
+    if (held & PAD_TRIGGER_Z)    state |= input::SELECT;  // GC pad has no Select
+    if (held & PAD_BUTTON_START) state |= input::START;
+    if (held & PAD_BUTTON_UP)    state |= input::UP;
+    if (held & PAD_BUTTON_DOWN)  state |= input::DOWN;
+    if (held & PAD_BUTTON_LEFT)  state |= input::LEFT;
+    if (held & PAD_BUTTON_RIGHT) state |= input::RIGHT;
     return state;
 }
 
@@ -45,20 +45,20 @@ static u8 read_pad(const int chan) {
 static u8 read_wpad(const int chan) {
     const u32 held = WPAD_ButtonsHeld(chan);
     u8 state = 0;
-    if (held & WPAD_BUTTON_2)     state |= A;
-    if (held & WPAD_BUTTON_1)     state |= B;
-    if (held & WPAD_BUTTON_MINUS) state |= SELECT;
-    if (held & WPAD_BUTTON_PLUS)  state |= START;
+    if (held & WPAD_BUTTON_2)     state |= input::A;
+    if (held & WPAD_BUTTON_1)     state |= input::B;
+    if (held & WPAD_BUTTON_MINUS) state |= input::SELECT;
+    if (held & WPAD_BUTTON_PLUS)  state |= input::START;
     // Remote held sideways: the D-pad is rotated a quarter turn clockwise.
-    if (held & WPAD_BUTTON_RIGHT) state |= UP;
-    if (held & WPAD_BUTTON_LEFT)  state |= DOWN;
-    if (held & WPAD_BUTTON_UP)    state |= LEFT;
-    if (held & WPAD_BUTTON_DOWN)  state |= RIGHT;
+    if (held & WPAD_BUTTON_RIGHT) state |= input::UP;
+    if (held & WPAD_BUTTON_LEFT)  state |= input::DOWN;
+    if (held & WPAD_BUTTON_UP)    state |= input::LEFT;
+    if (held & WPAD_BUTTON_DOWN)  state |= input::RIGHT;
     return state;
 }
 #endif
 
-void PollControllers(u8* port1, u8* port2) {
+void input::PollControllers(u8* port1, u8* port2) {
     PAD_ScanPads();
     u8 p1 = read_pad(0);
     u8 p2 = read_pad(1);

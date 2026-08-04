@@ -47,7 +47,7 @@ enum class eLevelStreamCommands : u8 {
 };
 
 interrupt nmiHandler();
-extern atomic enum_flags<eLevelStreamCommands> levelStreamCommand;
+extern atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
 
 // Deferred VRAM write queue (coin pickups -> NMI drain).
 // Pushing is done by the player logic; draining is done by the NMI.

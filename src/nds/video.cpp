@@ -282,8 +282,8 @@ void WaitForPresent() {
 
     // No IRQs permitted post-frame; discard anything still queued from this
     // frame's render before NMI enqueues for the next one (matches OGC/3DS).
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 } // namespace video
@@ -291,7 +291,7 @@ void WaitForPresent() {
 // init()/post() are the global library lifecycle hooks the RESET macro expands
 // to (declared in interrupts.hpp), so they live at global scope -- not inside
 // namespace video.
-void init() {
+void irq::init() {
     // Main 2D engine: BG0 (text) + hardware sprites, 1D OBJ mapping.
     videoSetMode(MODE_0_2D | DISPLAY_BG0_ACTIVE | DISPLAY_SPR_ACTIVE | DISPLAY_SPR_1D);
     vramSetBankA(VRAM_A_MAIN_BG);       // 128 KB: BG map + tiles
@@ -334,7 +334,7 @@ void init() {
     lcdSetHBlankIrq(true);
 }
 
-void post() {
+void irq::post() {
     // The DS has no teardown counterpart a homebrew app needs at exit; the loader
     // resets the machine. Disable the HBlank ISR for tidiness -- clear the LCD
     // DISPSTAT enable as well as the controller bit (mirror of init()).

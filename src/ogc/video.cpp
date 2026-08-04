@@ -472,8 +472,8 @@ void WaitForPresent() {
 
     /* No IRQs permitted post-frame; discard anything still queued from this
      * frame's render before NMI enqueues for the next one. */
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 }   // namespace video
@@ -481,7 +481,7 @@ void WaitForPresent() {
 // init()/post() are the global library lifecycle hooks the RESET macro expands
 // to (declared in interrupts.hpp), so they live at global scope -- not inside
 // namespace video.
-void init() {
+void irq::init() {
     VIDEO_Init();
     rmode = VIDEO_GetPreferredMode(nullptr);
 
@@ -599,7 +599,7 @@ void init() {
 #endif
 }
 
-void post() {
+void irq::post() {
     // libogc has no teardown counterpart to VIDEO_Init/GX_Init that a homebrew
     // app needs at exit; the loader resets the machine. Free the scratch buffers
     // so a clean shutdown doesn't leak (mostly documentary on a console).

@@ -1,15 +1,15 @@
 #include <platform-nes/mappers/vrc1.hpp>
 
-wo_register<0x8000> window1Control;
-wo_register<0xa000> window2Control;
-wo_register<0xc000> window3Control;
+tech::wo_register<0x8000> window1Control;
+tech::wo_register<0xa000> window2Control;
+tech::wo_register<0xc000> window3Control;
 
 extern "C" void _start();
 
 extern "C" fixed void _reset() {
-    poke(0x8000, 0);
-    poke(0xa000, 1);
-    poke(0xc000, 2);
+    tech::poke(0x8000, 0);
+    tech::poke(0xa000, 1);
+    tech::poke(0xc000, 2);
     _start();
 }
 
@@ -252,6 +252,6 @@ static void SyncBankShadows() {
     Call<OversizedFuncLow>();
 }
 
-wo_register<0x9000> chrHighBits;
-wo_register<0xe000> chr0Control;
-wo_register<0xf000> chr1Control;
+tech::wo_register<0x9000> chrHighBits;
+tech::wo_register<0xe000> chr0Control;
+tech::wo_register<0xf000> chr1Control;

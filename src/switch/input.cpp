@@ -21,7 +21,7 @@ void input_init() {
     padInitializeDefault(&pad);
 }
 
-void PollControllers(u8 *port1, u8 *port2) {
+void input::PollControllers(u8 *port1, u8 *port2) {
     padUpdate(&pad);
     const u64 held = padGetButtons(&pad);
 

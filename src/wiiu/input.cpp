@@ -32,18 +32,18 @@ static u8 read_pad(SDL_GameController *gc) {
     if (!gc) return 0;
 
     u8 state = 0;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A))          state |= A;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B))          state |= B;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK))       state |= SELECT;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START))      state |= START;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_UP))    state |= UP;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_DOWN))  state |= DOWN;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_LEFT))  state |= LEFT;
-    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) state |= RIGHT;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_A))          state |= input::A;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_B))          state |= input::B;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_BACK))       state |= input::SELECT;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_START))      state |= input::START;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_UP))    state |= input::UP;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_DOWN))  state |= input::DOWN;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_LEFT))  state |= input::LEFT;
+    if (SDL_GameControllerGetButton(gc, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) state |= input::RIGHT;
     return state;
 }
 
-void PollControllers(u8 *port1, u8 *port2) {
+void input::PollControllers(u8 *port1, u8 *port2) {
     SDL_GameControllerUpdate();
     *port1 = read_pad(pads[0]);
     *port2 = read_pad(pads[1]);

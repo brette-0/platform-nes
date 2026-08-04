@@ -28,7 +28,7 @@ __attribute__((used)) u8 pollScratch2;
 // replaces a fully-unrolled loop that did a load+shift+and+load+or+store
 // (through *port1/*port2 each iteration) with a tight 8-cycle loop body that
 // does the accumulation with a single RMW rotate per controller.
-void PollControllers(u8* port1, u8* port2) {
+void input::PollControllers(u8* port1, u8* port2) {
     IO_PORT1 = 1;
     IO_PORT1 = 0;
 

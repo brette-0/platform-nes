@@ -14,7 +14,7 @@
 
 #include <gba.h>
 
-void PollControllers(u8* port1, u8* port2) {
+void input::PollControllers(u8* port1, u8* port2) {
     scanKeys();
     const u16 held = keysHeld();
 

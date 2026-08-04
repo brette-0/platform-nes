@@ -374,8 +374,8 @@ IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
 
     // No IRQs permitted post-frame; discard anything still queued from this
     // frame's render before NMI enqueues for the next one (matches OGC/3DS/DS).
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 } // namespace video
@@ -383,7 +383,7 @@ IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
 // init()/post() are the global library lifecycle hooks the RESET macro expands
 // to (declared in interrupts.hpp), so they live at global scope -- not inside
 // namespace video.
-void init() {
+void irq::init() {
     irqInit();
     irqSet(IRQ_HBLANK, hblank_scroll);
     irqEnable(IRQ_VBLANK);   // required for VBlankIntrWait frame pacing
@@ -426,7 +426,7 @@ void init() {
     REG_DISPCNT = DCNT_MODE0 | DCNT_BG0 | DCNT_OBJ | DCNT_OBJ_1D;
 }
 
-void post() {
+void irq::post() {
     // The GBA has no teardown a homebrew app needs at exit; the loader/BIOS
     // resets the machine. Disable the HBlank ISR for tidiness -- clear the LCD
     // DISPSTAT enable as well as the controller bit (mirror of init()).

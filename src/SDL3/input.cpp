@@ -72,7 +72,7 @@ static u8 read_gamepad(SDL_Gamepad *pad) {
     return state;
 }
 
-void PollControllers(u8* port1, u8* port2) {
+void input::PollControllers(u8* port1, u8* port2) {
     *port1 = read_gamepad(gamepads[0]);
     *port2 = read_gamepad(gamepads[1]);
 }

@@ -54,8 +54,8 @@ static constexpr int BYTES_PER_SEC   = SAMPLE_RATE * BYTES_PER_FRAME;  // 192000
 // audio.hpp declares these for the desktop mixer; the Wii U streams via an SDL
 // callback instead, but define them so the externs resolve if anything refers
 // to them.
-float *pcm_buffer = nullptr;
-u32    pcm_buffer_size = 0;
+float *audio::pcm_buffer = nullptr;
+u32 audio::pcm_buffer_size = 0;
 
 static SDL_AudioDeviceID dev = 0;
 
@@ -145,7 +145,7 @@ static void audio_callback(void *, u8 *stream, int len) {
     }
 }
 
-void AudioInit() {
+void audio::AudioInit() {
     load_track();
 
     SDL_AudioSpec want;
@@ -167,11 +167,11 @@ void AudioInit() {
     SDL_PauseAudioDevice(dev, 0);  // start the callback running
 }
 
-void AudioUpdate() {
+void audio::AudioUpdate() {
     // Streaming is driven by the SDL audio callback; nothing to do per frame.
 }
 
-void TrackPlay(const u8 index) {
+void audio::TrackPlay(const u8 index) {
     if (index >= nTracks) return;
     SDL_LockAudioDevice(dev);
     play_pos = 0;
@@ -180,18 +180,18 @@ void TrackPlay(const u8 index) {
     SDL_UnlockAudioDevice(dev);
 }
 
-void TrackStop() {
+void audio::TrackStop() {
     SDL_LockAudioDevice(dev);
     playing = false;
     SDL_UnlockAudioDevice(dev);
 }
 
-void TrackPause(const u8 pause) {
+void audio::TrackPause(const u8 pause) {
     (void)pause;  // match the SDL/Switch backends: toggle regardless of argument
     SDL_LockAudioDevice(dev);
     paused = !paused;
     SDL_UnlockAudioDevice(dev);
 }
 
-void SfxPlay(const u8 index, const u8 channel) { (void)index; (void)channel; }
-void SfxSamplePlay(const u8 index)             { (void)index; }
+void audio::SfxPlay(const u8 index, const u8 channel) { (void)index; (void)channel; }
+void audio::SfxSamplePlay(const u8 index)             { (void)index; }

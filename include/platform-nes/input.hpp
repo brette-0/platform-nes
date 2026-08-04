@@ -22,12 +22,14 @@ using namespace br0::intsh;
 #endif
 #endif
 
+namespace input {
+
 /**
  * @brief Bit masks for the eight standard NES controller buttons.
  *
  * The values are chosen to match the NES hardware shift order, so they
  * can be OR'd directly into a port byte and tested against the
- * results of ::PollControllers.
+ * results of ::input::PollControllers.
  */
 enum Buttons {
     A       = 0x01, /**< A button. */
@@ -52,5 +54,7 @@ enum Buttons {
  * @param[out] port2 Receives the button mask for controller 2.
  */
 void PollControllers(u8* port1, u8* port2);
+
+} // namespace input
 
 #endif //INPUT_H

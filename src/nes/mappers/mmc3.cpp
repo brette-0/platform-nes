@@ -12,18 +12,18 @@ mmc3_register<3> chr3Control;
 mmc3_register<4> chr4Control;
 mmc3_register<5> chr5Control;
 
-wo_register<0xa000> mirroring;
-wo_register<0xa001> prgRamProtect;
-wo_register<0xc000> irqLatch;
+tech::wo_register<0xa000> mirroring;
+tech::wo_register<0xa001> prgRamProtect;
+tech::wo_register<0xc000> irqLatch;
 
 void ScheduleScanlineIRQ(const u8 scanline) {
     irqLatch = scanline; // $C000: reload value.
-    poke(0xc001, 0);     // $C001: force reload at next clock (value ignored).
-    poke(0xe001, 0);     // $E001: enable (value ignored).
+    tech::poke(0xc001, 0);     // $C001: force reload at next clock (value ignored).
+    tech::poke(0xe001, 0);     // $E001: enable (value ignored).
 }
 
 void AcknowledgeScanlineIRQ() {
-    poke(0xe000, 0); // $E000: disable + acknowledge pending IRQ (value ignored).
+    tech::poke(0xe000, 0); // $E000: disable + acknowledge pending IRQ (value ignored).
 }
 
 } // namespace mmc3
@@ -36,7 +36,7 @@ extern "C" void _start();
  *        to crt0's _start.
  *
  * Runs BEFORE .bss is zeroed (same constraint as VRC1's ::_reset, see its
- * own comment in vrc1.cpp): raw poke() calls only, no mmc3:: register
+ * own comment in vrc1.cpp): raw tech::poke() calls only, no mmc3:: register
  * shadow objects, and no calls to ordinary (non-::fixed) functions like
  * ::AcknowledgeScanlineIRQ -- window1Control/window2Control aren't
  * established yet at this point, so anything not pinned to this fixed bank
@@ -99,10 +99,10 @@ extern "C" void _start();
  * comment.
  */
 extern "C" fixed void _reset() {
-    poke(0xe000, 0);    // IRQ: disable generation + acknowledge any pending/residual IRQ.
-    poke(0xa001, 0x80); // PRG-RAM: enable, write-permitted.
-    poke(0x8000, 6); poke(0x8001, 0); // R6 -> bank 0 ($8000-$9FFF).
-    poke(0x8000, 7); poke(0x8001, 1); // R7 -> bank 1 ($A000-$BFFF).
+    tech::poke(0xe000, 0);    // IRQ: disable generation + acknowledge any pending/residual IRQ.
+    tech::poke(0xa001, 0x80); // PRG-RAM: enable, write-permitted.
+    tech::poke(0x8000, 6); tech::poke(0x8001, 0); // R6 -> bank 0 ($8000-$9FFF).
+    tech::poke(0x8000, 7); tech::poke(0x8001, 1); // R7 -> bank 1 ($A000-$BFFF).
     _start();
 }
 

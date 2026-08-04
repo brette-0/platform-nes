@@ -39,9 +39,9 @@ using namespace br0::intsh;
  * point. Defined (not just declared) in vrc1.cpp, where the default-bank
  * boot-time init also lives.
  */
-extern wo_register<0x8000> window1Control; ///< PRG-select, window 1 ($8000-$9FFF). See above.
-extern wo_register<0xa000> window2Control; ///< PRG-select, window 2 ($A000-$BFFF). See ::window1Control.
-extern wo_register<0xc000> window3Control; ///< PRG-select, window 3 ($C000-$DFFF). See ::window1Control.
+extern tech::wo_register<0x8000> window1Control; ///< PRG-select, window 1 ($8000-$9FFF). See above.
+extern tech::wo_register<0xa000> window2Control; ///< PRG-select, window 2 ($A000-$BFFF). See ::window1Control.
+extern tech::wo_register<0xc000> window3Control; ///< PRG-select, window 3 ($C000-$DFFF). See ::window1Control.
 
 /**
  * @brief Writes @p ctx into a VRC1 PRG-select register, banking in that window.
@@ -59,7 +59,7 @@ extern wo_register<0xc000> window3Control; ///< PRG-select, window 3 ($C000-$DFF
  * directly instead.
  */
 template <u16 addr>
-constexpr void SwitchBank(wo_register<addr> &reg, u8 ctx) {
+constexpr void SwitchBank(tech::wo_register<addr> &reg, u8 ctx) {
     reg = ctx;
 }
 
@@ -93,7 +93,7 @@ namespace vrc1_detail {
      * anywhere else, including the caller's own.
      */
     template <typename TReturn, u16 addr, typename TFunc>
-    [[gnu::noinline]] fixed TReturn CallInWindow(wo_register<addr> &reg, u8 bank, TFunc fn) {
+    [[gnu::noinline]] fixed TReturn CallInWindow(tech::wo_register<addr> &reg, u8 bank, TFunc fn) {
         SHADOW(reg) {
             SwitchBank(reg, bank);
             return fn();
@@ -174,9 +174,9 @@ fixed TReturn Long(TFunc fn, const u8 window = 0) {
  * chr1Control ($F000) hold each table's low 4 bank bits. Not `const`,
  * same reasoning as window1Control etc.
  */
-extern wo_register<0x9000> chrHighBits; ///< Shared high bank bit for both pattern tables. See above.
-extern wo_register<0xe000> chr0Control; ///< CHR-select, pattern table 0 ($0000-$0FFF). See ::chrHighBits.
-extern wo_register<0xf000> chr1Control; ///< CHR-select, pattern table 1 ($1000-$1FFF). See ::chrHighBits.
+extern tech::wo_register<0x9000> chrHighBits; ///< Shared high bank bit for both pattern tables. See above.
+extern tech::wo_register<0xe000> chr0Control; ///< CHR-select, pattern table 0 ($0000-$0FFF). See ::chrHighBits.
+extern tech::wo_register<0xf000> chr1Control; ///< CHR-select, pattern table 1 ($1000-$1FFF). See ::chrHighBits.
 
 /**
  * @brief Selects which 4 KiB CHR-ROM bank appears in a VRC1 pattern table.
@@ -194,7 +194,7 @@ extern wo_register<0xf000> chr1Control; ///< CHR-select, pattern table 1 ($1000-
  * @param bank Target bank, 0-31.
  */
 template <u16 addr>
-constexpr void SwitchCHRBank(wo_register<addr> &reg, u8 bank) {
+constexpr void SwitchCHRBank(tech::wo_register<addr> &reg, u8 bank) {
     static_assert(addr == 0xe000 || addr == 0xf000,
                   "SwitchCHRBank only valid for chr0Control ($E000) or chr1Control ($F000)");
     constexpr u8 bit = (addr == 0xe000) ? 0 : 1;

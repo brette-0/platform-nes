@@ -50,6 +50,8 @@ using namespace br0::intsh;
 #define interrupt void
 #endif
 
+namespace irq {
+
 #ifndef TARGET_NES
 
 /** @brief Signature of an IRQ handler (no arguments, no return value). */
@@ -67,12 +69,12 @@ typedef struct irq_t {
 /**
  * @brief The single pending IRQ event for the renderer (desktop only).
  *
- * ::SetNextIRQHandler overwrites this slot; only one IRQ can be pending at
- * a time. The renderer fires it at the matching pixel coordinate and clears
- * ::irqPending.
+ * ::irq::SetNextIRQHandler overwrites this slot; only one IRQ can be
+ * pending at a time. The renderer fires it at the matching pixel coordinate
+ * and clears ::irq::irqPending.
  */
 extern irq_t   irqPending;
-/** @brief Non-zero when ::irqPending holds a valid event. */
+/** @brief Non-zero when ::irq::irqPending holds a valid event. */
 extern bool    irqPendingValid;
 
 #else
@@ -95,10 +97,13 @@ void SetNextIRQHandler(irq_t handle);
 /**
  * @brief Returns the currently armed IRQ handler.
  *
- * On NES this is the value last written by ::SetNextIRQHandler. On desktop
- * it is the pending ::irq_t slot (its handler is null if none is armed).
+ * On NES this is the value last written by ::irq::SetNextIRQHandler.
+ * On desktop it is the pending ::irq::irq_t slot (its handler is null
+ * if none is armed).
  */
 irq_t GetCurrentIRQHandler();
+
+} // namespace irq
 
 
 #ifdef TARGET_NES
@@ -128,8 +133,10 @@ irq_t GetCurrentIRQHandler();
 #define RESET int main()
 #endif
 
+namespace irq {
 inline void EnableInterrupts()  { __asm__ volatile ("cli"); }
 inline void DisableInterrupts() { __asm__ volatile ("sei"); }
+} // namespace irq
 
 /**
  * @brief Busy-waits for a precise number of CPU cycles.
@@ -181,6 +188,7 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
  *
  * @param cycles Delay selector; total wait is `cycles + 27` CPU cycles.
  */
+namespace irq {
 inline __attribute__((noinline))
 void SpinWaitCycles(const u8 cycles) {
     __asm__ volatile (
@@ -202,6 +210,7 @@ void SpinWaitCycles(const u8 cycles) {
         : "p"
     );
 }
+} // namespace irq
 
 /**
  * @brief Declares the NMI handler on NES builds.
@@ -250,10 +259,16 @@ void SpinWaitCycles(const u8 cycles) {
  * ::NAKED_NMI / ::NAKED_IRQ instead, which sidestep the question entirely by
  * never asking llvm-mos to generate interrupt bookkeeping in the first
  * place.
+ *
+ * @note The C++-level function is named `nmi_vector`, not `nmi`, matching
+ * ::IRQ's treatment for consistency -- an explicit `asm("nmi")` label
+ * overrides the emitted symbol name back to the literal `nmi` nes.ld's
+ * vector table expects, so the linker sees no difference.
  */
-#define NMI(...)                                       \
-ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))  \
-void nmi()
+#define NMI(...)                                                          \
+ASM_LINKAGE __VA_ARGS__ void nmi_vector() asm("nmi");                     \
+ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))        \
+void nmi_vector()
 
 /**
  * @brief Declares the IRQ handler on NES builds.
@@ -267,10 +282,18 @@ void nmi()
  * Follow with the handler body: `IRQ()` for an ordinary handler,
  * `IRQ([[noreturn]])` composes the same way as on ::NMI, with the same
  * caveat -- only correct if the body never falls through.
+ *
+ * @note The C++-level function is named `irq_vector`, not `irq`: the
+ * `::irq` namespace already occupies the unqualified name `irq` at global
+ * scope, and a namespace and a function can't share one name in the same
+ * scope. An explicit `asm("irq")` label overrides the emitted symbol name
+ * back to the literal `irq` nes.ld's vector table expects, so the linker
+ * sees no difference -- this is purely a C++-side rename.
  */
-#define IRQ(...)                                       \
-ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))  \
-void irq()
+#define IRQ(...)                                                          \
+ASM_LINKAGE __VA_ARGS__ void irq_vector() asm("irq");                     \
+ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))        \
+void irq_vector()
 
 /**
  * @brief Declares the NMI handler on NES builds with zero compiler-generated
@@ -305,9 +328,10 @@ void irq()
  * compiler-generated code exists at the vector at all -- see the `@note` on
  * ::NMI's `[[noreturn]]` for why that guarantee isn't otherwise available.
  */
-#define NAKED_NMI                            \
-ASM_LINKAGE __attribute__((naked, used))     \
-void nmi()
+#define NAKED_NMI                                            \
+ASM_LINKAGE void nmi_vector() asm("nmi");                     \
+ASM_LINKAGE __attribute__((naked, used))                      \
+void nmi_vector()
 
 /**
  * @brief Declares the IRQ handler on NES builds with zero compiler-generated
@@ -319,9 +343,10 @@ void nmi()
  * else is). Same canonical use: a bare tail-jump into a separately defined
  * ::interrupt handler that does the real save/restore and RTI itself.
  */
-#define NAKED_IRQ                            \
-ASM_LINKAGE __attribute__((naked, used))     \
-void irq()
+#define NAKED_IRQ                                            \
+ASM_LINKAGE void irq_vector() asm("irq");                     \
+ASM_LINKAGE __attribute__((naked, used))                      \
+void irq_vector()
 
 /**
  * @brief Direct unconditional jump to `target`, a function (a fixed,
@@ -365,6 +390,7 @@ void irq()
  * Invoked by the expansion of ::RESET. Initialises SDL subsystems,
  * opens the window, and prepares the audio mixer.
  */
+namespace irq {
 extern void init();
 
 /**
@@ -374,6 +400,7 @@ extern void init();
  * audio devices, and shuts down SDL.
  */
 extern void post();
+} // namespace irq
 
 /**
  * @brief Declares the program's reset handler on desktop builds.
@@ -391,9 +418,9 @@ extern void post();
 #define RESET                       \
 static void usr_main();         \
 int main(){                     \
-init();                     \
+irq::init();         \
 usr_main();                 \
-post();                     \
+irq::post();         \
 }                               \
 inline static void usr_main ()
 
@@ -402,18 +429,29 @@ inline static void usr_main ()
  *
  * The SDL3 renderer calls this once per simulated VBlank, matching
  * the NES NMI cadence so the same source works on both targets.
+ *
+ * @note Named `nmi_vector`, not `nmi`, matching ::IRQ's desktop-side
+ * treatment for consistency with the NES macro of the same name (there's
+ * no `::nmi` namespace to collide with here, but every backend's
+ * `extern void nmi_vector();` / call site is kept in lock-step with this
+ * name either way).
  */
 #define NMI                     \
-void nmi()
+void nmi_vector()
 
 /**
  * @brief Declares the IRQ handler on non-NES builds.
  *
  * Non-NES equivalent of ::NMI, for symmetry with NES source that defines
  * both vectors; not currently driven by any renderer backend.
+ *
+ * @note Named `irq_vector`, not `irq`, so it doesn't collide with the
+ * `::irq` namespace at global scope -- see the NES-side ::IRQ's @note.
+ * There's no hardware vector on this target, so nothing needs the literal
+ * name `irq`.
  */
 #define IRQ                     \
-void irq()
+void irq_vector()
 
 /**
  * @brief Non-NES equivalent of ::NAKED_NMI.
@@ -425,13 +463,13 @@ void irq()
  * compiles unchanged on every target.
  */
 #define NAKED_NMI               \
-void nmi()
+void nmi_vector()
 
 /**
  * @brief Non-NES equivalent of ::NAKED_IRQ. See ::NAKED_NMI.
  */
 #define NAKED_IRQ               \
-void irq()
+void irq_vector()
 
 /**
  * @brief Non-NES equivalent of ::JUMP: an ordinary tail call.
@@ -457,12 +495,13 @@ void irq()
  * ::RESET body written once (calling ::EnableInterrupts / ::DisableInterrupts
  * around setup) compiles unchanged on every target.
  */
+namespace irq {
 inline void EnableInterrupts()  {}
 
 /**
  * @brief Disables the CPU interrupt line — a no-op off NES.
  *
- * @note This function does nothing on non-NES targets; see ::EnableInterrupts.
+ * @note This function does nothing on non-NES targets; see ::irq::EnableInterrupts.
  */
 inline void DisableInterrupts() {}
 
@@ -471,23 +510,27 @@ inline void DisableInterrupts() {}
  *
  * @note The desktop/emulated backends have no cycle-exact CPU timing
  * model -- they schedule IRQs by pixel/scanline position
- * (::SetNextIRQHandler), not by counting CPU cycles -- so there is nothing
- * meaningful to busy-wait on here. See the NES-side ::SpinWaitCycles for
- * the real implementation and its exact-cycle guarantee.
+ * (::irq::SetNextIRQHandler), not by counting CPU cycles -- so there
+ * is nothing meaningful to busy-wait on here. See the NES-side
+ * ::irq::SpinWaitCycles for the real implementation and its
+ * exact-cycle guarantee.
  */
 inline void SpinWaitCycles(const u8) {}
+} // namespace irq
 
 #endif
 
+namespace irq {
 /**
  * @brief Soft-resets the application.
  *
  * On NES builds, re-enters through the hardware reset vector (`jmp ($FFFC)`),
- * the same entry point a cold boot uses. On desktop builds, runs ::post to
- * tear down SDL and audio, then calls `exit(0)`. Lets application code spin
- * back to ::RESET on NES or quit cleanly on desktop from the same call site,
- * with no `#ifdef` needed.
+ * the same entry point a cold boot uses. On desktop builds, runs
+ * ::irq::post to tear down SDL and audio, then calls `exit(0)`. Lets
+ * application code spin back to ::RESET on NES or quit cleanly on desktop
+ * from the same call site, with no `#ifdef` needed.
  */
 void reset();
+} // namespace irq
 
 #endif

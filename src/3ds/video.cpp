@@ -360,8 +360,8 @@ void WaitForPresent() {
 
     /* No IRQs permitted post-frame; discard anything still queued from this
      * frame's render before NMI enqueues for the next one. */
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 }   // namespace video
@@ -369,7 +369,7 @@ void WaitForPresent() {
 // init()/post() are the global library lifecycle hooks the RESET macro expands
 // to (declared in interrupts.hpp), so they live at global scope -- not inside
 // namespace video.
-void init() {
+void irq::init() {
     gfxInitDefault();
 
     // The PICA200 does all per-pixel work now (tiles/sprites are textured quads,
@@ -404,7 +404,7 @@ void init() {
     emu::InitMemory(video::vram_bytes());
 }
 
-void post() {
+void irq::post() {
     linearFree(atlas_scratch);
     for (int p = 0; p < 4; p++) {
         C3D_TexDelete(&atlas_bg[p]);

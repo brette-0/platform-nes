@@ -14,7 +14,7 @@
 
 #include <3ds.h>
 
-void PollControllers(u8* port1, u8* port2) {
+void input::PollControllers(u8* port1, u8* port2) {
     hidScanInput();
     const u32 held = hidKeysHeld();
 

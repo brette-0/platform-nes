@@ -21,8 +21,8 @@ typedef struct {
 } track_runtime_t;
 
 static track_runtime_t track_info[256];
-float *pcm_buffer = nullptr;
-u32 pcm_buffer_size = 0;
+float *audio::pcm_buffer = nullptr;
+u32 audio::pcm_buffer_size = 0;
 static SDL_AudioStream *music_stream = nullptr;
 static u32 playback_pos = 0;
 static int current_track = -1;
@@ -104,8 +104,8 @@ static void BuildPCMBuffer() {
         }
     }
 
-    pcm_buffer = static_cast<float *>(SDL_malloc(total));
-    pcm_buffer_size = total;
+    audio::pcm_buffer = static_cast<float *>(SDL_malloc(total));
+    audio::pcm_buffer_size = total;
 
     // second pass — load, convert, and fill runtime info
     auto offset = 0;
@@ -126,7 +126,7 @@ static void BuildPCMBuffer() {
         auto converted_len = 0;
         if (SDL_ConvertAudioSamples(&spec, data, static_cast<int>(len),
                                      &target, &converted, &converted_len)) {
-            SDL_memcpy(reinterpret_cast<u8 *>(pcm_buffer) + offset, converted, converted_len);
+            SDL_memcpy(reinterpret_cast<u8 *>(audio::pcm_buffer) + offset, converted, converted_len);
 
             track_info[i].offset = offset;
             track_info[i].length = converted_len;
@@ -148,16 +148,16 @@ static void BuildPCMBuffer() {
 }
 
 
-void SfxPlay(const u8 index, const u8 channel) {
+void audio::SfxPlay(const u8 index, const u8 channel) {
     (void)channel;
     PlaySFX(0, index);
 }
 
-void SfxSamplePlay(const u8 index) {
+void audio::SfxSamplePlay(const u8 index) {
     PlaySFX(1, index);
 }
 
-void AudioInit() {
+void audio::AudioInit() {
     constexpr SDL_AudioSpec spec = {
         .format = SDL_AUDIO_F32LE,
         .channels = 2,
@@ -174,7 +174,7 @@ void AudioInit() {
     BuildPCMBuffer();
 }
 
-void AudioUpdate() {
+void audio::AudioUpdate() {
     if (!music_playing || music_paused || current_track < 0) return;
 
     const auto queued = SDL_GetAudioStreamQueued(music_stream);
@@ -200,7 +200,7 @@ void AudioUpdate() {
     }
 }
 
-void TrackPlay(const u8 index) {
+void audio::TrackPlay(const u8 index) {
     if (index >= nTracks) return;
     current_track = index;
     playback_pos = track_info[index].offset;
@@ -209,13 +209,13 @@ void TrackPlay(const u8 index) {
     SDL_ClearAudioStream(music_stream);
 }
 
-void TrackStop() {
+void audio::TrackStop() {
     music_playing = 0;
     current_track = -1;
     SDL_ClearAudioStream(music_stream);
 }
 
-void TrackPause(const u8 pause) {
+void audio::TrackPause(const u8 pause) {
     (void)pause;
     music_paused = !music_paused;
 }

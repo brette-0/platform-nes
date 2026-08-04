@@ -94,13 +94,13 @@ void WaitForPresent() {
 
     /* No IRQs permitted post-frame; discard anything still queued from this
      * frame's render before NMI enqueues for the next one. */
-    irqPendingValid = false;
-    nmi();
+    irq::irqPendingValid = false;
+    nmi_vector();
 }
 
 }   // namespace video
 
-void init() {
+void irq::init() {
     // The core owns VideoRAM/paletteRAM. video::vram_bytes() (video.hpp): the
     // 52-tile-wide widescreen viewport is wider than the NES's native 32, so
     // this resolves to double the NES-hardware minimum (4 pages/0x1000 bytes).
@@ -125,7 +125,7 @@ void init() {
     input_init();
 }
 
-void post() {
+void irq::post() {
     if (frame)    SDL_DestroyTexture(frame);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window)   SDL_DestroyWindow(window);

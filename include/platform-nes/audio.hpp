@@ -19,6 +19,8 @@
 using namespace br0::intsh;
 
 
+namespace audio {
+
 /**
  * @brief A single music track.
  *
@@ -51,14 +53,17 @@ typedef struct {
 #endif
 } sfx_t;
 
+} // namespace audio
 
 #ifndef TARGET_NES
+namespace audio {
 /** @brief Shared mixing buffer written by the SDL3 audio callback. */
 extern float *pcm_buffer;
 /** @brief Size of ::pcm_buffer, in samples. */
 extern u32 pcm_buffer_size;
+}
 /** @brief Application-defined track table; defined via ::TRACKS. */
-extern const music_t tracks[];
+extern const audio::music_t tracks[];
 /** @brief Number of entries in ::tracks. */
 extern const u8 nTracks;
 
@@ -66,7 +71,7 @@ extern const u8 nTracks;
  * @brief Declares the application's track table (desktop build).
  *
  * Expands to definitions of ::tracks and ::nTracks. Use once at file
- * scope with a brace-enclosed list of ::music_t initialisers.
+ * scope with a brace-enclosed list of ::audio::music_t initialisers.
  *
  * @code
  *   TRACKS(
@@ -76,8 +81,8 @@ extern const u8 nTracks;
  * @endcode
  */
 #define TRACKS(...)                         \
-    const music_t  tracks[] = {__VA_ARGS__ }; \
-    const u8 nTracks = sizeof(tracks) / sizeof(music_t);
+    const audio::music_t  tracks[] = {__VA_ARGS__ }; \
+    const u8 nTracks = sizeof(tracks) / sizeof(audio::music_t);
 #else
 /** @brief Pointer to the FamiStudio music bank (NES build). */
 extern const u8* tracks;
@@ -99,6 +104,7 @@ extern const u8* sfx;
 
 #endif
 
+namespace audio {
 
 /**
  * @brief Starts playback of the track at the given table index.
@@ -138,5 +144,7 @@ void AudioInit();
  * (NES) or to refill the PCM mix buffer (desktop).
  */
 void AudioUpdate();
+
+} // namespace audio
 
 #endif

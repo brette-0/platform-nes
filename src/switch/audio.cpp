@@ -36,8 +36,8 @@ static constexpr int N_BUF   = 3;
 
 // audio.hpp declares these for the desktop mixer; the Switch streams via audout
 // instead, but define them so the externs resolve if anything references them.
-float *pcm_buffer = nullptr;
-u32    pcm_buffer_size = 0;
+float *audio::pcm_buffer = nullptr;
+u32 audio::pcm_buffer_size = 0;
 
 static AudioOutBuffer buffers[N_BUF];
 
@@ -123,7 +123,7 @@ static void audio_thread(void *) {
     }
 }
 
-void AudioInit() {
+void audio::AudioInit() {
     romfsInit();
     load_track(0);
 
@@ -148,11 +148,11 @@ void AudioInit() {
         threadStart(&athread);
 }
 
-void AudioUpdate() {
+void audio::AudioUpdate() {
     // Streaming is driven by the audout thread; nothing to do per frame.
 }
 
-void TrackPlay(const u8 index) {
+void audio::TrackPlay(const u8 index) {
     if (index >= nTracks) return;
     mutexLock(&mtx);
     play_pos = 0;
@@ -161,18 +161,18 @@ void TrackPlay(const u8 index) {
     mutexUnlock(&mtx);
 }
 
-void TrackStop() {
+void audio::TrackStop() {
     mutexLock(&mtx);
     playing = false;
     mutexUnlock(&mtx);
 }
 
-void TrackPause(const u8 pause) {
+void audio::TrackPause(const u8 pause) {
     (void)pause;  // match the SDL backend: toggle regardless of argument
     mutexLock(&mtx);
     paused = !paused;
     mutexUnlock(&mtx);
 }
 
-void SfxPlay(const u8 index, const u8 channel) { (void)index; (void)channel; }
-void SfxSamplePlay(const u8 index)             { (void)index; }
+void audio::SfxPlay(const u8 index, const u8 channel) { (void)index; (void)channel; }
+void audio::SfxSamplePlay(const u8 index)             { (void)index; }

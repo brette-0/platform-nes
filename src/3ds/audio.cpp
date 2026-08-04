@@ -13,16 +13,16 @@
 #include <platform-nes/audio.hpp>
 
 /** @brief Shared mixing buffer (unused until a real 3DS mixer lands). */
-float *pcm_buffer = nullptr;
+float *audio::pcm_buffer = nullptr;
 /** @brief Size of ::pcm_buffer, in samples. */
-u32 pcm_buffer_size = 0;
+u32 audio::pcm_buffer_size = 0;
 
-void AudioInit() {}
-void AudioUpdate() {}
+void audio::AudioInit() {}
+void audio::AudioUpdate() {}
 
-void TrackPlay(u8 /*index*/) {}
-void TrackPause(u8 /*pause*/) {}
-void TrackStop() {}
+void audio::TrackPlay(u8 /*index*/) {}
+void audio::TrackPause(u8 /*pause*/) {}
+void audio::TrackStop() {}
 
-void SfxPlay(u8 /*index*/, u8 /*channel*/) {}
-void SfxSamplePlay(u8 /*index*/) {}
+void audio::SfxPlay(u8 /*index*/, u8 /*channel*/) {}
+void audio::SfxSamplePlay(u8 /*index*/) {}
