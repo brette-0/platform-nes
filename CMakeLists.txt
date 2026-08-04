@@ -178,6 +178,20 @@ if(TARGET_PLATFORM STREQUAL "nes")
     # -- becomes an if/elseif alongside TOPLEVEL_LD once a second mapper
     # subtarget exists, one MAPPER/SUBMAPPER pair per board.
     list(APPEND PLATFORM_DEFINE "MAPPER=4" "SUBMAPPER=0")
+
+    # Alternative nametable wiring (NES2.0 flags 6, bit 3 -- the "four-screen"
+    # bit): the board supplies its own nametable memory/routing instead of the
+    # console's default 2-way CIRAM mirror (see TVROM's extra VRAM chip, MMC5's
+    # ExRAM/fill-mode quadrant select, Sunsoft-4's CHR-as-nametable trick).
+    # header.hpp/nes2.hpp only ever tests this for non-zero-ness -- the value
+    # itself is not a hardware quantity read out of the header, just a knob a
+    # given board's glue code may interpret its own way. Set
+    # ALTERNATIVE_NAMETABLE in local.cmake to any non-zero value to set the
+    # bit; unset (the default) leaves it clear.
+    if(DEFINED ALTERNATIVE_NAMETABLE)
+        list(APPEND PLATFORM_DEFINE "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+    endif()
+
     # -D-prefixed form for the pass-1 custom command below, which invokes the
     # compiler directly and so doesn't pick up target_compile_definitions.
     list(TRANSFORM PLATFORM_DEFINE PREPEND "-D" OUTPUT_VARIABLE PLATFORM_DEFINE_FLAGS)

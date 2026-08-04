@@ -1,5 +1,5 @@
 #pragma once
-#include "actor.hpp"
+#include "../actor.hpp"
 
 // Two-player mode requires a second controller port and enough RAM/ROM budget.
 // GBA (TARGET_GBA), DS/DSi (TARGET_NDS), and 3DS (TARGET_CTR) are excluded:

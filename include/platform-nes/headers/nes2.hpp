@@ -9,6 +9,16 @@ using namespace br0::intsh;
 
 #ifdef TARGET_NES
 
+// Alternative nametable wiring (NES2.0 flags 6, bit 3 -- the "four-screen"
+// bit): set by the board's own CMake config (ALTERNATIVE_NAMETABLE in
+// local.cmake), not by the HEADER() call site -- it's a fact about which
+// board is being linked, same as MAPPER/SUBMAPPER below. Only its
+// non-zero-ness matters here; the value itself is board glue code's own
+// business, not something the header format records.
+#ifndef ALTERNATIVE_NAMETABLE
+#define ALTERNATIVE_NAMETABLE 0
+#endif
+
 /**
  * @brief Places the 16 raw NES2.0 header bytes at the front of the ROM file.
  *
@@ -131,8 +141,13 @@ namespace nes2 {
  * values are compile-time facts about the build rather than something a
  * call site should restate.
  *
+ * Four-screen/alternative nametable wiring (NES2.0 flags 6, bit 3) comes from
+ * the ::ALTERNATIVE_NAMETABLE compiler define (set via ALTERNATIVE_NAMETABLE
+ * in local.cmake), not from an argument here -- like MAPPER/SUBMAPPER, it's a
+ * compile-time fact about the board being built, not something a call site
+ * should restate. Only the define's non-zero-ness is used.
+ *
  * @param mirroring       Hard-wired nametable mirroring (::Mirroring).
- * @param four_screen     Hard-wired four-screen nametable wiring (e.g. TxSROM MMC3 boards).
  * @param battery         Battery-backed PRG-RAM/NVRAM present.
  * @param prg_rom_bytes   PRG-ROM size, in bytes.
  * @param chr_rom_bytes   CHR-ROM size, in bytes (0 for CHR-RAM-only carts).
@@ -142,7 +157,7 @@ namespace nes2 {
  * @param chr_nvram_bytes Non-volatile CHR-RAM size, in bytes (0 = absent).
  * @param timing          CPU/PPU timing region (::Timing).
  */
-#define HEADER(mirroring, four_screen, battery,                                                 \
+#define HEADER(mirroring, battery,                                                               \
                prg_rom_bytes, chr_rom_bytes,                                                     \
                prg_ram_bytes, prg_nvram_bytes,                                                   \
                chr_ram_bytes, chr_nvram_bytes,                                                   \
@@ -167,7 +182,7 @@ namespace nes2 {
         ::nes2::rom_size_byte(prg_rom_bytes),                                                     \
         ::nes2::rom_size_byte(chr_rom_bytes),                                                     \
         (static_cast<u8>(mirroring) | (static_cast<u8>(battery) << 1) |                          \
-            (static_cast<u8>(four_screen) << 3) | ((MAPPER & 0xF) << 4)),                        \
+            (static_cast<u8>((ALTERNATIVE_NAMETABLE) != 0) << 3) | ((MAPPER & 0xF) << 4)),       \
         (0b1000 | (((MAPPER >> 4) & 0xF) << 4)),                                                 \
         (((MAPPER >> 8) & 0xF) | (SUBMAPPER << 4)),                                               \
         ((::nes2::rom_msb_nibble(chr_rom_bytes) << 4) | ::nes2::rom_msb_nibble(prg_rom_bytes)),   \

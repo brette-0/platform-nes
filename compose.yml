@@ -52,15 +52,18 @@ services:
       - -c
       - |
         set -euo pipefail
-        # Pass the toolchain + prefix explicitly from the image's SDK rather
-        # than letting CMakeLists derive them from LLVM_MOS_SDK: a developer's
-        # bind-mounted local.cmake FORCEs that variable to a host path that
-        # doesn't exist inside the container. Build into a dedicated dir so the
-        # container never clashes with an IDE-configured cmake-build-nes-* tree
-        # (their CMakeCache.txt records a different, host source path).
+        # Pass the toolchain + prefix + top-level linker script explicitly
+        # rather than letting CMakeLists derive them from local.cmake: that
+        # file is gitignored (per-developer), so it never reaches CI's
+        # checkout, and even a bind-mounted local dev copy would FORCE these
+        # to host paths that don't exist inside the container. Build into a
+        # dedicated dir so the container never clashes with an
+        # IDE-configured cmake-build-nes-* tree (their CMakeCache.txt
+        # records a different, host source path).
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET" \
           -DCMAKE_TOOLCHAIN_FILE="$$LLVM_MOS_SDK/lib/cmake/llvm-mos-sdk/llvm-mos-toolchain.cmake" \
-          -DCMAKE_PREFIX_PATH="$$LLVM_MOS_SDK"
+          -DCMAKE_PREFIX_PATH="$$LLVM_MOS_SDK" \
+          -DTOPLEVEL_LD=/tmp/platform-nes/demo/link.ld
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo.nes"
 

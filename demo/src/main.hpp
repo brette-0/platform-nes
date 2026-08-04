@@ -1,7 +1,7 @@
 #pragma once
 #include <platform-nes/platform-nes.hpp>
 
-#include "level/actor.hpp"
+#include "actor.hpp"
 #include "level/player.hpp"
 
 enum class spriteZeroStatus : u8 {

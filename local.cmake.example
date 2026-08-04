@@ -27,6 +27,14 @@ set(LLVM_MOS_SDK "C:/llvm-mos" CACHE PATH "" FORCE)
 # ca65 is not already on PATH.
 set(CC65_DIR "C:/cc65" CACHE PATH "" FORCE)
 
+# Alternative nametable wiring (NES2.0 flags 6, bit 3 -- the "four-screen"
+# bit): set this if your board supplies its own nametable memory/routing
+# instead of the console's default 2-way CIRAM mirror (e.g. a TVROM-style
+# board with an extra VRAM chip). Any non-zero value works -- only its
+# non-zero-ness reaches the header; the number itself is not a hardware
+# quantity. Optional -- CMakeLists.txt leaves the bit clear if left unset.
+# set(ALTERNATIVE_NAMETABLE 1)
+
 # Path to your project's own top-level linker script for the NES/MMC3 build.
 # Only required if you build the NES target. The library never supplies this
 # itself -- only a helper (src/nes/mappers/mmc3-helper.ld) with the

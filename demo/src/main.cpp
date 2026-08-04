@@ -9,7 +9,7 @@
 #include "graphics/metatiles.hpp"
 
 #include "level/levels.hpp"
-#include "level/actor.hpp"
+#include "actor.hpp"
 #include "level/collision_map.hpp"
 #include "level/dynamic.hpp"
 #include "level/player.hpp"

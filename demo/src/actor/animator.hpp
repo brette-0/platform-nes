@@ -2,7 +2,7 @@
 
 #include "../actor.hpp"
 
-namespace demo {
+namespace demo::actor {
     void NextFrame(Actor* actor);
     void SwitchAnimation(u8* animTable);
 }

@@ -1,7 +1,7 @@
 #pragma once
 #include <platform-nes>
+#include "level/types.hpp"
 #include "types.hpp"
-#include "../types.hpp"
 
 class Actor {
     public:

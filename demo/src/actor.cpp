@@ -1,7 +1,7 @@
 #include "actor.hpp"
 
-#include "levels.hpp"
-#include "collision_map.hpp"
+#include "level/levels.hpp"
+#include "level/collision_map.hpp"
 
 static void TranslateWorldSpace(vec2<u16>& worldSpace, vec2<i8> delta);
 

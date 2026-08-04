@@ -1,6 +1,6 @@
 #include "animator.hpp"
 
-namespace demo {
+namespace demo::actor {
     void NextFrame(const Actor *actor) {
 
     }
