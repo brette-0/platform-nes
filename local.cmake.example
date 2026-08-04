@@ -27,11 +27,12 @@ set(LLVM_MOS_SDK "C:/llvm-mos" CACHE PATH "" FORCE)
 # ca65 is not already on PATH.
 set(CC65_DIR "C:/cc65" CACHE PATH "" FORCE)
 
-# Path to your project's own top-level linker script for the NES/VRC1 build.
+# Path to your project's own top-level linker script for the NES/MMC3 build.
 # Only required if you build the NES target. The library never supplies this
-# itself -- only a helper (src/nes/mappers/vrc1-helper.ld) with the
+# itself -- only a helper (src/nes/mappers/mmc3-helper.ld) with the
 # hardware/mechanical facts, which your own script should INCLUDE. demo/link.ld
 # is this repo's own reference example (ROM size, and this repo's own
-# BANKED()-tagged domains) -- copy its shape for your own project rather than
-# pointing straight at it, once you have real domains of your own to declare.
-set(VRC1_LD "${CMAKE_SOURCE_DIR}/demo/link.ld" CACHE FILEPATH "" FORCE)
+# MMC3_BANKED()-tagged domains) -- copy its shape for your own project rather
+# than pointing straight at it, once you have real domains of your own to
+# declare.
+set(TOPLEVEL_LD "${CMAKE_SOURCE_DIR}/demo/link.ld" CACHE FILEPATH "" FORCE)

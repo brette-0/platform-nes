@@ -15,7 +15,7 @@
 #include "level/player.hpp"
 
 #include <platform-nes/apu.hpp>
-#include <platform-nes/mappers/vrc1.hpp>
+#include <platform-nes/mappers/mmc3.hpp>
 
 using namespace demo;
 
@@ -32,9 +32,9 @@ u8 lastPort2;
 // lands (see WaitThenReactToSpriteZero in NMI).
 static void ApplyHudSplit();
 
-constexpr u8 kCoinVramCap = 48;            // 16 tile writes = 4 coins (2x2 each)
+constexpr u8 kCoinVramCap = 48;         // 16 tile writes = 4 coins (2x2 each)
 static u8 CoinVram[kCoinVramCap];
-static u8 CoinVramLen;                      // bytes used
+static u8 CoinVramLen;                  // bytes used
 
 static void CoinVramReset() { CoinVramLen = 0; }
 
@@ -97,13 +97,31 @@ static i16  ClampRow(u16 y);
 
 RESET {
 #ifdef TARGET_NES
-    // init bank state -- window1Control/2/3 and chr0Control/1 are VRC1
-    // registers, only defined off vrc1.cpp (NES-only, see vrc1.hpp).
-    SwitchBank(window1Control, 0);
-    SwitchBank(window2Control, 1);
-    SwitchBank(window3Control, 2);
-    SwitchCHRBank(chr0Control, 0);
-    SwitchCHRBank(chr1Control, 1);
+    // init bank state -- window1Control/window2Control and chr0Control-
+    // chr5Control are MMC3 registers, only defined off mmc3.cpp (NES-only,
+    // see mmc3.hpp). mmc3.cpp's own ::_reset/SyncBankShadows already set
+    // window1Control/window2Control to banks 0/1 at boot -- reasserted here
+    // for the same "this is the demo's own explicit choice, not just
+    // trusting boilerplate" reason the old VRC1 version did (there is no
+    // window3Control/bank-2 equivalent to reassert: MMC3 in PRG mode 0 has
+    // no register for $C000 at all, see mmc3.hpp's own file comment).
+    //
+    // CHR: VRC1's chr0Control/chr1Control were two 4 KiB windows (pattern
+    // tables 0/1). MMC3 carves the same 8 KiB CHR space into six finer
+    // windows instead -- R0/R1 (2 KiB each) cover $0000-$0FFF, R2-R5
+    // (1 KiB each) cover $1000-$1FFF -- so VRC1's chr0Control=0 (physical
+    // bytes [0,4096)) becomes R0=0/R1=1 (bytes [0,2048)+[2048,4096)), and
+    // chr1Control=1 (bytes [4096,8192)) becomes R2=4/R3=5/R4=6/R5=7 (four
+    // consecutive 1 KiB banks covering the same [4096,8192) range) -- same
+    // physical CHR-ROM content, just addressed at MMC3's own granularity.
+    mmc3::SwitchBank(mmc3::window1Control, 0);
+    mmc3::SwitchBank(mmc3::window2Control, 1);
+    mmc3::SwitchCHRBank(mmc3::chr0Control, 0);
+    mmc3::SwitchCHRBank(mmc3::chr1Control, 1);
+    mmc3::SwitchCHRBank(mmc3::chr2Control, 4);
+    mmc3::SwitchCHRBank(mmc3::chr3Control, 5);
+    mmc3::SwitchCHRBank(mmc3::chr4Control, 6);
+    mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
 #endif
 
     if (!level::LoadLevel(0)) {

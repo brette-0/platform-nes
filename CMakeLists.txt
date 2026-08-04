@@ -108,11 +108,11 @@ FetchContent_Declare(
 # NES target
 # ----------------------------------------------------------------------
 if(TARGET_PLATFORM STREQUAL "nes")
-    # Mapper 75 (VRC1), not NROM: linked against the generic nes-platform
+    # Mapper 4 (MMC3), not NROM: linked against the generic nes-platform
     # crt0 (LLVM_MOS_PLATFORM=nes, not nes-nrom), since nes-nrom's own
     # crt0.o/link.ld hardcode NROM-specific __prg_rom_size/__chr_rom_size
-    # defaults that this VRC1 build must supply itself (see vrc1.ld's
-    # COROLLARY comment).
+    # defaults that this MMC3 build must supply itself (see mmc3-helper.ld's
+    # COROLLARY-equivalent reasoning, carried over from vrc1-helper.ld).
     #
     # The generic nes platform has no default link.ld (unlike nes-nrom and
     # the other mapper subtargets), so -T must be supplied explicitly. This
@@ -130,30 +130,32 @@ if(TARGET_PLATFORM STREQUAL "nes")
     # invisible to that one probe even though it reaches every ordinary
     # target's link step. Compile-only steps harmlessly warn that -T is
     # unused; silenced below rather than left to spam every translation unit.
-    # BANKED CALL, Phase 5: VRC1_LD is no longer hardcoded into the library's
-    # own tree -- the library only ever supplies a HELPER script
-    # (src/nes/mappers/vrc1-helper.ld: hardware facts and mechanical
-    # plumbing), never the actual, final linker script a real project links
-    # against (see BANKED_CALL_THEORY.txt's "THE FINAL LINKER SCRIPT MUST BE
-    # USER-MADE" section). The demo supplies its own top-level script
-    # (demo/link.ld) via local.cmake, matching LLVM_MOS_SDK's own "no
+    # BANKED CALL, Phase 5: TOPLEVEL_LD (originally VRC1_LD, renamed when the
+    # demo converted from VRC1 to MMC3 -- the variable was never actually
+    # mapper-specific, just named after whichever mapper existed first) is
+    # not hardcoded into the library's own tree -- the library only ever
+    # supplies a HELPER script (src/nes/mappers/mmc3-helper.ld: hardware
+    # facts and mechanical plumbing), never the actual, final linker script a
+    # real project links against (see BANKED_CALL_THEORY.txt's "THE FINAL
+    # LINKER SCRIPT MUST BE USER-MADE" section -- written against VRC1, but
+    # the principle is mapper-agnostic). The demo supplies its own top-level
+    # script (demo/link.ld) via local.cmake, matching LLVM_MOS_SDK's own "no
     # fallback, missing is a hard configure-time error" convention just
     # above -- see local.cmake.example.
-    if(NOT VRC1_LD)
+    if(NOT TOPLEVEL_LD)
         message(FATAL_ERROR
-            "NES build requires a top-level linker script, but VRC1_LD is "
+            "NES build requires a top-level linker script, but TOPLEVEL_LD is "
             "unset. Copy local.cmake.example to local.cmake and set it to "
             "your own project's top-level script, e.g.\n"
-            "    set(VRC1_LD \"\${CMAKE_SOURCE_DIR}/demo/link.ld\" CACHE FILEPATH \"\" FORCE)\n"
-            "That script should INCLUDE vrc1-helper.ld (src/nes/mappers) for "
+            "    set(TOPLEVEL_LD \"\${CMAKE_SOURCE_DIR}/demo/link.ld\" CACHE FILEPATH \"\" FORCE)\n"
+            "That script should INCLUDE mmc3-helper.ld (src/nes/mappers) for "
             "the hardware/mechanical parts it doesn't need to reinvent.")
     endif()
     # -L: GNU ld/lld's INCLUDE directive does NOT search the directory of the
     # script doing the including -- only the linker's own -L search paths --
-    # so a top-level script's `INCLUDE vrc1-helper.ld` (which itself does
-    # `INCLUDE nes-no-pow2.ld`, a local fork of the SDK's nes.ld -- see its
-    # own comment for why it exists) needs this to resolve at all.
-    set(CMAKE_CXX_FLAGS "-T ${VRC1_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
+    # so a top-level script's `INCLUDE mmc3-helper.ld` needs this to resolve
+    # at all.
+    set(CMAKE_CXX_FLAGS "-T ${TOPLEVEL_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
 
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
@@ -172,10 +174,10 @@ if(TARGET_PLATFORM STREQUAL "nes")
 
     # Mapper/submapper number for header.hpp's HEADER() macro (see
     # nes2.cpp). This is the only mapper subtarget this branch currently
-    # builds (VRC1_LD is hardcoded above), so it's unconditional for now --
-    # becomes an if/elseif alongside VRC1_LD once a second mapper subtarget
-    # exists, one MAPPER/SUBMAPPER pair per board.
-    list(APPEND PLATFORM_DEFINE "MAPPER=75" "SUBMAPPER=0")
+    # builds (TOPLEVEL_LD is hardcoded above), so it's unconditional for now
+    # -- becomes an if/elseif alongside TOPLEVEL_LD once a second mapper
+    # subtarget exists, one MAPPER/SUBMAPPER pair per board.
+    list(APPEND PLATFORM_DEFINE "MAPPER=4" "SUBMAPPER=0")
     # -D-prefixed form for the pass-1 custom command below, which invokes the
     # compiler directly and so doesn't pick up target_compile_definitions.
     list(TRANSFORM PLATFORM_DEFINE PREPEND "-D" OUTPUT_VARIABLE PLATFORM_DEFINE_FLAGS)
@@ -297,6 +299,18 @@ if(TARGET_PLATFORM STREQUAL "nes")
     endforeach()
 
     file(GLOB_RECURSE NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp)
+    # This build targets MMC3 only (TOPLEVEL_LD/MAPPER above) -- vrc1.cpp
+    # still exists for a VRC1 project to use, but it also defines a global
+    # extern "C" _reset (and other symbols mmc3.cpp defines too), which the
+    # glob above would otherwise hand to this same static library: since
+    # nothing in an MMC3 build references anything vrc1.cpp provides,
+    # leaving it in costs nothing at RUNTIME, but a duplicate-_reset link
+    # error is a real risk the moment anything ELSE in the link happens to
+    # pull that archive member in. Excluded here, the same pattern already
+    # used above for famistudio_config.s's own glob -- becomes conditional
+    # (alongside MAPPER/TOPLEVEL_LD) once a real "pick your mapper" build
+    # option exists instead of this hardcoded single-target branch.
+    list(REMOVE_ITEM NES_SOURCES ${CMAKE_SOURCE_DIR}/src/nes/mappers/vrc1.cpp)
     add_library(platform-nes STATIC ${NES_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
@@ -340,7 +354,7 @@ if(TARGET_PLATFORM STREQUAL "nes")
             # This custom command calls the compiler directly, bypassing
             # CMAKE_EXE_LINKER_FLAGS (which supplies -T/-L for every ordinary
             # CMake target's link step) -- so -T/-L have to be repeated here too.
-            -T ${VRC1_LD}
+            -T ${TOPLEVEL_LD}
             -L${CMAKE_SOURCE_DIR}/src/nes/mappers
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
