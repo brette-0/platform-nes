@@ -1,0 +1,1632 @@
+BANKED CALL THEORY
+===================
+Working notes on giving the user three things, in order of how the
+design builds on itself:
+
+  1. Place lib modules in whatever linker section they like -- this
+     library never picks a naming convention for them. Satisfied simply
+     by BANKED()'s section_name being a literal, freely-chosen argument
+     in the library's own source -- see the note on why a whole
+     consumer-facing config layer for this turned out to be unnecessary,
+     below.
+  2. Write their own final linker script -- this library supplies
+     helper/fragment scripts for it to use, never owns the final one.
+  3. Long-call both lib and user functions correctly, including ones
+     that end up larger than one window and need multiple banks.
+
+Not implemented yet -- this is the design as worked out, written down
+so it can be picked back up later. Consolidated pass: earlier, now-
+redundant versions of the same macros/code that accumulated across the
+original discussion have been removed in favor of the current, correct
+forms shown once each below. A later pass removed the module-level
+config layer entirely (PLATFORM_NES_AUDIO_SEGMENT, AUDIO_BANKED,
+platform-nes-config) once it turned out not to be solving a real
+problem -- see the note where MODULE-LEVEL CONFIGURATION used to be.
+
+
+THE PROBLEM
+-----------
+vrc1.hpp's ::Long already does "far calls" across a bankswitch:
+
+    Long<int>(fn, window)
+
+The caller has to know, by hand, which of the three switchable windows
+(0/1/2) the target function lives in, and pass it every time. That's
+exactly the kind of fact that's already implied by which linker section
+the function was tagged into. We don't need the whole physical ROM
+address computed in C++ -- a function pointer to code inside a
+switchable window already IS the CPU-space address, and each window
+maps 1:1 onto a fixed range ($8000-$9FFF / $A000-$BFFF / $C000-$DFFF),
+so the low bits (offset within the window) are already sitting in the
+pointer for free. The only thing invisible from the pointer alone is
+which physical bank is currently supposed to back that window -- which
+is exactly what the segment tag already encodes. So: stop asking the
+caller, and instead let the function's own declaration carry that fact,
+queryable at the call site.
+
+
+WHY THIS CAN'T BE DONE VIA REFLECTION OR PRAGMAS
+-------------------------------------------------
+(Ruled out earlier in discussion, recorded here so it isn't re-litigated.)
+
+- `#pragma clang section` / a PUSH_SEGMENT-around-#include trick only
+  affects codegen for whatever is actually compiled at the point of the
+  #include. For an out-of-line function whose body lives in its own .cpp,
+  that codegen happens once, in that .cpp's own translation unit,
+  independent of who includes the header later. It only works for
+  header-only/inline code, and even then multiple includers pushing
+  different segments for the same inline function produces duplicate
+  definitions that the linker dedups arbitrarily.
+- C++26 reflection (P2996) is a frontend/compile-time facility. It runs
+  before linking, so it cannot read back where the linker actually placed
+  a symbol. Not useful here regardless of maturity.
+- The compiler attribute `__attribute__((section(...)))` is consumed by
+  the backend/linker; nothing exposes its contents back to the C++ type
+  system or to constexpr evaluation. There is no `__builtin_section_of(fn)`.
+
+Conclusion: the fact has to be attached on the C++ side, by hand, at
+declaration time, using an ordinary compile-time trait keyed off the
+function's own address. Function pointers are valid non-type template
+parameters since C++17, so this needs nothing newer than that.
+
+
+DESIGN: THREE LAYERS
+---------------------
+
+1. bank_layout<Tag>  -- hardware facts about one physical bank/segment.
+   Written ONCE per bank, not once per function. The escape hatch for
+   oddball cases later (a section spanning more than one bank would get
+   a different kind of bank_layout specialization instead of a single
+   `bank` constant -- see LONG-CALLING FUNCTIONS BIGGER THAN ONE WINDOW
+   below, where this escape hatch gets a concrete shape).
+
+2. bank_of<Fn>  -- which bank a SPECIFIC function was tagged into.
+   One specialization per banked function, generated automatically by
+   BANKED()/BANKED_EXTERN() below -- never written by hand.
+
+3. Call<Fn>(args...) / CallBlock<Fn>(block)  -- the generalized far-call.
+   Looks up bank_of<Fn>, then bank_layout<Tag>, switches the right
+   window, runs the target (or an arbitrary block, for CallBlock),
+   restores the window, and returns.
+
+
+THE CODE (current, consolidated -- this is the only version; nothing
+earlier in the design history should be treated as authoritative)
+--------------------------------------------------------------------
+
+// -- bank_layout: one entry per physical bank. Hand-written, lives in
+//    the user's own mapper-glue header (e.g. their copy/use of vrc1.hpp),
+//    matched against whatever MEMORY regions their own linker script
+//    actually defines -- see THE FINAL LINKER SCRIPT section below. --
+
+// section_t: the ONE mapper-agnostic fact bank_layout<Tag> carries --
+// physical (LMA, load address -- see LOADADDR() in a linker script, NOT
+// ADDR()/VMA) location and size within the ROM image. Deliberately
+// carries no bank/window concept: on a switchable region, multiple
+// physical banks alias the SAME CPU-visible VMA at different times, so
+// VMA alone can't disambiguate which bank a range belongs to -- LMA can,
+// unambiguously, since it's that range's one real position in the
+// linked file, independent of any mapper's addressing scheme. See THIS
+// ALSO CLOSES THE MULTI-BANK-SECTIONS GAP below for how rom_address/
+// size actually get computed.
+struct section_t {
+    u32 rom_address;   // LOADADDR()-derived: physical position in ROM
+    u32 size;
+};
+
+template <typename Tag> struct bank_layout;   // primary template, deliberately undefined
+
+// NAMING CORRECTION (found during real implementation, Phase 1 of the
+// rollout roadmap): the always-mapped tag is fixed_bank_tag in the actual
+// vrc1.hpp, not fixed_tag as drafted here. Reason: BANKED()'s tag argument
+// gets macro-expanded before tag##_tag pastes it (see BANKED_IMPL's own
+// comment on why -- a #define'd tag must arrive already expanded). vrc1.hpp
+// ALSO already #defines the bare word `fixed` for an unrelated purpose
+// (CREATE_SEGMENT_KEYWORD(".prg_rom_fixed"), the ::fixed keyword). Passing
+// tag=fixed into BANKED() therefore macro-expands `fixed` to that unrelated
+// attribute expression before ## ever sees it, producing a paste of garbage
+// tokens -- confirmed empirically, this fails to compile. Not a flaw in the
+// indirection logic itself, just a real name collision the draft below
+// didn't hit because it never actually called BANKED() with tag=fixed.
+// Every other *_tag name in this file remains illustrative/unaffected.
+struct fixed_tag {};
+struct bank2_tag {};
+// ... one *_tag + bank_layout specialization per real segment the
+// user's own linker script defines ...
+
+template <> struct bank_layout<fixed_tag> {
+    static constexpr bool always_mapped = true;
+};
+template <> struct bank_layout<bank2_tag> {
+    static constexpr bool always_mapped = false;
+    static constexpr section_t section = { /* rom_address */, /* size */ };
+};
+
+// SHAPE CORRECTION (found during real implementation, Phase 2): `section`
+// is a FUNCTION in the actual vrc1.hpp -- `static section_t section()` --
+// not a stored `constexpr` data member as drafted above, for any
+// specialization whose rom_address is genuinely link-derived rather than a
+// human-entered literal. Reason: LOADADDR() is a link-time fact; converting
+// a linker symbol's address to an integer is not a constant expression in
+// standard C++, so a REAL (non-guessed) rom_address can only be computed at
+// runtime. Storing that as a data member would need dynamic initialization,
+// which is a genuine hazard here: an unprioritized dynamic initializer runs
+// AFTER every explicitly-prioritized __attribute__((constructor(N))) on
+// this toolchain, so a low-priority constructor calling Call<Fn> before the
+// section data member's own initializer ran would read a garbage/zero
+// address. A plain function computing the value fresh on every call (two
+// cheap reinterpret_casts of already-link-fixed symbol addresses, no stored
+// state) has no initialization-order dependency at all -- safe to call from
+// anywhere, including an early-priority constructor. Confirmed working end
+// to end: see bank_layout<window_test_tag> in vrc1.cpp, and Call<Fn>/
+// CallBlock<Fn>'s two call sites, both `L::section()` not `L::section`.
+// The hand-entered-literal case (a domain given its own dedicated,
+// human-picked MEMORY region) could still safely use a `constexpr` data
+// member instead, since it never needs a linker symbol read-back at all --
+// but for consistency, one calling convention (`L::section()`) covers both,
+// rather than bank_layout<Tag> having two different shapes depending on
+// which case applies.
+//
+// COST CORRECTION, same phase, found immediately after: the runtime-derived
+// shape above is NOT free, and the difference is large enough to change
+// which shape is the DEFAULT. Measured on window_test_tag's actual call
+// site: hand-supplied ::Long-style window (baseline) = 111 bytes;
+// resolution hardcoded to a constant (theoretical floor) = 116 bytes;
+// window_test_tag's real runtime-computed section() = 235 bytes. The ~120
+// byte gap is the subtract/shift-divide/branch CallInSection does to turn
+// rom_address into a window index -- real 6502 code, generated fresh at
+// EVERY Call<Fn>/CallBlock<Fn> call site (CallInSection is a template,
+// instantiated per TFunc, so this isn't shared/amortized). Narrowing the
+// arithmetic from u32 to u16 only recovered 14 of those bytes -- the
+// dominant cost isn't integer width, it's that the compiler never proves
+// the division's result is constant, even though it provably is for any
+// one Call<Fn> instantiation (LTO already folds rom_address itself down to
+// a literal; it just doesn't propagate that far enough through
+// bank_layout<Tag>::section()'s runtime symbol read to fold the division
+// and switch too).
+//
+// RESOLUTION: give window_test_tag its own dedicated, hand-known-address
+// MEMORY region (prg_rom_window_test, vrc1.ld) instead of letting it share
+// prg_rom_switchable and resolving its address at runtime. section() is now
+// a real `constexpr` literal (0xdfc0) matching that region's ORIGIN, with a
+// link-time-only ASSERT (zero runtime cost) catching the two drifting
+// apart. Re-measured: 112 bytes -- matches the floor. CONSEQUENCE: the
+// hand-entered-literal shape is the DEFAULT/PREFERRED shape now, not just
+// an equally-valid alternative -- any real tagged domain (a level chunk, an
+// audio module) should get its own dedicated MEMORY region unless it
+// genuinely cannot (content whose size/placement isn't decided ahead of
+// time). The runtime-computed shape remains available for that narrower
+// case, with its real cost now known rather than assumed negligible.
+
+// -- bank_of: auto-generated per function, never hand-written. --
+
+template <auto Fn> struct bank_of;            // primary template, deliberately undefined
+
+// section_name is the literal linker-section string -- whatever the
+// user's OWN linker script actually uses. This library never picks it,
+// synthesizes it, or enforces a naming convention on it (goal #1 --
+// see REMOVING THE ENFORCED SECTION-NAMING CONVENTION for why an
+// earlier version of this macro got that wrong). tag is a SEPARATE,
+// plain C++-identifier-safe token used only to key bank_of<>/
+// bank_layout<> -- kept apart from section_name because tag##_tag needs
+// valid identifier characters, which most real section strings (leading
+// dots, slashes) don't have.
+//
+// The BANKED -> BANKED_IMPL indirection is load-bearing, not decorative:
+// without it, if section_name or tag ever arrived as another macro
+// rather than a literal token, # and ## would stringize/paste the
+// macro's NAME instead of its expanded VALUE -- wrong, and wrong
+// silently (compiles, resolves the wrong bank).
+//
+// CONFIRMED, GREENLIT: section_name/tag CAN be a #define from a plain
+// config header, #include'd before the BANKED()/BANKED_EXTERN() call
+// site -- e.g. `#define SECTION_TECH "prg_rom_fixed"` in a config.hpp,
+// then `BANKED(SECTION_TECH, tag, ...)`. This is exactly what the
+// indirection above exists for: BANKED's own body doesn't touch
+// section_name/tag with # or ##, so the preprocessor macro-expands them
+// to their #define'd values BEFORE forwarding to BANKED_IMPL, which
+// then pastes/uses the already-expanded literal text. Not the same
+// thing as the removed MODULE-LEVEL CONFIGURATION layer below (no CMake
+// injection target, no per-module wrapper macro needed) -- just an
+// ordinary header a caller chooses to #include. See EXTERNALLY-BUILT
+// LIBRARIES: THE GENERAL PATTERN (below the oversized-domains section)
+// for why BANKED_EXTERN needs more than this alone to stay honest.
+#define BANKED(section_name, tag, ret, name, ...) \
+    BANKED_IMPL(section_name, tag, ret, name, __VA_ARGS__)
+#define BANKED_IMPL(section_name, tag, ret, name, ...)                     \
+    CREATE_SEGMENT_KEYWORD(section_name) ret name(__VA_ARGS__);            \
+    template <> struct bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
+        using layout = bank_layout<tag##_tag>;                             \
+    }
+
+// For functions implemented outside C++ codegen entirely -- hand-written
+// assembly, or a third-party engine assembled separately (see the
+// FamiStudio worked example below). BANKED's attribute-emitting half is
+// a no-op for these (there's no C++ codegen to place), so this only
+// does the bank_of<> registration half; actual placement is controlled
+// by whatever assembled/linked that symbol in the first place, and has
+// to be kept in sync with section_name by hand (or by a shared build
+// variable -- see the FamiStudio section).
+#define BANKED_EXTERN(section_name, tag, ret, name, ...) \
+    BANKED_EXTERN_IMPL(section_name, tag, ret, name, __VA_ARGS__)
+#define BANKED_EXTERN_IMPL(section_name, tag, ret, name, ...)              \
+    extern ret name(__VA_ARGS__);                                         \
+    template <> struct bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
+        using layout = bank_layout<tag##_tag>;                            \
+    }
+
+// -- Call / CallBlock: the generalized far-calls. --
+
+template <typename T> struct function_traits;
+template <typename R, typename... A>
+struct function_traits<R (*)(A...)> { using return_type = R; };
+
+// Reach one specific, compile-time-known, tagged function. Args are
+// captured by reference into a closure and handed to CallInWindow as a
+// zero-arg callable -- the same trick ::Long's own doc comment already
+// covers ("a lambda, captures included"). Return type is inferred from
+// Fn's own signature -- no need to state it explicitly the way
+// Long<TReturn>(fn, window) requires.
+template <auto Fn, typename... Args>
+fixed auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type {
+    using TReturn = typename function_traits<decltype(Fn)>::return_type;
+#ifdef TARGET_NES
+    using L = typename bank_of<Fn>::layout;
+    if constexpr (L::always_mapped) {
+        return Fn(std::forward<Args>(args)...);
+    } else {
+        // CallInSection is MAPPER-PROVIDED: it consumes L::section (pure
+        // rom_address+size, no VRC1 concept baked in) and does whatever
+        // VRC1-specific register resolution/switching is needed. An
+        // MMC3 mapper-glue header defines its own CallInSection taking
+        // the SAME section_t shape, doing entirely different internal
+        // work -- Call<>/CallBlock<> themselves never change per mapper.
+        return vrc1_detail::CallInSection<TReturn>(
+            L::section,
+            [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
+    }
+#else
+    return Fn(std::forward<Args>(args)...);
+#endif
+}
+
+// Run an arbitrary block under Fn's resolved window instead of just
+// calling Fn once -- for generic code that needs iterative/repeated
+// access to a known, tagged function (see the PopulateFromProvider
+// worked example below). The block itself may capture freely; only Fn
+// has to be a compile-time-known tagged function.
+template <auto Fn, typename Block>
+fixed auto CallBlock(Block &&block) -> decltype(block()) {
+#ifdef TARGET_NES
+    using L = typename bank_of<Fn>::layout;
+    if constexpr (L::always_mapped) {
+        return block();
+    } else {
+        return vrc1_detail::CallInSection<decltype(block())>(
+            L::section, std::forward<Block>(block));
+    }
+#else
+    return block();
+#endif
+}
+
+// -- GetCallable / Call(callable_t): runtime-selected dispatch among
+//    KNOWN, tagged candidates (closes the cross-domain LIMITATIONS gap
+//    -- see the worked example below and LIMITATIONS). --
+//
+// Call<Fn>/CallBlock<Fn> need Fn nameable at the CALL site, at compile
+// time -- a template argument. A dispatch table indexed by a runtime
+// value can't supply that: table[runtime_index] is never a constant
+// expression, no matter how the table itself is declared. But Call<Fn>
+// was never missing the KNOWLEDGE for any one candidate -- bank_of<Fn>
+// is fully correct for every entry individually. The fix is to
+// MATERIALIZE that knowledge into an ordinary storable value, at the
+// one point each candidate is still nameable (where the table itself
+// is built, or wherever a callback slot gets assigned) -- not to make
+// Call<Fn> smarter, which the language won't allow anyway.
+//
+// callable_t carries only {fn, section} -- no separate always_mapped
+// field. CallInSection derives "does this even need a switch" itself,
+// by comparing rom_address against the mapper's own known fixed-region
+// bounds (a compile-time constant only the mapper module has) -- the
+// same fact bank_layout<fixed_tag>::always_mapped encodes for the
+// compile-time path, just computed instead of stored, so nothing has to
+// remember to set it correctly per entry.
+template <typename Ret, typename... Args>
+struct callable_t {
+    Ret (*fn)(Args...);
+    section_t section;
+};
+
+template <auto Fn>
+constexpr auto GetCallable() {
+    using L = typename bank_of<Fn>::layout;
+    if constexpr (L::always_mapped) {
+        return callable_t{ Fn, section_t{ /* fixed-region sentinel */ } };
+    } else {
+        return callable_t{ Fn, L::section };
+    }
+}
+
+// Ordinary function overload, NOT a template on Fn -- takes the
+// already-resolved value GetCallable<Fn>() produced. Same always_mapped
+// vs CallInSection branch Call<Fn> makes, just reading section_t at
+// runtime instead of via bank_of<Fn> at compile time.
+template <typename Ret, typename... Args>
+fixed Ret Call(const callable_t<Ret, Args...> &c, Args &&...args) {
+#ifdef TARGET_NES
+    return vrc1_detail::CallInSection<Ret>(
+        c.section, [&]() -> Ret { return c.fn(std::forward<Args>(args)...); });
+#else
+    return c.fn(std::forward<Args>(args)...);
+#endif
+}
+
+// NOTE on ::Long: CallInSection is NOT implemented in terms of ::Long,
+// and this overload doesn't consult ::Long either. ::Long currently
+// only takes a WINDOW, not a bank (vrc1.hpp's own doc comment: "today
+// this call reasserts the window's already-active bank... an explicit
+// target-bank parameter will need to be added" once real multi-bank
+// content exists) -- it's not general enough to resolve a section_t.
+// CallInSection is the generalized primitive ::Long's own comment was
+// already anticipating, owned entirely by the mapper module, not a
+// wrapper around ::Long. ::Long's remaining scope narrows to what it
+// alone can still do: an ad-hoc capturing lambda with no BANKED()
+// registration at all (see IMPLEMENTATION STEP 7).
+
+
+EXAMPLE USAGE
+-------------
+
+// header (declaration) --------------------------------------------------
+BANKED(".prg_rom_bank2", bank2, void, LoadLevelChunk, u8 chunkId);
+// section_name is whatever the user's own linker script calls it; bank2
+// is just the C++-side lookup key, matched to bank_layout<bank2_tag>.
+
+// .cpp (implementation) --------------------------------------------------
+#include "level_chunks.hpp"
+
+void LoadLevelChunk(u8 chunkId) {
+    // ... body ...
+}
+
+// caller -------------------------------------------------------------
+Call<LoadLevelChunk>(chunkId);
+// window/bank resolved automatically from BANKED's registration,
+// chunkId forwarded through, return type inferred (void here) --
+// no manual `window` argument, unlike Long<TReturn>(fn, window).
+
+
+CallBlock<Fn>: WHY IT EXISTS -- GENERIC CODE THAT TAKES A CALLBACK
+--------------------------------------------------------------------
+Call<Fn> covers "reach this one specific tagged function, forward args,
+get a value back." It does NOT cover generic engine code that takes a
+callback as a runtime parameter and invokes it itself -- e.g.
+technology.hpp's existing PopulateFromProvider:
+
+    template <typename Idx, typename Count, typename Step>
+    void PopulateFromProvider(u8* target, const u16 offset,
+                              u8 (*fn)(Idx), const Count amt, const Step step) {
+        const auto base = target + offset;
+        for (Count i = 0; i < amt; ++i)
+            base[static_cast<int>(i) * step] = fn(static_cast<Idx>(i));
+    }
+
+`fn` is a runtime parameter, called `amt` times in a loop -- there's no
+single compile-time Fn to hand Call<> here, and there must never be:
+PopulateFromProvider lives in technology.hpp, which is portable/
+mapper-agnostic (works off-NES too), so it must never be taught about
+windows or banks. If the specific provider passed to it happens to live
+in a different bank than wherever PopulateFromProvider is currently
+executing, the fix is NOT to make PopulateFromProvider bank-aware --
+it's to open the right window for the ENTIRE loop, from outside, before
+calling it at all, the same way ::Long already wraps a whole operation
+today. CallBlock<Fn> is exactly Call<Fn>'s window-resolution half,
+decoupled from its "one call, forward args" half.
+
+Worked example -- calling PopulateFromProvider with a provider that
+lives in a different, tagged bank:
+
+    CallBlock<MyBankedProvider>([&]{
+        PopulateFromProvider(target, offset, MyBankedProvider, amt, step);
+    });
+
+Why this satisfies every rule established so far:
+- Fn (MyBankedProvider) still has to be a plain, compile-time-known,
+  BANKED()-tagged function -- no relaxation of the "Fn can't be an ad
+  hoc capturing lambda" limitation (see LIMITATIONS). It's declared
+  through BANKED() like any other tagged function.
+- The BLOCK passed to CallBlock can capture freely -- that's fine
+  because the block itself is never looked up in bank_of<>, it's just an
+  ordinary callable run once the window is already known correct. This
+  is exactly ::Long's existing calling convention, reused rather than
+  reinvented.
+- PopulateFromProvider (and technology.hpp generally) stays completely
+  untouched and mapper-agnostic -- it has no idea a window switch
+  happened. The only code that knows a bank switch is involved is the
+  call site that already wanted MyBankedProvider specifically.
+- Domain/segment assignment for MyBankedProvider still comes entirely
+  from wherever it was BANKED()-tagged in the library's own source --
+  nothing new needed there.
+
+Scope note: only reach for CallBlock<Fn> when the provider genuinely
+lives in a different bank than the calling code's current window. If
+it's already reachable (::fixed, or the same domain), just call
+PopulateFromProvider directly -- no wrapping needed.
+
+Worked example -- runtime-selected dispatch WITHIN one shared domain.
+Distinct from the cross-domain case (see GetCallable<Fn>() below, and
+the resolved worked example under CallBlock<Fn> further down):
+
+    BANKED(".prg_rom_enemies", enemies, void, UpdateGoomba, Entity* e);
+    BANKED(".prg_rom_enemies", enemies, void, UpdateKoopa,  Entity* e);
+    BANKED(".prg_rom_enemies", enemies, void, UpdateBoss,   Entity* e);
+    // all three declared with the SAME tag: enemies
+
+    void (*enemyUpdateTable[])(Entity*) = { UpdateGoomba, UpdateKoopa, UpdateBoss };
+
+    CallBlock<UpdateGoomba>([&]{
+        enemyUpdateTable[entity.type](&entity);   // ordinary bare call
+    });
+
+entity.type is a runtime value and never has to be a compile-time
+constant. CallBlock<Fn>'s Fn only has to be SOME function that shares
+the table's tag -- it's used purely to look up bank_of<Fn>::layout,
+which resolves the SAME window for every entry since they were all
+tagged identically. UpdateGoomba here isn't "the function being
+called," it's a stand-in anchor; entity.type only picks which function
+inside an already-correctly-mapped window actually runs. This only
+works because bank_of<Fn>::layout depends on Fn's TAG, not its specific
+identity -- if the table's entries didn't all share one tag, no single
+anchor would be correct for every possible runtime pick. That case is
+below, and it's now also solved -- just by a different mechanism, since
+a shared anchor can't be it.
+
+Worked example -- runtime-selected dispatch ACROSS different domains.
+This is the case the anchor trick above cannot cover, and the reason
+Runtime-SELECTED dispatch used to be listed as unsolved in LIMITATIONS:
+
+    BANKED(".prg_rom_enemies_a", enemiesA, void, UpdateGoomba, Entity* e);
+    BANKED(".prg_rom_enemies_b", enemiesB, void, UpdateBoss,   Entity* e);
+    // two DIFFERENT tags -- no single function's bank_of<> is correct
+    // for both entries, so no CallBlock<AnyMemberFn> anchor exists
+
+    constexpr auto table[] = { GetCallable<UpdateGoomba>(), GetCallable<UpdateBoss>() };
+
+    Call(table[entity.type], &entity);
+
+Each table ENTRY carries its own resolved {fn, section} pair, baked in
+by GetCallable<Fn>() at the one point each function was still nameable
+as a literal (the table initializer). The runtime index only ever picks
+which ALREADY-SELF-DESCRIBING entry to hand to the runtime Call()
+overload -- nothing needs a shared anchor, because nothing is sharing
+one resolved window anymore; every entry resolves its own. This is
+exactly ::Long's existing contract (caller supplies addressing info by
+hand) generalized to be self-describing and baked in once, instead of
+hand-typed at every call site.
+
+
+MODULE-LEVEL CONFIGURATION -- TRIED, THEN REMOVED
+----------------------------------------------------
+There used to be a whole layer here: a consumer-facing config header
+(PLATFORM_NES_AUDIO_SEGMENT etc.), one AUDIO_BANKED-style wrapper macro
+per library module, and a platform-nes-config CMake INTERFACE target to
+inject that header into the library's own compilation. Removed --
+walked through why on reconsideration and it wasn't solving a real
+problem, for audio specifically and then in general:
+
+- The part of "audio" whose size and placement genuinely varies by
+  project is FamiStudio, and that's already independently, per-project
+  configurable through its own mechanism (see the FamiStudio section
+  below) -- a different axis, already covered elsewhere.
+- platform-nes's own module code (audio.cpp etc.) is library-owned. It
+  doesn't need a consumer-facing knob to decide its own placement --
+  that's just an ordinary BANKED(literal_section, tag, ...) call,
+  decided once by whoever writes the library, same as any other
+  library-authored code. Since platform-nes is built from source as
+  part of the consumer's own project (not linked as a prebuilt binary),
+  nothing stops a consumer who genuinely needs a different placement
+  from just editing the BANKED() call directly -- the config-injection
+  ceremony wasn't the only way to get reconfigurability, it was solving
+  a problem source-level editing already solves.
+- The "bypass the module default for one outlier function" escape hatch
+  that justified keeping the per-module macro around only matters if
+  there's a module-default macro in the first place to need bypassing.
+  Interrupt-safety and similar placement constraints are on whoever
+  writes that function, not something this plan needs a special
+  override mechanism for.
+
+Net effect: goal #1 ("place lib modules in whatever section they like")
+is still fully satisfied -- by BANKED()'s section_name simply being a
+literal argument, freely chosen in the library's own source -- it just
+doesn't need a consumer-facing config layer to achieve that.
+
+
+REMOVING THE ENFORCED SECTION-NAMING CONVENTION (why goal #1 needed a fix)
+----------------------------------------------------------------------------
+Raised in response to "can a user just bring their own linker script":
+the honest answer turned out to be "yes for hardware modeling, no for
+one specific thing this library was imposing on top of it" -- and that
+thing needed fixing, not just documenting. THE CODE above already shows
+the fixed version; this section is the reasoning for why it looks that
+way.
+
+THE CLAIM EXPLORED: does a correct linker script fail to "cut it"
+because this lib is divisive? Audited a full checklist of what a custom
+linker script author would need to get right, item by item. Most of it
+-- MEMORY region ORIGIN/LENGTH matching real window geometry, windows
+mapping to fixed CPU address ranges, window adjacency for paired
+domains, the cold-boot reset hazard -- is pure hardware fact. This
+library has no opinion on any of it, was never proposing to, and no
+verification/ASSERT machinery is being added to guard against a user
+getting their own hardware modeling wrong -- that's entirely on them,
+full stop, not something this plan tries to protect against anywhere.
+
+But ONE item wasn't hardware truth -- it was this library's own opinion,
+hardcoded: the original BANKED() built its section string itself,
+unconditionally, as ".prg_rom_" + the tag. A user with a perfectly
+correct linker script using ANY other naming convention -- their own
+existing project convention, or a third-party library's convention
+(FamiStudio's own CODE/ZEROPAGE/BSS, for instance) -- could not use
+BANKED() without renaming their own sections to match this library's
+made-up prefix. That's the library being divisive for no hardware
+reason. Fixed: section_name and tag are now independent arguments (see
+THE CODE). tag##_tag (used to key bank_layout<Tag>) requires valid C++
+identifier characters anyway, which most real section-name strings
+(leading dots, slashes) don't satisfy -- so the old form was always
+latently broken for non-trivial section names, not just inconvenient;
+this wasn't purely a flexibility nice-to-have.
+
+Nothing else on the checklist had the same property on inspection --
+register-switching primitives and bank_layout<Tag>'s shape are
+necessarily custom per mapper regardless of this library's choices, not
+an imposed naming convention.
+
+
+THE FINAL LINKER SCRIPT MUST BE USER-MADE, NOT LIB-MADE (goal #2)
+----------------------------------------------------------------------
+Stated goal: the library supplies helper/fragment scripts, but the
+actual, final linker script used to build a real project has to be
+something the user assembles themselves, not something platform-nes
+hands over wholesale and owns.
+
+CURRENT REALITY, CHECKED AGAINST THE REAL FILE
+Exactly one platform-nes-authored script exists: src/nes/mappers/vrc1.ld.
+Everything IT includes (nes.ld, c-in-ram.ld, rompoke-table.ld, dpcm.ld)
+is llvm-mos's own (mos-platform/nes/lib/), not this project's -- so this
+goal only concerns that one file. CMakeLists.txt:133-134 hardcodes its
+path (set(VRC1_LD ${CMAKE_SOURCE_DIR}/src/nes/mappers/vrc1.ld)) and
+unconditionally passes -T ${VRC1_LD} to both CMAKE_CXX_FLAGS and the
+real link step (:306). Today the library owns and supplies the final
+script outright -- the opposite of the goal.
+
+WHAT'S INSIDE vrc1.ld TODAY, AND WHERE EACH PIECE BELONGS
+- MEMORY block (window ORIGIN/LENGTH, the fixed region) -- pure VRC1
+  hardware fact, true for any project targeting this chip. Fine to stay
+  in a lib-supplied helper script.
+- PROVIDE(__prg_rom_size = 32) + its ASSERT -- NOT a VRC1 fact, this
+  project's own ROM size. Has no business in anything shipped as
+  reusable; belongs entirely in the user's own top-level script.
+- .prg_rom_fixed : { *(.prg_rom_fixed .prg_rom_fixed.*) } >prg_rom_fixed
+  -- the old hardcoded section-naming convention. Directly contradicted
+  the BANKED() fix above: if BANKED() no longer forces a section name on
+  the C++ side, a lib-supplied fragment can't quietly re-impose one
+  either. The section STRING has to be the user's own choice, added by
+  their own SECTIONS rules in their own top-level script.
+- Reset vector (.vector, EXTERN(_nes2_header), .nes2_header,
+  OUTPUT_FORMAT) -- genuinely mechanical NES2.0-format-and-crt0-required
+  plumbing, not project policy and not a user-facing naming choice. Fine
+  to stay in a lib-supplied helper script.
+
+ONE LIB-SUPPLIED HELPER SCRIPT, NOT SPLIT INTO TWO
+The hardware-geometry MEMORY block and the reset-vector/header
+boilerplate are tempting to ship as two separate helper fragments, but
+that's wrong on inspection: .nes2_header's SECTIONS rule, the .vector
+table, and OUTPUT_FORMAT's FULL(...) list all reference MEMORY region
+names (nes2_header, prg_rom_fixed, prg_rom_switchable, chr_rom) by
+literal string, defined in the same MEMORY block. Splitting them means
+two files silently agreeing on four names -- exactly the cross-file
+drift risk flagged for the FamiStudio ca65/C++ boundary below. Cleaner
+as ONE combined lib-supplied helper script (MEMORY + reset vector +
+.nes2_header + EXTERN + OUTPUT_FORMAT together) -- no cross-file naming
+contract to maintain, just ordinary within-file consistency the library
+already has to keep straight regardless.
+
+THE GUIDING DISTINCTION THIS RESOLVES
+- MEMORY REGION names (right-hand side of a placement rule, e.g.
+  >prg_rom_fixed) are internal plumbing shared only between the
+  library's own helper script and itself -- fine to be lib-fixed and
+  documented as part of what the helper provides, since only the
+  library's own content needs to agree on them.
+- SECTION names (what a domain-tagged function's section attribute
+  actually says, left-hand side of a placement rule) are the user-facing
+  surface that needed decoupling -- already fixed above. The user's own
+  top-level script adds its own SECTIONS rules, routing whatever
+  section-name strings it chose into the lib-documented region names.
+
+CMAKE WIRING CHANGE NEEDED
+set(VRC1_LD ${CMAKE_SOURCE_DIR}/src/nes/mappers/vrc1.ld) has to stop
+pointing at platform-nes's own tree and instead read a path the
+CONSUMER supplies before add_subdirectory(platform-nes) -- e.g. a CMake
+variable or a small INTERFACE target the consumer defines first, the
+same dependency-injection shape used for FreeRTOSConfig.h-style config
+in other CMake-based projects, just for -T instead of include
+directories. Same "no fallback, missing script is a hard CMake
+configure-time error" philosophy used everywhere else in this plan.
+
+RESULT: A THIN USER-OWNED TOP-LEVEL SCRIPT
+
+    INCLUDE vrc1.ld          ; lib-supplied helper: MEMORY, reset vector, header, OUTPUT_FORMAT
+
+    PROVIDE(__prg_rom_size = 64);   ; theirs -- their actual ROM size
+    ASSERT(__prg_rom_size == 64, "...")
+
+    SECTIONS {
+      .my_audio_code : { *(.my_audio_code) } >prg_rom_switchable   ; their tag, lib's region name
+    }
+
+Mostly INCLUDE plus the couple of lines that are genuinely theirs to
+own -- ROM size policy and their own domain section-name routing.
+
+
+LONG-CALLING FUNCTIONS BIGGER THAN ONE WINDOW (goal #3, oversized case)
+----------------------------------------------------------------------------
+Everything above handles a function that fits inside one bank. A
+domain/module -- lib or user code, no distinction -- can legitimately
+need more code than fits in one physical bank/window. On VRC1
+specifically this is workable because its three switchable windows are
+physically CONTIGUOUS in CPU address space ($8000-$9FFF, $A000-$BFFF,
+$C000-$DFFF, back to back) -- so N adjacent windows can be driven as one
+combined flat region, an oversized domain placed there as a single
+ordinary allocation, and ordinary intra-domain calls (not going through
+Call<>/BANKED at all) work via plain addressing -- PROVIDED all the
+physical banks backing that combined region are switched in
+simultaneously before anything in it executes.
+
+HARD CONSTRAINT THIS MUST RESPECT
+The lib (audio.cpp etc.) must NEVER know a window's size, and must NEVER
+#include a mapper header (vrc1.hpp) itself -- that inclusion is
+exclusively the consuming project's decision, made once, by the human,
+not by lib code. Even branching on a compile-time-known mapper inside
+lib modules is explicitly rejected -- it opens the door to combinatorial
+bloat (every domain x every supported mapper).
+
+THE RESOLUTION: NOTHING IS REQUESTED BY THE LIB
+BANKED(...) doesn't change at all -- the lib only ever names an abstract
+domain tag, never a size or window count. Sizing is a fact the BUILD
+already has and can be made to report; it does not need to be declared
+in advance by anyone. All of the sizing and paired-switch mechanics live
+in the SAME lib-supplied helper script described above (not something
+platform-nes's own build silently does -- it's part of what that helper
+script contains, INCLUDEd into the user's own top-level script same as
+everything else in it), plus the corresponding mapper-glue header (the
+user's own copy/use of vrc1.hpp) that only the consuming project opts
+into -- never the lib. CONFIRMED REQUIREMENT, not an optional nicety:
+without this, goal #3 ("long-call functions bigger than one window")
+simply isn't met for any real project, since real domains routinely
+outgrow one bank. Every mapper's own helper script (vrc1.ld today,
+whatever an eventual MMC3 helper script would be) has to ship this
+sizing feature as part of what it provides -- it's a per-mapper
+implementation (VRC1's window arithmetic differs from MMC3's bank-select
+model, per the resolver discussion below), but the requirement to ship
+it at all isn't optional or mapper-specific:
+
+  1. The helper script computes SIZEOF(<whatever section the user's own
+     SECTIONS rule assigned the domain>) -- an ordinary GNU ld
+     linker-script builtin, the same category of fact vrc1.ld's existing
+     ASSERT(__prg_rom_size == 32, ...) already relies on.
+  2. It computes how many contiguous windows that needs
+     (ceil(SIZEOF(...) / WINDOW_SIZE)) and PROVIDEs the result as a
+     symbol.
+  3. C++ reads that value the same way this toolchain already surfaces
+     every other link-time-only fact it can't hand to the frontend
+     directly -- an extern array whose ADDRESS (not contents) encodes
+     the number, read back via a pointer-to-integer cast at runtime, not
+     as a compile-time template constant. This is a link-time fact, not
+     a frontend one -- the same category of problem the very first
+     physical-vs-CPU-address question in this file's opening section ran
+     into.
+  4. CallInSection (see THE CODE and THIS ALSO CLOSES THE MULTI-BANK-
+     SECTIONS GAP below) is what Call<Fn>/CallBlock<Fn> actually call --
+     it takes the resolved section_t and internally switches however
+     many registers the runtime-read window count says, one bank each,
+     before jumping in. For VRC1 that internal loop is what "CallInWindows"
+     (plural) names: looping over physically contiguous registers instead
+     of switching a single compile-time-fixed one. CONFIRMED REQUIREMENT,
+     not an optional extension: goal #3 explicitly includes functions
+     bigger than one window, and there is no other mechanism anywhere in
+     this plan that switches more than one register at once. Not yet
+     written -- Call<Fn>/CallBlock<Fn> above only handle the
+     single-window case today -- but the shape of what it drives
+     (section_t in, however many (window, bank) pairs out) is settled
+     enough to build from. Exact implementation is per-mapper, same as
+     every other mapper-specific primitive in this plan.
+
+Result: the lib/mapper boundary stays exactly as clean as it is
+everywhere else in this plan. The lib never learns a window exists.
+Sizing and paired switching happen automatically, triggered by whatever
+got tagged into a domain, with no advance declaration from the lib or
+the consuming project. Applies equally to lib modules (audio.cpp,
+video.cpp) and user code -- BANKED()/BANKED_EXTERN() don't distinguish
+between them, and neither does this.
+
+THIS ALSO CLOSES THE MULTI-BANK-SECTIONS GAP (was open in LIMITATIONS)
+Whether a tagged section "truly" spans more than one physical bank
+turns out not to be the question that matters -- it doesn't need
+answering in the abstract at all. What matters is only: for THIS
+specific call, what physical byte range does the target function's own
+code occupy, and what has to be mapped for that range to be reachable.
+
+CONFIRMED SHAPE: that byte range is exactly section_t (see THE CODE) --
+rom_address via LOADADDR(<section>) [+ offset-within-section for one
+specific function, the same per-function link-time-fact category used
+everywhere else in this plan] and size via SIZEOF() or the equivalent
+per-function size fact. LOADADDR(), not ADDR(), is what makes this
+genuinely mapper-agnostic: ADDR() gives the CPU-visible VMA, which is
+the SAME number for every bank that ever aliases onto a given
+switchable window -- useless for telling banks apart. LOADADDR() gives
+the byte's actual, unique position in the linked ROM image, true
+regardless of which mapper or window scheme ends up showing it.
+
+A mapper-defined primitive (vrc1_detail::CallInSection for VRC1; an
+eventual MMC3 mapper-glue header would define its own) consumes that
+section_t and does whatever register resolution/switching its own
+hardware needs -- VRC1's is plain arithmetic given its windows are
+equal-sized and contiguous (window_index = rom_address / WINDOW_SIZE,
+window_count = ceil((rom_address % WINDOW_SIZE + size) / WINDOW_SIZE));
+MMC3's would differ, reflecting its own bank-select/slot model,
+including cases where a mapper can bank in more than one physical bank
+simultaneously through means other than adjacent windows. This IS the
+bank_layout<Tag> escape hatch flagged back in DESIGN: THREE LAYERS, now
+concretely shaped: the single-bank struct shown in THE CODE is
+section_t's trivial, degenerate case (one bank, no splitting), not a
+separate mechanism -- and Call<>/CallBlock<> never change per mapper,
+since they only ever hand a section_t to whatever CallInSection the
+mapper-glue header defines.
+
+Net effect on the old LIMITATIONS question ("is a section ever backed
+by multiple different bank assignments for different functions sharing
+it, or just multiple bytes within one consistent bank") -- it stops
+mattering which is true. The resolver never trusts "the domain's bank"
+as a single fact to begin with; it only ever asks about the specific
+byte range the current call needs, so it produces the right answer
+either way without the fallback (per-symbol runtime bank storage) that
+question was originally raised to justify.
+
+RESOLVED: intra-domain calls stay bare, always -- one convention, no
+per-domain choice. Once an oversized domain is entered (all N windows
+its section_t needs mapped simultaneously), calls between its own
+tagged functions are ordinary calls, exactly like the "map all N windows
+simultaneously, then plain-address internally" description above already
+says -- full stop, not conditional on anything.
+
+The alternative (routing every intra-domain call, including sibling-to-
+sibling ones, back through the per-function resolver) was considered and
+rejected. It bought nothing that was actually missing: reaching a
+DIFFERENT domain from partway through a domain visit already works,
+unconditionally, under the bare-call convention -- a nested Call<Fn>/
+CallBlock<Fn> mid-visit saves whatever's currently mapped, switches,
+runs, and restores it on return, the same SHADOW-based save/restore
+::Long has always used for composing far calls, at any nesting depth.
+That was never blocked; there was nothing here to trade reachability
+for. The only thing the alternative would have bought is marginally
+avoiding entry cost for a domain with few or no sibling-to-sibling
+calls -- not worth a second calling convention, and not worth the new
+kind of machinery it would need (a scope holding multiple windows open
+across an entire outer call, which nothing else in this plan requires).
+
+Performance, where it varies, is a function of how the user organizes
+their own code across domains -- keeping hot, chatty call groups
+together inside one domain instead of splitting them across several --
+same category of concern as choosing good MEMORY region sizes or window
+adjacency for a paired domain. That's an ordinary banking/code-placement
+decision on the user's side, not a gap in Call<>/CallBlock<> or in this
+design; consistent with the "hardware modeling mistakes are entirely on
+the user" line drawn in REMOVING THE ENFORCED SECTION-NAMING CONVENTION
+and DECLINED elsewhere in this plan.
+
+KNOWN IMPRECISION, AND THE VERDICT ON FIXING IT
+SIZEOF() measures the TOTAL size of everything tagged into a domain, not
+the reachable call-subgraph from one specific entry point through to
+wherever it returns -- a conservative over-approximation. It can only
+ever request MORE window capacity than a given call strictly needs,
+never less, so it's safe, just not optimal. A precise, per-entry-point
+alternative was investigated: llvm-mos's clang already emits, via
+`-S -emit-llvm`, textual IR carrying real call-graph edges and size
+estimates per function (verified against the actual installed
+toolchain, not hypothetical) -- so it's genuinely buildable without
+embedding LLVM's C++ API or forking llvm-mos. Verdict: build SIZEOF()
+now -- it's cheap, safe, and fits this project's existing linker-script
+idioms. Defer the LLVM-summary-parsing precision approach until a real
+domain actually hits window scarcity SIZEOF()'s conservatism makes
+infeasible; it's meaningfully more build complexity and a genuinely new
+class of toolchain-version fragility (parsing LLVM's internal summary
+format) that nothing else in this plan relies on.
+
+
+EXTERNALLY-BUILT LIBRARIES: THE GENERAL PATTERN (FAMISTUDIO IS THE REFERENCE CASE)
+----------------------------------------------------------------------------------------
+CONFIRMED, GREENLIT. BANKED_EXTERN(section_name, tag, ...) only ever
+registers a CLAIM -- bank_of<>'s mapping from a function to a
+bank_layout<Tag>. It cannot place anything; correctness depends
+entirely on section_name actually matching wherever the external build
+(ca65, or any tool outside this project's own C++ codegen) put that
+symbol. General pattern for keeping that claim honest, generalized from
+the FamiStudio fix below rather than staying a FamiStudio-only story:
+
+- section_name/tag can be an ordinary #define from a config header (see
+  the CONFIRMED, GREENLIT note under BANKED_IMPL in THE CODE) -- but a
+  C++-only #define is invisible to a tool that never sees the C
+  preprocessor, so that alone isn't sufficient here.
+- For a library whose build IS driven by this project (invoked from our
+  own CMake, e.g. ca65 for FamiStudio), the SAME value has to reach both
+  sides: the C++ #define AND whatever config mechanism the external tool
+  itself reads. The pattern: one CMake variable, substituted into BOTH
+  the external tool's own generated config AND passed as a -D compile
+  definition to the C++ side. From BANKED_EXTERN's point of view a -D
+  IS a #define, just delivered by the build system instead of an
+  #include'd header -- same mechanism as the header case, different
+  delivery, chosen because ca65 needs it and a header can't reach ca65.
+- Scope: this closes "keep the claim honest" ONLY for libraries whose
+  build we drive. It does NOT extend to a genuinely opaque,
+  prebuilt/vendored library where there's no build step of ours to
+  inject a shared value into at all -- see LIMITATIONS.
+
+FamiStudio (below) is the first, reference application of this pattern,
+not a special case of its own -- any future externally-built dependency
+whose build this project drives should follow the same shape.
+
+
+WORKED EXAMPLE: FAMISTUDIO (A REAL, EXISTING, UNPROTECTED "LIB FUNCTION" CASE)
+----------------------------------------------------------------------------------
+Not hypothetical -- checked the actual integration. CMakeLists.txt:209
+hardcodes `.define FAMISTUDIO_CA65_CODE_SEGMENT CODE`, and audio.cpp:72
+etc. call famistudio_update(), famistudio_music_play(index), etc. as
+bare, unprotected calls -- no bank switching at all. This only works
+today because of the same "one bank per window at 32 KiB" default
+vrc1.ld's own file comment already calls out as temporary. The moment
+real multi-bank content exists, these bare calls become a live
+correctness bug, not a style nit -- exactly the kind of "long call a lib
+function" case goal #3 is about, and a real one already sitting in this
+codebase, not an invented example.
+
+FamiStudio is assembled by a genuine standalone ca65 binary
+(CMakeLists.txt:241, `${CA65}`), NOT llvm-mos's own assembler. ca65 has
+its own directive language (.define, .if) and never sees the C
+preprocessor -- so the segment name can't be shared between the C++
+side and the .s config via a #include'd macro the way BANKED's tag is
+shared elsewhere in this plan. The single source of truth has to sit one
+level up, at CMake -- which is exactly the pattern this project's own
+CMakeLists.txt already uses for every OTHER FamiStudio knob
+(FAMISTUDIO_CFG_NTSC_SUPPORT etc. are CMake cache variables substituted
+into both the generated .s config text AND passed as -D compile
+definitions to audio.cpp, CMakeLists.txt:207-219 and :277-282). The
+code-segment name just isn't parameterized that way yet -- it's a
+hardcoded literal instead of a variable.
+
+THE FIX, THREE PARTS
+1. Parameterize FAMISTUDIO_CA65_CODE_SEGMENT the same way every other
+   FamiStudio knob already is: a CMake variable, sourced from the
+   demo-root config, substituted into BOTH the generated .s config's
+   `.define FAMISTUDIO_CA65_CODE_SEGMENT ${...}` line and passed as a -D
+   to the C++ compile. One value, two consumers -- this IS the general
+   pattern above, FamiStudio is just where it's first applied.
+
+2. Register FamiStudio's entry points with bank_of<> via BANKED_EXTERN
+   (see THE CODE above):
+
+       BANKED_EXTERN("CODE", audio, void, famistudio_update);
+
+   tagged with the same value the CMake variable from step 1 drives on
+   the ca65 side.
+
+3. Route audio.cpp's calls through Call<>/CallBlock<> instead of bare
+   calls -- Call<famistudio_update>() instead of famistudio_update();.
+   This is the step that makes step 2 actually matter: registration
+   alone protects nothing that ::Long or a bare call ever consults, so
+   without this step correctness still depends entirely on "everything
+   happens to be one bank right now."
+
+RESOLVED: famistudio_config.s moves to the demo root as a real,
+directly-edited file -- not a CMake-generated string. Reasoning:
+FamiStudio's config (NTSC/PAL support, SFX streams, and now the
+code-segment name) is a per-project setting, not something this library
+should standardize or own -- different project, different game,
+different music/SFX requirements. It belongs with the other real,
+project-owned config at the demo root (same "real file, exercised by
+the demo's own build, can't silently rot" reasoning as the demo's own
+top-level linker script -- see THE FINAL LINKER SCRIPT MUST BE USER-MADE
+above), not staying a string generated and hidden inside CMakeLists.txt.
+
+DECLINED: an earlier version of this note proposed a linker-script
+ASSERT verifying famistudio_update's final linked address falls inside
+its expected bank's range, as a detection-based safety net for the fact
+this ca65/C++ boundary doesn't get bank_layout<Tag>'s "undefined primary
+template = compile error" protection for free. Not pursuing this -- no
+capability-enforcing machinery is being added anywhere in this plan,
+full stop, matching the same line drawn in REMOVING THE ENFORCED
+SECTION-NAMING CONVENTION above.
+
+
+LIMITATIONS / OPEN QUESTIONS (not solved yet)
+----------------------------------------------
+
+- Captures are gone on the Call<>/BANKED path. bank_of<Fn> requires Fn
+  to be a plain, capture-less named function usable as a template
+  argument (NTTP). ::Long explicitly supports arbitrary lambdas with
+  captures today (vrc1.hpp, doc comment on ::Long) -- Call<> is a
+  narrower sibling for the "tagged, address-known, domain function"
+  case, not a replacement. Keep both. CallBlock<Fn> closes part of this
+  gap -- generic code needing iterative/repeated access to a known,
+  tagged function can run under CallBlock<Fn>'s resolved window, with
+  the block itself free to capture.
+
+  Runtime-SELECTED dispatch (a table or callback slot that doesn't know
+  which tagged function it's calling until a runtime value picks one) --
+  RESOLVED, for the case that actually comes up: every realistic
+  candidate is itself a real, BANKED()-tagged function. Two mechanisms,
+  depending on whether the candidates share a tag:
+    - Same tag/domain (homogeneous table): CallBlock<AnyMemberFn>
+      wrapped around the runtime-indexed call, using any one member
+      purely as a compile-time anchor -- see the first worked example
+      under CallBlock<Fn> above.
+    - DIFFERENT tags/domains (heterogeneous table): GetCallable<Fn>() +
+      the runtime Call(callable_t, args...) overload (see THE CODE) --
+      bakes each candidate's {fn, section} pair in at the point it's
+      still nameable (the table initializer, or wherever a callback
+      slot gets assigned), so the runtime index only ever selects
+      between already-self-describing entries instead of needing one
+      shared anchor -- see the second worked example under CallBlock<Fn>.
+  RESOLVED, fully: traced every place a "no BANKED() registration"
+  pointer could actually occur, and each one either isn't this problem
+  or isn't a design gap.
+    - Interrupt vectors / hardware-driven bare-pointer slots -- not
+      this problem at all. As long as the user keeps the vector target
+      in fixed space, or otherwise guarantees the target's bank is
+      already mapped whenever the vector can fire, that code can
+      itself use Call<> same as anything else (or needs no resolution
+      because L::always_mapped already short-circuits it). Discipline
+      the user already owns, same as every other "hardware modeling is
+      on the user" line drawn elsewhere in this plan.
+    - Self-erased tagged function pointers in this project's OWN code
+      -- e.g. a generic callback slot typed as a bare `void(*)()`
+      instead of `callable_t<Ret,Args...>`, throwing away a section_t
+      that GetCallable<Fn>() would otherwise have preserved. Solved by
+      discipline, not a missing mechanism: nothing forces that
+      downgrade, GetCallable<Fn>() exists precisely to avoid it. If it
+      happens anyway, that's carelessness on the user's side, not a
+      gap here.
+    - A bare-pointer callback slot mandated by a genuinely FOREIGN API
+      surface (not the vendored-library case above, which never routes
+      through Call<> at all -- an actual third-party interface whose
+      own signature can't carry a section_t). This is the one real
+      residue, and it isn't fixable: no mechanism on this project's
+      side can retrofit type-preservation onto an interface it doesn't
+      own. Same category as the non-relocatable-blob residue above --
+      an honest boundary condition, not an undesigned gap. The user
+      just has to be careful there; there's nothing to offer.
+  ::Long remains the answer for that last case, by necessity rather
+  than by gap.
+
+- Function templates aren't covered. BANKED()/BANKED_EXTERN() are for
+  ordinary, non-template free functions -- CallInWindow/Long themselves
+  (which are templates) are internal plumbing and stay on the existing
+  `fixed` keyword directly.
+
+- Multi-bank sections -- RESOLVED as a design question, including the
+  resolver's concrete C++ shape (section_t: rom_address via LOADADDR(),
+  size) and the intra-domain calling convention (bare calls, always, one
+  convention, no per-domain choice) -- see THIS ALSO CLOSES THE
+  MULTI-BANK-SECTIONS GAP under LONG-CALLING FUNCTIONS BIGGER THAN ONE
+  WINDOW for both. Not yet built.
+
+- BANKED()'s signature (ret, name, __VA_ARGS__) must exactly match the
+  real declaration/definition -- RESOLVED, and mostly not a risk at
+  all: verified empirically (g++ and clang++, both reject) that
+  BANKED_IMPL's own `static_cast<ret (*)(__VA_ARGS__)>(&name)` already
+  fails to COMPILE on a mismatched return type, parameter type, or
+  arity against a normal, non-overloaded function -- static_cast
+  between two distinct function-pointer types is ill-formed in
+  standard C++, not a bit-cast, so this was never silent for the
+  realistic typo case. No static_assert or other new machinery needed;
+  the macro as already written fails hard for free.
+
+  The one narrow residue: if `name` refers to an OVERLOADED function
+  and the macro's declared signature happens to match a different real
+  overload of the same name, `&name` silently binds to that sibling
+  overload instead of erroring (confirmed: this does compile). Not a
+  BANKED()-specific hazard, though -- it's the ordinary
+  address-of-an-overloaded-function-resolved-by-target-type ambiguity
+  that exists anywhere in C++, independent of this design (Call<Fn>
+  already requires the caller to name Fn precisely enough to pick one
+  overload too). Out of scope for the same reason the plan declines to
+  solve other general-C++ hazards elsewhere -- not something this
+  design should fix where C++ itself doesn't.
+
+- CREATE_SEGMENT_KEYWORD and the existing `fixed`/`direct`/`absolute`
+  keywords (technology.hpp:47, vrc1.hpp:32) are untouched by this
+  design -- BANKED() is additive, built on top of them, not a
+  replacement.
+
+- CallInSection (the section_t-consuming primitive Call<>/CallBlock<>
+  actually call, internally looping over multiple registers where the
+  resolved section demands it -- "CallInWindows" plural, on VRC1) is
+  CONFIRMED REQUIRED (see LONG-CALLING FUNCTIONS BIGGER THAN ONE WINDOW,
+  point 4), not optional or speculative; not yet written. CallInWindow
+  (singular, taking a fixed register+bank directly) is the only version
+  that exists in the current design. Exact implementation is per-mapper.
+
+- Long-calling into a genuinely opaque, prebuilt/vendored third-party
+  library (no source, no build control) -- RESOLVED, and turns out not
+  to need BANKED_EXTERN or any shared #define at all. Don't tag the
+  vendor's own symbols; write one ordinary wrapper function of ours
+  (e.g. `void AudioUpdate() { famistudio_update(); }`), tag THAT with
+  BANKED() like any other self-authored function, and let its internal
+  call to the vendor function stay a bare call. That only requires the
+  vendor's entire compiled footprint to land in the SAME output region
+  as the wrapper at final-link time -- an ordinary linker-script
+  input-section grouping rule (route this .o/.a's input sections into
+  this domain's output section), which this project can always write
+  regardless of who compiled the input, because THE FINAL LINKER SCRIPT
+  MUST BE USER-MADE already establishes we own the final link either
+  way. No per-function granularity is needed on the vendor's side --
+  the whole undifferentiated blob rides along as one lump inside the
+  domain, exactly the "oversized domain, Rev A" shape already resolved
+  above; nothing here requires visibility into the vendor's internal
+  call graph, because Rev A never needed that visibility for
+  self-authored oversized domains either.
+
+  The one constraint: the vendor's footprint (plus the wrapper, plus
+  anything else sharing that domain) must fit within however many
+  windows this project is willing to map simultaneously for that
+  domain. If it doesn't, that's a hardware capacity ceiling, not a
+  software gap -- out of scope by the same "code-placement is the
+  user's responsibility" stance the intra-domain calling convention
+  resolution above already draws.
+
+  What's left is not a design gap, just an implementation task (write
+  the grouping rule when a real dependency needs it) plus one genuinely
+  narrow residual case: a vendor artifact shipped as a NON-relocatable,
+  already-fixed-address blob (no relocation records at all) has no
+  linker-script lever to place, and stays unsolved -- rarer and
+  narrower than "no source, no build control" implied.
+
+
+IMPLEMENTATION STEPS (when ready to build this for real)
+-----------------------------------------------------------
+
+1. Add bank_layout<Tag> primary template + fixed_tag/bank_layout<fixed_tag>
+   to the user's own mapper-glue header (e.g. their copy/use of
+   vrc1.hpp), near window1Control/2/3Control. Add one *_tag +
+   specialization per real segment their own linker script defines.
+
+2. Add bank_of<Fn> primary template + BANKED()/BANKED_EXTERN() to the
+   same header.
+
+3. Add function_traits<> + Call<>()/CallBlock<>() to the same header,
+   after CallInWindow (they depend on it).
+
+4. Build the mapper-defined (offset, size) resolver (see LONG-CALLING
+   FUNCTIONS BIGGER THAN ONE WINDOW) BEFORE tagging any real section
+   other than a single, fully-owned bank -- otherwise Call<>'s bank
+   resolution can silently be wrong for a function that happens to land
+   in a different physical bank than its section-mates.
+
+5. Split vrc1.ld into the lib-supplied helper script (MEMORY, reset
+   vector, header, OUTPUT_FORMAT) and update CMakeLists.txt to source
+   the final -T path from the consumer instead of hardcoding it (see
+   THE FINAL LINKER SCRIPT section).
+
+6. Convert one real leaf function currently using ::fixed or a plain
+   untagged declaration to BANKED() as a smoke test; confirm it still
+   links under the new helper-script arrangement and that Call<>
+   produces the same bankswitch CallInWindow would have if called by
+   hand with the right window.
+
+7. Only after step 6 works: consider whether ::Long's callers should be
+   migrated to Call<> where the target is a plain tagged function (i.e.
+   no captures needed), leaving ::Long for the general-callable case.
+
+PHASE 3 ADDENDUM: REAL MULTI-BANK CONTENT, FINDINGS FROM ACTUAL IMPLEMENTATION
+-------------------------------------------------------------------------------
+Phases 0-3 of the rollout roadmap are now real code (vrc1.hpp/vrc1.cpp/
+vrc1.ld), not just design notes -- this section records what building Phase 3
+(a second real physical bank sharing window3Control) actually required,
+beyond what THE CODE above anticipated.
+
+MULTI-BANK ENCODING: BORROWED, NOT INVENTED. Two banks sharing one CPU-
+visible window need their LINKED addresses to stay distinguishable at link
+time even though they execute at the same real address once switched in.
+Checked llvm-mos's own banked NES platforms (nes-unrom, nes-mmc1, nes-mmc3)
+before inventing anything -- they already solve this, verified empirically
+against nes-unrom's own _prg-rom-banked.ld AND a real compiled+linked test
+binary (not just reading the script): each bank N's MEMORY region gets
+ORIGIN = (N * 0x10000) + its real CPU address; every reference to a symbol
+placed there (an absolute JSR operand, or a runtime pointer value -- checked
+both) automatically truncates to the low 16 bits, because 6502 relocations
+only ever carry 16 bits regardless of the linker's own wider internal
+bookkeeping. No special compiler/linker feature beyond ordinary relocation
+truncation is involved. This project's vrc1.ld now uses the identical
+convention (prg_rom_bank3 at ORIGIN = (3*0x10000)+0xc000).
+
+CallInSection (vrc1.hpp) accordingly derives window and bank SEPARATELY:
+window index always comes from the low 16 bits (`static_cast<u16>(rom_address)`,
+matching what a real JSR would truncate to); bank comes from the high bits
+(`rom_address >> 16`) IF NONZERO, else falls back to bank == window index
+(the original, still-valid degenerate assumption for any tag whose
+rom_address was never given an explicit high-bits encoding, e.g.
+window_test_tag from Phase 2 -- it keeps working completely unchanged).
+
+LD.LLD FORCES A POWER-OF-2 PRG-ROM SIZE. Confirmed empirically: 40 KiB (the
+minimal size Phase 3 actually needed -- 5 banks) fails to link with
+"PRG-ROM size must be a power of 2", despite NES2.0's own exponent-
+multiplier header form being able to represent 40 KiB just fine (odd part
+5, one of the representable values). This is a hard ld.lld constraint, not
+a hardware or NES2.0-format one. PRG-ROM grew to 64 KiB (8 banks) instead --
+next power of 2 above 32 -- with banks 4-6 left as genuinely unused,
+explicitly-reserved padding (prg_rom_reserved) purely to make the total
+size add up; not yet reachable by any tag. Future banks carve their own
+region out of that reserved space using the same ORIGIN convention.
+
+REAL BUG, CAUGHT BY THE COMPILER: `(3u << 16)` in the first draft of
+bank3_test_tag's section() is undefined behavior on this target -- `unsigned
+int` is only 16 bits wide on mos-nes, so shifting it left by 16 shifts past
+its own width (-Wshift-count-overflow caught this immediately; the compiler
+warning did its job). Fixed by shifting in the actually-intended width
+explicitly: `static_cast<u32>(3) << 16`. Worth remembering generally on this
+target: integer literals/plain `unsigned`/`int` are 16-bit, not the 32-bit a
+desktop-C++ habit would assume -- any bit-manipulation intended to exceed 16
+bits needs an explicit u32 (or wider) cast before the shift, not just a `u`
+suffix on the literal.
+
+VERIFIED END TO END, INCLUDING NESTED COMPOSITION, VIA DISASSEMBLY OF THE
+REAL LINKED ELF (not just a successful build): bank 3 is written to
+window3Control before BankedCallBank3Test's real, correctly-truncated JSR
+($3c000 linked, $c000 emitted); INSIDE that function, a nested Call<Fn> into
+bank2's BankedCallWindowTest correctly saves the CALLER's active bank (3,
+not the ROM's original boot-time default) before switching to bank 2, and
+restores exactly that saved value (3) afterward -- proving CallInSection's
+SHADOW-based save/restore composes correctly across a genuine BANK VALUE
+change, not just window-register identity, which is what Phase 2's test
+alone could never have exercised (window_test_tag was the only non-fixed
+tag in the whole domain, so nothing could ever nest into a DIFFERENT bank
+of the same window).
+
+Status: Phases 0-3 of the rollout roadmap are implemented and verified
+against the real llvm-mos toolchain (not just designed on paper). This file
+remains the design record particular decisions were reasoned from, kept in
+sync with real corrections as they're found -- not a diff, but no longer
+purely hypothetical either.
+
+PHASE 3 FOLLOW-UP: THE PRG-ROM POWER-OF-2 RESTRICTION WAS REMOVED, NOT WORKED
+AROUND. src/nes/mappers/nes-no-pow2.ld is now a real, tracked fork of the
+SDK's mos-platform/nes/lib/nes.ld with exactly one line removed: the ASSERT
+requiring PRG-ROM size to be an exact power of 2. vrc1.ld now INCLUDEs the
+fork instead of the SDK original (CMakeLists.txt gained a matching -L search
+path, since INCLUDE resolution only ever consults -L paths, never the
+including script's own directory). PRG-ROM is back down to the genuine
+minimum Phase 3 needs (40 KiB, 5 banks) -- the 64 KiB/3-reserved-bank
+padding that check forced is gone entirely.
+
+Verified, not just linked successfully: output ROM file size is exactly
+16+40960+8192 = 49168 bytes; NES2.0 header bytes 4 and 9 decode to 0x36/0xFF,
+matching this project's OWN header.hpp/nes2.hpp computation for 40960 bytes
+byte-for-byte (exponent-multiplier form, E=13, M=2); mapper/mirroring bytes
+also checked and correct; the bank3 nested-call disassembly (see above) is
+byte-identical in structure to the 64 KiB build, just at different absolute
+addresses. No behavior changed -- only the wasted padding is gone.
+
+Investigated where the restriction actually came from before touching
+anything (see nes-no-pow2.ld's own file comment for the full chain): not
+ld.lld itself (the error text doesn't exist anywhere in the linker binary);
+an ordinary ASSERT in nes.ld, stricter than even that file's own downstream
+consumer (ines-header.ld, unused by this project anyway) actually requires
+-- that generator only needs a multiple of 16 KiB (plain PRG-ROM count
+notation), not a power of 2. Neither NES2.0's real header format nor VRC1
+hardware has any such requirement.
+
+Traced further, via the SDK's actual git history and real board documentation
+(nesdev wiki), rather than left as a guess: the check was deliberately
+TIGHTENED in a 2022 SDK refactor (commit 6b1f482, "Move pow2 requirements
+into NES common"), consolidating per-board checks that DID have real
+electrical justification -- CNROM's CHR bank-select latch wires its output
+bits DIRECTLY onto the CHR-ROM chip's address lines (confirmed against
+nesdev's own CNROM page: latch outputs -> chip A13/A14 directly, no decode
+logic at all), so its total addressable range is mathematically bound to a
+power of 2 by simple bit concatenation, an actual hardware constraint, not
+a software convention. That refactor generalized CNROM/MMC1/NROM's real,
+board-specific constraint into one blanket rule for every board sharing the
+common script, VRC1 included, despite VRC1 being a genuine Konami ASIC with
+real internal register/decode logic (three independently addressed PRG
+registers, not a passive latch) -- confirmed not just architecturally but
+empirically, by this project's own Phase 3 test already linking and running
+correctly at a non-power-of-2 size before this fork even existed.
+
+
+PHASE 4: OVERSIZED DOMAIN (SPANNING TWO WINDOWS), FINDINGS FROM REAL BUILD
+-------------------------------------------------------------------------------
+Implemented and verified against the real toolchain: a domain (oversized_tag)
+spanning window2Control+window3Control simultaneously (banks 5+6, 16 KiB,
+prg_rom_oversized in vrc1.ld). PRG-ROM grew to 56 KiB.
+
+DESIGN CORRECTION from the ORIGINAL per-byte "encode bank in rom_address's
+high bits" mental model (Phase 3's mechanism): that trick answers "which of
+several CANDIDATE banks backs this one window" -- it does NOT need to
+answer "what's the bank number of the SECOND, THIRD, ... window in an
+oversized domain," because that's simple arithmetic (bankBase+1, bankBase+2,
+...) once the domain's STARTING bank is known, never re-derived per byte.
+The region needs exactly ONE extended-address encoding (its base), covering
+the WHOLE flat multi-window span as ONE ordinary MEMORY region with ONE
+LMA block -- ordinary unsigned addition means the low 16 bits of any address
+within that flat span already truncate to the correct real VMA on their own
+(0xa000+0x2000=0xc000, no wraparound), so intra-domain code just works with
+ordinary addressing, no per-function bank tagging needed inside the domain.
+
+`bank_layout<oversized_tag>::section()` is NOT a fully constexpr literal like
+Phase 2/3's tags -- its base bank/address IS hand-entered and free, but
+`size` is genuinely read from the linker's SIZEOF() at runtime, because
+declaring a domain's window count by hand is exactly the manual-sync burden
+the whole feature exists to avoid. CallInSection's ceil(size/kWindowSize)
+therefore costs real runtime bytes for THIS domain specifically -- an
+accepted, necessary cost of dynamic sizing, not a missed optimization; every
+other tag in this file stays free because its size was always a small,
+foldable literal.
+
+TWO REAL BUGS CAUGHT BY VERIFICATION, NOT JUST A SUCCESSFUL BUILD:
+1. Placing a data array (`u8 buf[N]` tagged into `.prg_rom_oversized`)
+   alongside the domain's functions failed to compile: "section type
+   conflict" -- GNU/Clang refuse to mix executable-code and read-only-data
+   flags on one named output section. Fixed by moving the padding INSIDE
+   OversizedFuncLow's own body via inline asm (`.fill N, 1, 0xea`) instead
+   of a separate global -- keeps everything in the section classified
+   consistently as code, and (bonus) needed no separate gnu::used/retain
+   survival trick since the padding rides along with a function already
+   guaranteed to survive (it's Call<>'d directly).
+2. The first padding size (8100 bytes) made __oversized_domain_size exceed
+   one window's worth of SIZEOF() (passing that ASSERT) WITHOUT actually
+   making OversizedFuncHigh's own address cross the window boundary --
+   confirmed via disassembly, not assumed: total domain size being over
+   8 KiB does not by itself guarantee any SPECIFIC function inside it
+   crosses the boundary; it only guarantees the region overall needs two
+   windows of SPACE. Added a second, stronger vrc1.ld ASSERT checking
+   OversizedFuncHigh's actual linked address directly (via DEFINED() to
+   stay safe under CMake's bare-probe builds), not just the aggregate size,
+   after increasing padding to 8300 bytes to genuinely force the split.
+
+VERIFIED END TO END VIA DISASSEMBLY OF THE REAL LINKED ELF:
+- CallInWindows2 writes bank 5 to window2Control, then bank 6 (via INX, not
+  a second hand-supplied constant) to window3Control, before the call, and
+  restores both afterward in correct LIFO order.
+- OversizedFuncLow ends in a bare `jmp` (not `jsr` -- tail-call optimized)
+  directly to OversizedFuncHigh's correctly-truncated address -- ordinary
+  intra-domain addressing, no BANKED_CALL machinery involved at all.
+- OversizedFuncHigh's nested Call<BankedCallWindowTest>() saves window3Control's
+  CURRENT value (6, the oversized domain's own bank) -- not the ROM's boot
+  default -- switches to bank 2, calls, and restores exactly 6 afterward.
+  window2Control is never referenced anywhere in this function, confirming
+  the nested single-window call correctly leaves the outer domain's OTHER
+  window completely undisturbed throughout.
+
+Status: Phases 0-4 of the rollout roadmap are implemented and verified
+against the real llvm-mos toolchain. Only Phases 5 (linker script ownership
+handoff), 6 (FamiStudio), and 7 (::Long migration cleanup) remain.
+
+
+CRITICAL POST-PHASE-4 FIX: `fixed` DOES NOT SURVIVE INLINING
+-------------------------------------------------------------------------------
+Found via a REAL crash, reported by the user running the actual ROM in
+Mesen-CE (not a bug this project's own disassembly-based verification ever
+caught -- every phase's own "verify via disassembly" checks were reading
+the compiled code and confirming it did what it looked like it should,
+without ever specifically checking whether CallInWindow/CallInSection
+existed as real, separate, out-of-line symbols at all).
+
+SYMPTOM: illegal opcodes / BRK cascade, first hit a few bytes after a
+`jsr`/return sequence completed successfully -- not at the jsr itself.
+Bank-loaded history (Mesen) never showed bank 2 despite bank2_test_tag's
+own code visibly running correctly earlier in the same session.
+
+ROOT CAUSE: `fixed` (CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")) places an
+OUT-OF-LINE SYMBOL into a section. It has no effect on whether an
+out-of-line symbol ever gets created in the first place. CallInWindow,
+CallInWindows2, and CallInSection are all small template functions, each
+called from very few (often exactly one) call site per template
+instantiation -- an easy, expected target for -Os to fully inline. Confirmed
+empirically: llvm-readelf showed NO CallInSection/CallInWindow symbols at
+all before this fix -- every one of them had been inlined directly into
+its caller, taking on THAT caller's own section instead of `.prg_rom_fixed`.
+
+WHY THIS WAS INVISIBLE THROUGH PHASE 2-4's OWN VERIFICATION: inlining
+`fixed`-tagged switch/restore logic into a caller is HARMLESS as long as
+the caller's own code lives somewhere that's never itself being switched
+away (true for every Phase 2/3/4 top-level call from SyncBankShadows, which
+lives in the default/bank0 area, never touched by any window2/window3
+switch). It only becomes fatal when the CALLER's own code lives INSIDE the
+same window it's switching -- exactly the nested-call cases (Phase 3's
+BankedCallBank3Test -> Call<BankedCallWindowTest>, Phase 4's
+OversizedFuncHigh -> Call<BankedCallWindowTest>), both of which route
+through window3Control from a caller ALSO resident in window3Control's
+range. Once the inlined switch code changes window3Control away from the
+caller's own bank, the REST OF THAT SAME INLINED FUNCTION -- specifically
+the restore-after-return half -- is no longer the bank mapped in at that
+CPU address. The callee runs fine (its own bank is genuinely active); on
+return, the CPU resumes into whatever unrelated bytes the callee's bank
+happens to have at that address. Illegal opcodes almost immediately,
+exactly matching what got reported.
+
+FIX: `[[gnu::noinline]]` added to CallInWindow, CallInWindows2, and
+CallInSection (vrc1.hpp). Verified, not assumed: after the fix, all three
+exist as real, separate symbols, every one inside $E000-$FFFF (confirmed
+via llvm-readelf). BankedCallBank3Test's own compiled body shrank to 8
+bytes (write its marker, tail-jump into CallInSection); OversizedFuncHigh's
+to 6. The switch/call/restore sequence for the nested call now executes
+entirely from the permanently-mapped fixed bank, so it no longer depends on
+-- or can be disturbed by -- whatever window3Control is showing at the
+time, including its own caller's bank. Re-disassembled both previously-
+broken nested-call paths after the fix and confirmed the full save/switch/
+call/restore sequence now runs from a single, shared, fixed-bank-resident
+CallInSection instance (BankedCallBank3Test and OversizedFuncHigh both
+target the same Fn, BankedCallWindowTest, so they share one instantiation).
+
+GENERALIZES BEYOND THIS PROJECT'S OWN TEST CODE: this was never specific to
+the smoke tests -- ANY real BANKED()-tagged function whose own code lives
+in a switchable window, calling Call<Fn>/CallBlock<Fn> for another function
+sharing that SAME window, would hit this without the noinline fix. Worth
+remembering as a standing rule for this design: a `fixed`-tagged helper is
+only ACTUALLY fixed if it's also guaranteed to remain out-of-line -- the
+attribute alone is not sufficient, and this class of bug produces no
+compiler warning, no build error, and (per Phase 1's earlier, unrelated
+noinline lesson) is easy to miss because "the code looks right" when read
+as an inlined sequence in isolation.
+
+
+PHASE 5: LINKER SCRIPT OWNERSHIP HANDOFF, DONE AND VERIFIED
+-------------------------------------------------------------------------------
+vrc1.ld (the single, library-owned file) is gone, split into:
+- src/nes/mappers/vrc1-helper.ld -- LIBRARY-owned. Only genuinely hardware/
+  mechanical facts: prg_rom_switchable/prg_rom_fixed/nes2_header MEMORY
+  regions, the reset vector, .nes2_header extraction, REGION_ALIAS. Exposes
+  ONE hook, PROVIDE(__prg_rom_switchable_reserved = 0), so a consumer can
+  shrink prg_rom_switchable's own tail for their own dedicated carve-outs
+  without the library needing to know why.
+- demo/link.ld -- CONSUMER-owned (this repo's own reference example, not
+  something a real downstream project should point at directly once they
+  have real domains of their own -- copy its SHAPE). Owns __prg_rom_size/
+  __chr_rom_size, and every one of this rollout's own Phase 2-4 domains
+  (prg_rom_window_test/prg_rom_bank3/prg_rom_oversized) -- exactly as much
+  "this project's own code" as anything else in the demo, the library never
+  knows they exist.
+- CMakeLists.txt's VRC1_LD is no longer hardcoded into the library's own
+  tree -- now a required CACHE variable (local.cmake, matching
+  LLVM_MOS_SDK's existing no-fallback convention), hard configure-time
+  error if unset.
+
+VERIFIED THREE THINGS EMPIRICALLY BEFORE COMMITTING TO THE SPLIT, NOT
+ASSUMED FROM GENERAL GNU LD KNOWLEDGE: built minimal, throwaway two-region
+test scripts (real files, real llvm-mos driver invocations, real hexdump
+verification of output content, not just successful linking) confirming
+MEMORY, SECTIONS, and OUTPUT_FORMAT are all ADDITIVE across multiple
+occurrences/multiple INCLUDEd files in this toolchain -- no SDK script
+anywhere does this (every one is single-file, self-contained), so this had
+no existing precedent to lean on.
+
+REAL BUG, FOUND BY THIS PHASE'S OWN VERIFICATION (not shipped, unlike
+Phase 4's): __prg_rom_switchable_reserved's PROVIDE() didn't take effect
+across the INCLUDE boundary the way a first draft assumed. GNU ld's
+PROVIDE() only fires on the FIRST definition it encounters in parse order;
+vrc1-helper.ld's own PROVIDE(=0) default, encountered via `INCLUDE
+vrc1-helper.ld` at the top of the first draft of demo/link.ld, silently
+"won" over demo/link.ld's own later PROVIDE(=0x40) -- compiled and linked
+without any error, quietly leaving prg_rom_switchable unshrunk and its
+declared address range genuinely overlapping prg_rom_window_test's. Caught
+by cross-checking actual output file size against the pre-split build
+(65552 bytes expected, got 65616 -- exactly 64 bytes off) rather than
+trusting a successful link. Fixed by moving demo/link.ld's own PROVIDE
+ahead of its `INCLUDE vrc1-helper.ld` line, so the CONSUMER's value is the
+one already "defined" by the time the helper's own default is considered.
+
+ALSO FOUND: the existing Phase 4 bank-4 ASSERT was a hardcoded arithmetic
+tautology (`(0x6000-0x40)+0x40+0x2000==4*0x2000`) that never actually
+referenced the live __prg_rom_switchable_reserved symbol at all -- it would
+have stayed green even with the PROVIDE bug active, since the literal 0x40
+it used never depended on what the real reservation value was. Rewritten to
+mix the live symbol (for prg_rom_switchable's shrink) against the literal
+0x40 (prg_rom_window_test's own fixed length) specifically so a mismatch
+between the two -- which is exactly what the real bug was -- makes the sum
+wrong and the ASSERT fire. A second, new ASSERT was also added
+(__prg_rom_switchable_reserved == 0x40 directly) as the more direct check.
+Lesson for any future ASSERT in this design: verify it actually depends on
+the live value it claims to be checking, not a restated constant that would
+pass regardless.
+
+Re-verified after both fixes: output file byte-identical in size/header to
+the pre-split build (65552 bytes, header bytes 0x37/0xFF unchanged);
+CallInSection/CallInWindow/CallInWindows2 still exist as real, separate,
+fixed-bank-resident symbols (the Phase 4 noinline fix survives the split
+unaffected); BankedCallBank3Test/window_test/bank3/oversized all still at
+their expected addresses.
+
+PHASE 6 -- FAMISTUDIO: THE REAL OPAQUE-VENDOR-LIBRARY CASE
+
+FamiStudio turned out to be the "our own CMake drives ca65" pattern this
+plan's own EXTERNALLY-BUILT LIBRARIES section anticipated, not the
+genuinely-opaque-prebuilt-blob one -- BANKED_EXTERN tags FamiStudio's real
+entry points directly, no wrapper layer needed.
+
+WHAT LANDED
+- CMakeLists.txt: FAMISTUDIO_CA65_CODE_SEGMENT parameterized as a CMake
+  cache variable (FAMISTUDIO_SEGMENT), substituted into both the generated
+  famistudio_config*.s (`.define FAMISTUDIO_CA65_CODE_SEGMENT ${...}`) and
+  passed as an unquoted -D to audio.cpp -- the same one-value-two-consumers
+  pattern every other FAMISTUDIO_CFG_* knob already used. Unquoted
+  specifically so audio.cpp stringizes it itself via the standard two-level
+  macro idiom (FAMISTUDIO_SEGMENT_STR_HELPER/FAMISTUDIO_SEGMENT_STR),
+  avoiding shell-escaping a pre-quoted string through a raw command line.
+- demo/link.ld: a dedicated prg_rom_famistudio region (bank 6, ORIGIN =
+  (6*0x10000)+0xc000, LENGTH=0x2000), a SECTIONS rule routing the ca65
+  segment into it, and the same two-ASSERT pattern as every other domain in
+  this file (segment captured real content; LOADADDR matches the hand-
+  entered bank in bank_layout<famistudio_tag>::section()).
+- audio.cpp: bank_layout<famistudio_tag> (mirrors oversized_tag's shape --
+  hand-entered bank 4 constexpr-safe base bank number 6, runtime-read size
+  via the extern-symbol-address idiom, since FamiStudio's real compiled
+  footprint isn't something to hand-declare). BANKED_EXTERN for
+  famistudio_music_play/pause/stop, famistudio_sfx_play, famistudio_update.
+  All wrapper bodies (TrackPlay, TrackPause, TrackStop, AudioUpdate,
+  SfxPlay, SfxSamplePlay) now route through Call<Fn> instead of bare calls.
+- AudioInit()'s two famistudio_init/famistudio_sfx_init calls are raw
+  inline asm (`jsr famistudio_init` embedded directly in an __asm__ block)
+  -- no C++ function pointer exists to BANKED_EXTERN. Wrapped the entire
+  body in CallBlock<famistudio_update>([&]{ ...both asm blocks... }),
+  using famistudio_update (already registered) purely as the anchor to
+  resolve famistudio_tag's window -- exactly CallBlock's documented
+  purpose ("Fn only anchors which bank_of<> entry to resolve; the block
+  may capture freely"). This also means both init calls share ONE bank
+  switch instead of needing two, confirmed in the disassembly below.
+
+THREE REAL BUGS FOUND BY THIS PHASE'S OWN VERIFICATION, NONE ASSUMED AWAY
+
+1. "templates must have C++ linkage." BANKED_EXTERN_IMPL bundles an
+   `extern ret name(...)` declaration together with a `template<> struct
+   bank_of<...>` specialization in one macro expansion. The pre-existing
+   audio.cpp code wrapped its plain externs in `extern "C" { ... }` (needed
+   because ca65-assembled symbols are unmangled); doing the same around
+   BANKED_EXTERN calls put the template specialization inside that block
+   too, which C++ forbids outright. FIX: BANKED_EXTERN_IMPL now emits
+   `extern "C" ret name(...)` itself, so callers never wrap it in their own
+   extern "C" block. This is the correct general default for this macro
+   specifically (not a one-off workaround): every real BANKED_EXTERN user
+   -- hand-written asm, third-party ca65 code -- exposes unmangled, C-style
+   symbol names by construction. BANKED() (the non-extern macro, for this
+   project's own C++-emitted functions) is unaffected, correctly.
+
+2. ld.lld's XO65 reader (the native ca65/xo65 object-file linking path
+   this build uses) decodes every ca65 segment name through its OWN
+   underscore-based escape scheme when synthesizing an ELF-shaped section
+   for it -- necessary because xo65 segments don't carry the richer
+   name/type/flag info ELF sections do, so that information gets folded
+   into the name string itself. This is a SEPARATE, lower layer than the
+   "no leading dot, no escaping" fact already verified and relied on in
+   Phase 5/6's own SECTIONS-rule routing (that's about matching a name
+   textually inside a linker script; this is about xo65->ELF decoding of
+   the object file itself, upstream of that). The chosen name
+   "FAMISTUDIO_CODE" was rejected outright at this layer ("unknown
+   underscore escape: FAMISTUDIO_CODE") -- confirmed with a real link, not
+   assumed from the wiki (which was unreachable from this environment, a
+   Cloudflare challenge page). FIX: renamed the segment to "FSCODE" --
+   underscore-free, matching ca65's own convention for its four built-in
+   segment names (CODE/RODATA/BSS/ZEROPAGE, none of which contain an
+   underscore either). CMakeLists.txt's FAMISTUDIO_SEGMENT default and
+   every hardcoded reference in demo/link.ld were updated together.
+
+3. The Phase 6 FSCODE-nonempty ASSERT, as first written, claimed
+   "famistudio_pass1.o is a real input to EVERY build of this demo, probes
+   included" and deliberately did NOT tolerate a zero SIZEOF() the way
+   Phase 4's analogous oversized-domain check does. This was wrong,
+   confirmed by a real failure: CMake's own internal compiler-
+   identification/ABI-probe try_compile step (which runs automatically at
+   `project()`, before any of this project's own custom build steps exist)
+   also inherits CMAKE_CXX_FLAGS -- and therefore VRC1_LD -- and links a
+   bare `int main(){}` with no famistudio_pass1.o or any other real content
+   in sight. That's the exact same bare-probe class Phase 4's own
+   DEFINED(_Z17OversizedFuncHighv)-guarded check already exists for, not a
+   demo-only exemption as originally assumed. FIX: reused that same guard
+   symbol -- FSCODE's nonempty check is now skipped whenever
+   OversizedFuncHigh (any real demo build's own content) isn't present
+   either, rather than inventing a new detection mechanism.
+
+VERIFIED (real llvm-mos toolchain, cmake-build-nes-release; debug-config
+build directories were checked and found to have never produced a working
+demo.nes even before this phase -- unoptimized -g code overflows VRC1's 32
+KiB switchable budget, a pre-existing environmental fact unrelated to this
+work, out of scope to fix here):
+- Clean build succeeds end to end: configure, both FamiStudio assembly
+  passes, platform-nes static lib, demo link, all ASSERTs green.
+- demo.nes is exactly 73744 bytes = 65536 (PRG) + 8192 (CHR) + 16 (header)
+  -- the Phase 6 ROM-size arithmetic (64 KiB total, chosen for NES2.0
+  exponent-multiplier representability -- 64's odd part is 1, always
+  representable) matches exactly.
+- FSCODE section: llvm-readelf shows it at file offset/VMA 0x6c000
+  (bank 6, matching (6*0x10000)+0xc000), size 0x8d7 (2263 bytes) -- well
+  under one window (0x2000), so this domain never exercises the
+  CallInWindows2 two-window path at its current size (both branches still
+  compile, since size is a genuine runtime read, not folded away).
+- __famistudio_domain_size == 0x8d7, matching SIZEOF(FSCODE) exactly.
+  __banked_call_famistudio_rom_address == 0x6c000, matching the hand-
+  entered bank in bank_layout<famistudio_tag>::section().
+- Disassembly of Call<famistudio_update>()'s resolved CallInWindow: `stx
+  $c000` (writes bank 6 into window3Control -- a REAL switch, not a
+  reassertion of a default), `jsr $c163` (famistudio_update's real linked
+  address), then `sta $c000` restoring the prior value on the way out --
+  exactly CallInWindow's documented save/switch/call/restore shape.
+- Disassembly of AudioInit()'s CallBlock<famistudio_update>: one `stx
+  $c000` switch, THEN both `jsr $c000` (famistudio_init) and `jsr $c5d5`
+  (famistudio_sfx_init) back to back, THEN one `sta $c000` restore --
+  confirming CallBlock's whole-block semantics actually shares one switch
+  across both raw-asm calls, not two redundant ones.
+
+POST-PHASE-6 INVESTIGATION: AUDIO CORRUPTION -- PRE-EXISTING, OUT OF SCOPE
+
+Reported after Phase 6 landed: FamiStudio's song plays recognizably but
+corrupted -- channels drifting out of sync with each other, the noise
+channel "freaking out" specifically near the start, and a hard crash at the
+song's loop point instead of looping cleanly.
+
+Chased this through several real, individually-verified hypotheses across
+this session -- a window3Control/metatiles placement collision, a fake
+llvm-mos attribute (`cc65_fastcall`) plus a dropped `leaf` attribute, a
+hand-written raw-asm calling convention mismatch against FamiStudio's own
+official interop header, a $4017/$4010 stale-shadow write ordering issue,
+and finally FamiStudio's own compile-time feature flags
+(VIBRATO/ARPEGGIO/PITCH_TRACK/SLIDE_NOTES/RELEASE_NOTES, silently skipped
+because FAMISTUDIO_CFG_EXTERNAL=1 gates the file's own "simplest way"
+defaults). Every one of these was a real, concretely-verified fact about the
+codebase -- confirmed via disassembly, linker maps, or ca65 compile errors,
+not guessed -- but NONE of them changed the reported symptom, and the
+feature-flag fix specifically made things WORSE (a hard hang shortly after
+the first note, not the original corruption).
+
+RESOLUTION: confirmed against git history that audio has been broken since
+commit 287956e1ca0e37bda5e958f96c2cc516e19b957d -- well before Phase 6, and
+before this session's own BANKED_CALL work existed at all. The banked-call
+machinery is not the cause. All of this session's audio bug-fix attempts
+(the FASTCALL/leaf change, the AudioInit() raw-asm rewrite, the
+DisableFrameIRQ/DisableDMCIRQ reordering, the FamiStudio feature-flag
+additions, and the earlier metatiles/window3Control placement change) have
+been REVERTED -- audio.cpp, main.cpp, CMakeLists.txt's FamiStudio config,
+demo/link.ld, and demo/src/graphics/metatiles.cpp/.hpp are all back to
+their exact pre-investigation state. Fixing the actual, pre-existing audio
+bug is explicitly out of scope for this rollout; it should be investigated
+starting from the commit above, separately from BANKED_CALL work.
+
+What Phase 6 itself still stands on its own merits, independent of the
+pre-existing audio bug: the banked-call machinery (BANKED_EXTERN
+registration, Call<>/CallBlock<> routing through audio.cpp, FSCODE's
+dedicated bank) was verified correct earlier in this phase via disassembly
+-- real bank switches, correct save/restore, correct register-argument
+passing, correct bank numbers. Whatever is wrong with FamiStudio's actual
+sound output predates and is independent of that.
+
+PHASE 7 -- ::Long MIGRATION CLEANUP
+
+Trivially complete: a full-repo search (not just this file's own doc
+comments) turns up exactly ONE occurrence of `Long` anywhere in this
+codebase -- its own definition in vrc1.hpp. Zero real call sites exist to
+migrate. Nothing in demo/ or src/ ever called ::Long<...>(...) directly;
+whatever needed a switchable-window call either predates Call<Fn> entirely
+(and was written directly against CallInWindow-era internals, since folded
+into this rollout's own Phase 1-4 machinery) or was written after Call<Fn>/
+CallBlock<Fn> already existed and used those from the start. ::Long itself
+is left in place, unchanged -- it's still the documented fallback for a
+genuinely ad-hoc/capturing call that doesn't have (and doesn't want) a
+BANKED()-registered Tag, exactly as the rollout roadmap's own Phase 7 entry
+anticipated ("leaving ::Long for genuinely capturing/ad-hoc callables").
+
+Status: Phases 0-7 of the rollout roadmap are implemented. Phase 6's own
+banked-call integration is verified correct on its own terms (real switches,
+correct save/restore, correct bank numbers, correct register-argument
+passing). Phase 7 required no code changes -- there was nothing to migrate.
+A real, pre-existing (pre-Phase-6) audio bug remains unfixed and is
+explicitly out of scope for this rollout -- see commit
+287956e1ca0e37bda5e958f96c2cc516e19b957d. The BANKED CALL rollout roadmap
+is otherwise complete.

@@ -3,7 +3,7 @@
 
 HEADER(
     Mirroring::Horizontal, false, false,
-    32768, 8192,
+    65536, 8192,
     0, 0,
     0, 0,
     Timing::NTSC

@@ -130,8 +130,30 @@ if(TARGET_PLATFORM STREQUAL "nes")
     # invisible to that one probe even though it reaches every ordinary
     # target's link step. Compile-only steps harmlessly warn that -T is
     # unused; silenced below rather than left to spam every translation unit.
-    set(VRC1_LD ${CMAKE_SOURCE_DIR}/src/nes/mappers/vrc1.ld)
-    set(CMAKE_CXX_FLAGS "-T ${VRC1_LD} -Wno-unused-command-line-argument")
+    # BANKED CALL, Phase 5: VRC1_LD is no longer hardcoded into the library's
+    # own tree -- the library only ever supplies a HELPER script
+    # (src/nes/mappers/vrc1-helper.ld: hardware facts and mechanical
+    # plumbing), never the actual, final linker script a real project links
+    # against (see BANKED_CALL_THEORY.txt's "THE FINAL LINKER SCRIPT MUST BE
+    # USER-MADE" section). The demo supplies its own top-level script
+    # (demo/link.ld) via local.cmake, matching LLVM_MOS_SDK's own "no
+    # fallback, missing is a hard configure-time error" convention just
+    # above -- see local.cmake.example.
+    if(NOT VRC1_LD)
+        message(FATAL_ERROR
+            "NES build requires a top-level linker script, but VRC1_LD is "
+            "unset. Copy local.cmake.example to local.cmake and set it to "
+            "your own project's top-level script, e.g.\n"
+            "    set(VRC1_LD \"\${CMAKE_SOURCE_DIR}/demo/link.ld\" CACHE FILEPATH \"\" FORCE)\n"
+            "That script should INCLUDE vrc1-helper.ld (src/nes/mappers) for "
+            "the hardware/mechanical parts it doesn't need to reinvent.")
+    endif()
+    # -L: GNU ld/lld's INCLUDE directive does NOT search the directory of the
+    # script doing the including -- only the linker's own -L search paths --
+    # so a top-level script's `INCLUDE vrc1-helper.ld` (which itself does
+    # `INCLUDE nes-no-pow2.ld`, a local fork of the SDK's nes.ld -- see its
+    # own comment for why it exists) needs this to resolve at all.
+    set(CMAKE_CXX_FLAGS "-T ${VRC1_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
 
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
@@ -177,47 +199,52 @@ if(TARGET_PLATFORM STREQUAL "nes")
                 ${FAMISTUDIO_DIR}/NoteTables/famistudio_note_table_msb.bin)
     endif()
 
-    # Locate the ca65 assembler and llvm-readelf binary used during the
-    # two-pass build below. ca65 is part of cc65 (a separate, system-installed
-    # toolchain) so it legitimately falls back to PATH. llvm-readelf ships with
-    # the SDK: NO_DEFAULT_PATH pins it to the SDK bin (derived from the NES
-    # compiler's own directory) so a PATH-resolved llvm-mos can never sneak in.
+    # Locate the ca65 assembler and llvm-readelf binary used below. ca65 is
+    # part of cc65 (a separate, system-installed toolchain) so it legitimately
+    # falls back to PATH. llvm-readelf ships with the SDK: NO_DEFAULT_PATH
+    # pins it to the SDK bin (derived from the NES compiler's own directory)
+    # so a PATH-resolved llvm-mos can never sneak in.
     find_program(CA65 ca65 HINTS "${CC65_DIR}/bin" "C:/cc65/bin" REQUIRED)
     get_filename_component(LLVM_MOS_BIN ${CMAKE_C_COMPILER} DIRECTORY)
     find_program(LLVM_READELF llvm-readelf
         HINTS "${LLVM_MOS_BIN}" NO_DEFAULT_PATH REQUIRED)
 
-    set(FAMISTUDIO_CFG_NTSC_SUPPORT 1 CACHE STRING "FamiStudio: enable NTSC timing tables")
-    set(FAMISTUDIO_CFG_PAL_SUPPORT  0 CACHE STRING "FamiStudio: enable PAL timing tables")
-    set(FAMISTUDIO_CFG_DPCM_SUPPORT 1 CACHE STRING "FamiStudio: enable DPCM sample playback")
-    set(FAMISTUDIO_CFG_SFX_SUPPORT  1 CACHE STRING "FamiStudio: enable SFX engine")
-    set(FAMISTUDIO_CFG_SFX_STREAMS  2 CACHE STRING "FamiStudio: number of concurrent SFX streams")
-    set(FAMISTUDIO_USE_VOLUME_TRACK 1 CACHE STRING "FamiStudio: enable per-note volume track")
+    # demo/famistudio_config.s is the REAL, project-owned FamiStudio config
+    # file (see its own header comment, and BANKED_CALL_THEORY.txt's
+    # "RESOLVED: famistudio_config.s moves to the demo root as a real,
+    # directly-edited file" -- this used to be a CMake-generated string
+    # instead, which is what that entry flags as the thing to fix). CMake's
+    # own job here is reduced to READING values back out of that real file
+    # (regex-extracted, never written) so audio.cpp's #if FAMISTUDIO_CFG_*
+    # checks and its BANKED_EXTERN segment tag stay in sync with whatever
+    # this file actually says -- editing the .s file is what changes the
+    # engine's real configuration; these extracted CMake variables can never
+    # drift from it because they're read from it, not a separate source.
+    file(READ ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s FAMISTUDIO_CONFIG_TEXT)
+
+    macro(famistudio_extract var pattern)
+        string(REGEX MATCH "${pattern}" _famistudio_match "${FAMISTUDIO_CONFIG_TEXT}")
+        if(NOT _famistudio_match)
+            message(FATAL_ERROR "demo/famistudio_config.s: couldn't find ${var} (expected to match: ${pattern})")
+        endif()
+        set(${var} ${CMAKE_MATCH_1})
+    endmacro()
+
+    famistudio_extract(FAMISTUDIO_SEGMENT          "FAMISTUDIO_CA65_CODE_SEGMENT[ \t]+([A-Za-z0-9_]+)")
+    famistudio_extract(FAMISTUDIO_CFG_NTSC_SUPPORT "FAMISTUDIO_CFG_NTSC_SUPPORT[ \t]*=[ \t]*([0-9]+)")
+    famistudio_extract(FAMISTUDIO_CFG_PAL_SUPPORT  "FAMISTUDIO_CFG_PAL_SUPPORT[ \t]*=[ \t]*([0-9]+)")
+    famistudio_extract(FAMISTUDIO_CFG_DPCM_SUPPORT "FAMISTUDIO_CFG_DPCM_SUPPORT[ \t]*=[ \t]*([0-9]+)")
+    famistudio_extract(FAMISTUDIO_CFG_SFX_SUPPORT  "FAMISTUDIO_CFG_SFX_SUPPORT[ \t]*=[ \t]*([0-9]+)")
+    famistudio_extract(FAMISTUDIO_CFG_SFX_STREAMS  "FAMISTUDIO_CFG_SFX_STREAMS[ \t]*=[ \t]*([0-9]+)")
+    famistudio_extract(FAMISTUDIO_USE_VOLUME_TRACK "FAMISTUDIO_USE_VOLUME_TRACK[ \t]*=[ \t]*([0-9]+)")
 
     if(FAMISTUDIO_CFG_NTSC_SUPPORT AND FAMISTUDIO_CFG_PAL_SUPPORT)
         message(FATAL_ERROR
-                "FAMISTUDIO_CFG_NTSC_SUPPORT and FAMISTUDIO_CFG_PAL_SUPPORT "
-                "are both enabled; DUAL mode requires a runtime region "
-                "detection routine that this project does not yet provide.")
+                "demo/famistudio_config.s: FAMISTUDIO_CFG_NTSC_SUPPORT and "
+                "FAMISTUDIO_CFG_PAL_SUPPORT are both enabled; DUAL mode "
+                "requires a runtime region detection routine that this "
+                "project does not yet provide.")
     endif()
-
-    # Common FamiStudio configuration block. The pass 1 build uses this
-    # as-is; the pass 2 build prepends a generated padding include.
-    set(FAMISTUDIO_CFG
-            ".define FAMISTUDIO_CA65_ZP_SEGMENT   ZEROPAGE
-.define FAMISTUDIO_CA65_RAM_SEGMENT  BSS
-.define FAMISTUDIO_CA65_CODE_SEGMENT CODE
-
-FAMISTUDIO_CFG_EXTERNAL     = 1
-FAMISTUDIO_CFG_NTSC_SUPPORT = ${FAMISTUDIO_CFG_NTSC_SUPPORT}
-FAMISTUDIO_CFG_PAL_SUPPORT  = ${FAMISTUDIO_CFG_PAL_SUPPORT}
-FAMISTUDIO_CFG_DPCM_SUPPORT = ${FAMISTUDIO_CFG_DPCM_SUPPORT}
-FAMISTUDIO_CFG_SFX_SUPPORT  = ${FAMISTUDIO_CFG_SFX_SUPPORT}
-FAMISTUDIO_CFG_SFX_STREAMS  = ${FAMISTUDIO_CFG_SFX_STREAMS}
-FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
-
-.include \"famistudio_ca65.s\"
-")
 
     file(COPY ${FAMISTUDIO_DIR}/famistudio_ca65.h
             DESTINATION ${CMAKE_BINARY_DIR}/famistudio_include)
@@ -227,27 +254,31 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
                 DESTINATION ${CMAKE_BINARY_DIR}/famistudio_include)
     endif()
 
-    # ------------------------------------------------------------------
-    # Pass 1: build FamiStudio and the demo with no zero-page or BSS
-    # padding so that the resulting ELF can be inspected to determine
-    # how much space the C code actually consumes in those segments.
-    # ------------------------------------------------------------------
-
-    file(WRITE ${CMAKE_BINARY_DIR}/famistudio_config_pass1.s "${FAMISTUDIO_CFG}")
-
-    set(FAMISTUDIO_PASS1_OBJ ${CMAKE_BINARY_DIR}/famistudio_pass1.o)
+    # Assemble the real, project-owned config once. There is no longer a
+    # separate "pass 1 without padding, pass 2 with padding" split -- see
+    # the measurement step below for why: it was already a permanent no-op,
+    # so building the exact same content twice bought nothing. The one
+    # object below is used both for the diagnostic measurement link and the
+    # real demo link.
+    set(FAMISTUDIO_OBJ ${CMAKE_BINARY_DIR}/famistudio.o)
     add_custom_command(
-            OUTPUT ${FAMISTUDIO_PASS1_OBJ}
+            OUTPUT ${FAMISTUDIO_OBJ}
             COMMAND ${CA65}
+            -I ${CMAKE_SOURCE_DIR}/demo
             -I ${FAMISTUDIO_DIR}
             -I ${FAMISTUDIO_DIR}/NoteTables
-            -o ${FAMISTUDIO_PASS1_OBJ}
-            ${CMAKE_BINARY_DIR}/famistudio_config_pass1.s
-            DEPENDS ${CMAKE_BINARY_DIR}/famistudio_config_pass1.s
-            COMMENT "Assembling FamiStudio (pass 1)"
+            -o ${FAMISTUDIO_OBJ}
+            ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s
+            DEPENDS ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s
+            COMMENT "Assembling FamiStudio"
     )
 
+    # demo/famistudio_config.s is handled explicitly above (assembled once
+    # into FAMISTUDIO_OBJ) -- excluded here so it isn't ALSO picked up and
+    # assembled a second time by this generic "every hand-written .s file"
+    # loop, which would produce a second object defining the same symbols.
     file(GLOB_RECURSE DEMO_ASM_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.s)
+    list(REMOVE_ITEM DEMO_ASM_SOURCES ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s)
     set(DEMO_ASM_OBJECTS "")
     foreach(ASM_SRC ${DEMO_ASM_SOURCES})
         get_filename_component(ASM_NAME ${ASM_SRC} NAME_WE)
@@ -280,6 +311,12 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             FAMISTUDIO_CFG_SFX_SUPPORT=${FAMISTUDIO_CFG_SFX_SUPPORT}
             FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
+            # Unquoted on purpose -- audio.cpp stringizes it itself (see
+            # FAMISTUDIO_SEGMENT_STR there), the standard two-level macro
+            # stringize idiom, rather than trying to pass an already-quoted
+            # string literal through this raw command-line definition (which
+            # would need shell-escaping that's easy to get subtly wrong).
+            FAMISTUDIO_SEGMENT=${FAMISTUDIO_SEGMENT}
     )
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
@@ -301,9 +338,10 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # leaving no room for FamiStudio's ZEROPAGE segment.
             -mlto-zp=214
             # This custom command calls the compiler directly, bypassing
-            # CMAKE_EXE_LINKER_FLAGS (which supplies -T for every ordinary
-            # CMake target's link step) -- so -T has to be repeated here too.
+            # CMAKE_EXE_LINKER_FLAGS (which supplies -T/-L for every ordinary
+            # CMake target's link step) -- so -T/-L have to be repeated here too.
             -T ${VRC1_LD}
+            -L${CMAKE_SOURCE_DIR}/src/nes/mappers
             -I${CMAKE_SOURCE_DIR}/include
             -I${CMAKE_SOURCE_DIR}/include/umbrella
             -I${CMAKE_BINARY_DIR}/famistudio_include
@@ -314,19 +352,23 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             # so the driver treats them as link inputs, not source files.
             -x none
             $<TARGET_FILE:platform-nes>
-            ${FAMISTUDIO_PASS1_OBJ}
+            ${FAMISTUDIO_OBJ}
             ${DEMO_ASM_OBJECTS}
             -o ${CMAKE_BINARY_DIR}/demo_pass1
             DEPENDS platform-nes
-            ${FAMISTUDIO_PASS1_OBJ}
+            ${FAMISTUDIO_OBJ}
             ${DEMO_ASM_OBJECTS}
             ${DEMO_C_SOURCES}
-            COMMENT "Linking pass 1 ELF for segment measurement"
+            COMMENT "Linking diagnostic ELF for ZP/BSS measurement"
     )
 
     # ------------------------------------------------------------------
-    # Measurement step: read ZP/BSS sizes from the pass 1 ELF and emit
-    # a ca65 include defining the padding required for pass 2.
+    # Diagnostic only: report how much ZP/BSS the C++ side actually uses.
+    # Informational -- measure_sections.cmake's own header comment explains
+    # why this can never feed back into a real padding step (llvm-mos's own
+    # linker script already places ca65's ZEROPAGE/BSS after the C-side
+    # sections via wildcard order; adding real padding here would double-
+    # count the reservation). Nothing depends on this file's contents.
     # ------------------------------------------------------------------
 
     set(CA65_PADDING ${CMAKE_BINARY_DIR}/ca65_padding.s)
@@ -339,30 +381,7 @@ FAMISTUDIO_USE_VOLUME_TRACK = ${FAMISTUDIO_USE_VOLUME_TRACK}
             -P ${CMAKE_SOURCE_DIR}/tools/measure_sections.cmake
             DEPENDS ${PASS1_ELF}
             ${CMAKE_SOURCE_DIR}/tools/measure_sections.cmake
-            COMMENT "Extracting ZP/BSS sizes from pass 1 ELF"
-    )
-
-    # ------------------------------------------------------------------
-    # Pass 2: reassemble FamiStudio with the measured padding so its
-    # zero-page and BSS allocations sit above the C runtime's usage.
-    # ------------------------------------------------------------------
-
-    file(WRITE ${CMAKE_BINARY_DIR}/famistudio_config.s
-            ".include \"ca65_padding.s\"
-${FAMISTUDIO_CFG}")
-
-    set(FAMISTUDIO_OBJ ${CMAKE_BINARY_DIR}/famistudio.o)
-    add_custom_command(
-            OUTPUT ${FAMISTUDIO_OBJ}
-            COMMAND ${CA65}
-            -I ${CMAKE_BINARY_DIR}
-            -I ${FAMISTUDIO_DIR}
-            -I ${FAMISTUDIO_DIR}/NoteTables
-            -o ${FAMISTUDIO_OBJ}
-            ${CMAKE_BINARY_DIR}/famistudio_config.s
-            DEPENDS ${CA65_PADDING}
-            ${CMAKE_BINARY_DIR}/famistudio_config.s
-            COMMENT "Assembling FamiStudio (pass 2, with padding)"
+            COMMENT "Extracting ZP/BSS sizes (diagnostic only)"
     )
 
     # ------------------------------------------------------------------
@@ -385,16 +404,19 @@ ${FAMISTUDIO_CFG}")
     # in C++ mode. It is the intended mechanism here, so silence the diagnostic.
     target_compile_options(demo PRIVATE -Wno-c23-extensions)
 
-    add_dependencies(demo demo_pass2_asm)
+    add_dependencies(demo demo_famistudio_asm)
 
-    add_custom_target(demo_pass2_asm
-            DEPENDS ${FAMISTUDIO_OBJ} ${DEMO_ASM_OBJECTS}
+    # CA65_PADDING is listed here purely so the diagnostic ZP/BSS measurement
+    # (informational only -- see its own comment above) actually runs as
+    # part of a normal build; nothing downstream reads its output.
+    add_custom_target(demo_famistudio_asm
+            DEPENDS ${FAMISTUDIO_OBJ} ${DEMO_ASM_OBJECTS} ${CA65_PADDING}
     )
 
     # FamiStudio and the hand-written assembly objects are required by
     # every build configuration.
     target_link_options(demo PRIVATE
-            -mlto-zp=214   # match pass-1 cap; leaves 10 bytes for FamiStudio ZEROPAGE
+            -mlto-zp=214   # leaves 10 bytes at the top of zero page for FamiStudio's own ZEROPAGE segment
             ${FAMISTUDIO_OBJ}
             ${DEMO_ASM_OBJECTS}
     )

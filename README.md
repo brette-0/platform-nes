@@ -64,3 +64,18 @@ or in the case of more modern targets save files with paths managed by the devel
 
 Currently, the pattern tables are not modified post-reset where they are fetched from `rodata`, in the future 
 Character ROM Bank switching technology will be supported.
+
+## Minimum Spec (Windows/Mac/Linux/Web)
+
+On the SDL3 targets, the per-tick cost is the shared game logic plus the software PPU compositor
+(`src/emu/ppu.cpp`) writing a real frame every 60Hz, independent of display refresh. That workload needs an
+out-of-order CPU — in-order cores (e.g. Atom Bonnell, ARM11) stall heavily on its per-pixel branches even when
+their nameplate clock/MIPS looks sufficient.
+
+- **With a GPU** (hardware textured-quad blit, e.g. SDL3's accelerated renderer): an out-of-order CPU roughly on
+  the order of a Pentium II 233 / K6-2 300 (1998) or a Cortex-A53 (2013+) is enough; GPU requirements are
+  negligible (any hardware blit path since the late '90s clears it).
+- **Without a GPU** (software-rendered/fbdev path): the scale-and-present step also runs on CPU, raising the
+  floor to roughly a Pentium II 300-350 / K6-2 350+ or a Cortex-A7 quad (Raspberry Pi 2, 2015)-class core.
+
+These are order-of-magnitude estimates, not measured benchmarks of this codebase.
