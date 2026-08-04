@@ -122,6 +122,24 @@ RESET {
     mmc3::SwitchCHRBank(mmc3::chr3Control, 5);
     mmc3::SwitchCHRBank(mmc3::chr4Control, 6);
     mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
+
+    // Mirroring ($A000) is the one MMC3 register nothing above reasserts, and
+    // mmc3.cpp's own ::_reset deliberately leaves it alone (real hardware
+    // powers it up undefined -- see that function's comment). VRC1 had no
+    // mirroring register at all, so this engine's column-streaming address
+    // math (nt_h selects PPU A10 as the horizontal-neighbor bit -- see
+    // player.cpp's PushCoinVram) was implicitly relying on VERTICAL mirroring
+    // (side-by-side nametables) the whole time without ever having to say so.
+    // Under MMC3 that assumption is no longer free: with the register
+    // unwritten, mirroring is whatever the mapper happens to power up with on
+    // a given board/emulator, and if that lands on HORIZONTAL instead, PPU
+    // A10 stops being the live nametable-select bit -- every other 32-tile
+    // world-screen then aliases onto the SAME physical attribute byte as its
+    // neighbour, so a column build for one screen silently corrupts an
+    // attribute nibble that's still on screen from the other. Bit 0: 0 =
+    // vertical, 1 = horizontal (opposite polarity from the iNES header's own
+    // mirroring bit -- a well-known MMC3 gotcha, not a typo).
+    mmc3::mirroring = 0;
 #endif
 
     if (!level::LoadLevel(0)) {
