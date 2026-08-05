@@ -543,6 +543,41 @@ namespace ppu {
 
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
+
+#ifndef TARGET_NES
+    /**
+     * @brief Signature of a mapper's tile-address translator.
+     *
+     * Takes a tile's PPU pattern-table address (0x0000-0x1FFF, the same
+     * value the emu PPU would otherwise index ::patternTable with directly)
+     * and returns the byte offset to actually index ::patternTable with --
+     * i.e. that address resolved through whatever CHR banks are currently
+     * switched in. Not a fetch: the translator returns an address, the
+     * caller still does the array read. ::NROM::GetTileLMA (identity, the
+     * default) and ::MMC3::GetTileLMA are the two implementations so far.
+     */
+    using TileTranslator = u32 (*)(u16);
+
+    /**
+     * @brief Binds the mapper-specific tile-address translator the emu PPU
+     *        (src/emu/ppu.cpp) resolves every background/sprite tile fetch
+     *        through.
+     *
+     * Off-NES only: real NES hardware performs CHR bank switching in
+     * silicon, so there is nothing for this to do there -- the emu PPU is
+     * the only consumer, since it renders straight from a flat, non-bank-
+     * switched CHR-ROM image (::patternTable) and needs a software stand-in
+     * for whatever the cartridge's mapper would otherwise be doing on the
+     * PPU's own address bus. Defaults to ::NROM::GetTileLMA (identity) so a
+     * non-bank-switching game needs to call this at all; a game using a
+     * bank-switching mapper (e.g. MMC3) should call this once, early, with
+     * that mapper's own translator (e.g. `ppu::BindTileTranslator(&MMC3::GetTileLMA)`),
+     * the same way it already sets up that mapper's initial CHR banks.
+     *
+     * @param fn Translator to install; replaces whatever was bound before.
+     */
+    void BindTileTranslator(TileTranslator fn);
+#endif
 }
 #if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
@@ -714,6 +749,14 @@ extern u8* paletteRAM;
 extern u16 xScroll;
 /** @brief Current vertical scroll (pixels). */
 extern u16 yScroll;
+/**
+ * @brief Desktop shadow of MMC3's $A000 mirroring bit: false = vertical,
+ *        true = horizontal. There's no hardware register to poke off-NES, so
+ *        this is the library-visible state mapper code (e.g. ::mmc3::SetMirroring)
+ *        writes directly, for the emu PPU (and anything else that needs to
+ *        know the current mirroring) to read.
+ */
+extern bool mirroring;
 #endif
 
 #ifdef TARGET_NES

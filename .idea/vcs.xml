@@ -2,6 +2,12 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-nes-release/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-nes-release/_deps/tuple-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-web-release/_deps/intsh-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-web-release/_deps/sdl3-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-web-release/_deps/stb-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/cmake-build-ci-web-release/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-debug/_deps/intsh-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-debug/_deps/tuple-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/cmake-build-ctr-release/_deps/intsh-src" vcs="Git" />

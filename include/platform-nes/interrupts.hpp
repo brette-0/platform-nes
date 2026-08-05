@@ -7,8 +7,8 @@
  * application defines the single hardware IRQ handler directly with
  * ::IRQ, placed at the hardware vector exactly like ::NMI -- there is no
  * runtime arming. On desktop, which has no hardware vector to place code
- * at, the renderer instead schedules a scanline event with
- * ::SetNextIRQHandler and fires it by calling the given function pointer.
+ * at, the renderer instead schedules a scanline event directly into
+ * ::irqPending and fires it by calling the given function pointer.
  *
  * On desktop builds the armed handler is a plain function pointer, and
  * the pending IRQ is held in ::irqPending for the renderer to drain once
@@ -69,39 +69,16 @@ typedef struct irq_t {
 /**
  * @brief The single pending IRQ event for the renderer (desktop only).
  *
- * ::irq::SetNextIRQHandler overwrites this slot; only one IRQ can be
- * pending at a time. The renderer fires it at the matching pixel coordinate
- * and clears ::irq::irqPending.
+ * Callers write this slot directly to arm the next scanline IRQ --
+ * overwriting it is a set, not an enqueue, so only one IRQ can be pending
+ * at a time. Set ::irqPendingValid alongside it. The renderer fires it at
+ * the matching pixel coordinate and clears ::irqPendingValid.
  */
 extern irq_t   irqPending;
 /** @brief Non-zero when ::irq::irqPending holds a valid event. */
 extern bool    irqPendingValid;
 
-#else
-
-/** @brief Opaque IRQ handle on NES builds. */
-typedef u8 irq_t;
-
 #endif
-
-/**
- * @brief Arms the handler that should fire on the next scanline IRQ.
- *
- * Overwrites any previously armed handler — this is a set, not an enqueue.
- * Only one handler can be pending at a time.
- *
- * @param handle Previously armed handle.
- */
-void SetNextIRQHandler(irq_t handle);
-
-/**
- * @brief Returns the currently armed IRQ handler.
- *
- * On NES this is the value last written by ::irq::SetNextIRQHandler.
- * On desktop it is the pending ::irq::irq_t slot (its handler is null
- * if none is armed).
- */
-irq_t GetCurrentIRQHandler();
 
 } // namespace irq
 
@@ -510,7 +487,7 @@ inline void DisableInterrupts() {}
  *
  * @note The desktop/emulated backends have no cycle-exact CPU timing
  * model -- they schedule IRQs by pixel/scanline position
- * (::irq::SetNextIRQHandler), not by counting CPU cycles -- so there
+ * (::irq::irqPending), not by counting CPU cycles -- so there
  * is nothing meaningful to busy-wait on here. See the NES-side
  * ::irq::SpinWaitCycles for the real implementation and its
  * exact-cycle guarantee.

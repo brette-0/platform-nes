@@ -96,10 +96,17 @@ static oam::oam_t SpriteX2(u16 i);
 static i16  ClampRow(u16 y);
 
 RESET {
-#ifdef TARGET_NES
+#ifndef TARGET_NES
+    // Real NES hardware does CHR bank switching in silicon -- there's no
+    // software tile-address translation to bind there. ppu::BindTileTranslator
+    // and mmc3::GetTileLMA only exist off-NES (see video.hpp/mmc3.hpp).
+    ppu::BindTileTranslator(mmc3::GetTileLMA);
+#endif
     // init bank state -- window1Control/window2Control and chr0Control-
-    // chr5Control are MMC3 registers, only defined off mmc3.cpp (NES-only,
-    // see mmc3.hpp). mmc3.cpp's own ::_reset/SyncBankShadows already set
+    // chr5Control are MMC3 registers, defined for every target (see
+    // mmc3.hpp/mmc3.cpp -- NES pokes real hardware, off-NES tracks bank
+    // state for ppu::BindTileTranslator above). mmc3.cpp's own
+    // ::_reset/SyncBankShadows already set
     // window1Control/window2Control to banks 0/1 at boot -- reasserted here
     // for the same "this is the demo's own explicit choice, not just
     // trusting boilerplate" reason the old VRC1 version did (there is no
@@ -139,8 +146,7 @@ RESET {
     // attribute nibble that's still on screen from the other. Bit 0: 0 =
     // vertical, 1 = horizontal (opposite polarity from the iNES header's own
     // mirroring bit -- a well-known MMC3 gotcha, not a typo).
-    mmc3::mirroring = 0;
-#endif
+    mmc3::SetMirroring(false);
 
     if (!level::LoadLevel(0)) {
         irq::reset();    // spin reset on NES, exit on SDL3

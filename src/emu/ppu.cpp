@@ -13,6 +13,7 @@
 
 #include <platform-nes/video.hpp>
 #include <platform-nes/interrupts.hpp>
+#include <platform-nes/mappers/nrom.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +30,7 @@ u16 yScroll;
 u8 *paletteRAM;
 u8 *VideoRAM;
 int quit;
+bool mirroring;
 
 namespace ppu {
 u8 PPUCTRL;
@@ -43,6 +45,15 @@ static video::spriteZeroHandler_t sprite0_zero;
 
 void video::SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
     sprite0_zero = (video::spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
+}
+
+/* Mapper-supplied tile-address translator (::ppu::BindTileTranslator). Defaults
+ * to NROM's identity mapping so a non-bank-switching game needs no setup call;
+ * a bank-switching mapper (e.g. MMC3) overrides it once, early. */
+static ppu::TileTranslator tileTranslator = &NROM::GetTileLMA;
+
+void ppu::BindTileTranslator(const TileTranslator fn) {
+    tileTranslator = fn;
 }
 
 static constexpr u32 nes_rgb[64] = {
@@ -189,8 +200,9 @@ void GenerateFrame(u32 *fb, const int stride) {
                 const u8 attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
                 tile_pal = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
                 const int chr_base = chr_tbl + tile_id * 16 + fine_y;
-                plane0 = patternTable[chr_base];
-                plane1 = patternTable[chr_base + 8];
+                const u32 chr_lma  = tileTranslator(static_cast<u16>(chr_base));
+                plane0 = patternTable[chr_lma];
+                plane1 = patternTable[chr_lma + 8];
             };
             if (bg_on) load_tile();
 
@@ -520,5 +532,6 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     *latch = true;
     video::SetSpriteZeroHandler(px, py, fn);
-    irq::SetNextIRQHandler((irq::irq_t){ .fn = fn, .px = px, .py = py });
+    irq::irqPending      = (irq::irq_t){ .fn = fn, .px = px, .py = py };
+    irq::irqPendingValid = true;
 }

@@ -6,6 +6,7 @@
 
 #include <intsh>
 #include <platform-nes/technology.hpp>
+#include <platform-nes/types.hpp>      // vec2
 using namespace br0::intsh;
 
 namespace demo::level {

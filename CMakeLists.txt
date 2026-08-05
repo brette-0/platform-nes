@@ -477,7 +477,7 @@ elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
     # emulator and all the nametable/OAM/palette write functions are
     # platform-agnostic and compiled here alongside the GX-specific
     # video/present, the PAD/WPAD input, and the (stub) audio.
-    file(GLOB OGC_SOURCES CONFIGURE_DEPENDS src/ogc/*.cpp src/emu/*.cpp)
+    file(GLOB OGC_SOURCES CONFIGURE_DEPENDS src/ogc/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
     add_library(platform-nes STATIC ${OGC_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
@@ -562,7 +562,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
     # the emulator and all the nametable/OAM/palette write functions are
     # platform-agnostic and compiled here alongside the citro2d video/present,
     # the hid input, and the (stub) audio.
-    file(GLOB CTR_SOURCES CONFIGURE_DEPENDS src/3ds/*.cpp src/emu/*.cpp)
+    file(GLOB CTR_SOURCES CONFIGURE_DEPENDS src/3ds/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
     add_library(platform-nes STATIC ${CTR_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
@@ -641,7 +641,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # emulator and all the nametable/OAM/palette write functions are
         # platform-agnostic and compiled here alongside the libnx framebuffer
         # video/present, the hid input, and the audout audio.
-        file(GLOB NX_SOURCES CONFIGURE_DEPENDS src/switch/*.cpp src/emu/*.cpp)
+        file(GLOB NX_SOURCES CONFIGURE_DEPENDS src/switch/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
         add_library(platform-nes STATIC ${NX_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
@@ -752,7 +752,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # emulator and all the nametable/OAM/palette write functions are
         # platform-agnostic and compiled here alongside the SDL2 video/present,
         # the SDL2 GameController input, and the SDL2 audio.
-        file(GLOB WIIU_SOURCES CONFIGURE_DEPENDS src/wiiu/*.cpp src/emu/*.cpp)
+        file(GLOB WIIU_SOURCES CONFIGURE_DEPENDS src/wiiu/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
         add_library(platform-nes STATIC ${WIIU_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
@@ -989,7 +989,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # hardware: the emulator and all the nametable/OAM/palette write functions
         # are platform-agnostic and compiled here alongside the libnds video/
         # present, the keypad input, and the (stub) audio.
-        file(GLOB NDS_SOURCES CONFIGURE_DEPENDS src/nds/*.cpp src/emu/*.cpp)
+        file(GLOB NDS_SOURCES CONFIGURE_DEPENDS src/nds/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
         add_library(platform-nes STATIC ${NDS_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
@@ -1086,7 +1086,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # hardware: the emulator and all the nametable/OAM/palette write functions
         # are platform-agnostic and compiled here alongside the libgba video/
         # present, the keypad input, and the (stub) audio.
-        file(GLOB GBA_SOURCES CONFIGURE_DEPENDS src/gba/*.cpp src/emu/*.cpp)
+        file(GLOB GBA_SOURCES CONFIGURE_DEPENDS src/gba/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
         add_library(platform-nes STATIC ${GBA_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
@@ -1288,7 +1288,7 @@ else()
     # The SDL3 backend presents the shared software PPU (src/emu): the emulator
     # and all the nametable/OAM/palette write functions are platform-agnostic
     # and compiled here alongside the SDL-specific window/present/input/audio.
-    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp src/emu/*.cpp)
+    file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
     add_library(platform-nes STATIC ${SDL3_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include

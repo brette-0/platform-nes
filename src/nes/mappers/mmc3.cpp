@@ -1,32 +1,31 @@
 #include <platform-nes/mappers/mmc3.hpp>
 
-namespace mmc3 {
+mmc3::Register<6> mmc3::window1Control;
+mmc3::Register<7> mmc3::window2Control;
 
-mmc3_register<6> window1Control;
-mmc3_register<7> window2Control;
+mmc3::Register<0> mmc3::chr0Control;
+mmc3::Register<1> mmc3::chr1Control;
+mmc3::Register<2> mmc3::chr2Control;
+mmc3::Register<3> mmc3::chr3Control;
+mmc3::Register<4> mmc3::chr4Control;
+mmc3::Register<5> mmc3::chr5Control;
 
-mmc3_register<0> chr0Control;
-mmc3_register<1> chr1Control;
-mmc3_register<2> chr2Control;
-mmc3_register<3> chr3Control;
-mmc3_register<4> chr4Control;
-mmc3_register<5> chr5Control;
+tech::wo_register<0xa001> mmc3::prgRamProtect;
+tech::wo_register<0xc000> mmc3::irqLatch;
 
-tech::wo_register<0xa000> mirroring;
-tech::wo_register<0xa001> prgRamProtect;
-tech::wo_register<0xc000> irqLatch;
+void mmc3::SetMirroring(const bool horizontal) {
+    tech::poke(0xa000, horizontal ? 1 : 0);
+}
 
-void ScheduleScanlineIRQ(const u8 scanline) {
+void mmc3::ScheduleScanlineIRQ(const u8 scanline) {
     irqLatch = scanline; // $C000: reload value.
     tech::poke(0xc001, 0);     // $C001: force reload at next clock (value ignored).
     tech::poke(0xe001, 0);     // $E001: enable (value ignored).
 }
 
-void AcknowledgeScanlineIRQ() {
+void mmc3::AcknowledgeScanlineIRQ() {
     tech::poke(0xe000, 0); // $E000: disable + acknowledge pending IRQ (value ignored).
 }
-
-} // namespace mmc3
 
 extern "C" void _start();
 
@@ -36,7 +35,7 @@ extern "C" void _start();
  *        to crt0's _start.
  *
  * Runs BEFORE .bss is zeroed (same constraint as VRC1's ::_reset, see its
- * own comment in vrc1.cpp): raw tech::poke() calls only, no mmc3:: register
+ * own comment in vrc1.cpp): raw tech::poke() calls only, no MMC3::Register
  * shadow objects, and no calls to ordinary (non-::fixed) functions like
  * ::AcknowledgeScanlineIRQ -- window1Control/window2Control aren't
  * established yet at this point, so anything not pinned to this fixed bank

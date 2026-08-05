@@ -1,8 +1,8 @@
 #include <platform-nes/mappers/vrc1.hpp>
 
-tech::wo_register<0x8000> window1Control;
-tech::wo_register<0xa000> window2Control;
-tech::wo_register<0xc000> window3Control;
+tech::wo_register<0x8000> VRC1::window1Control;
+tech::wo_register<0xa000> VRC1::window2Control;
+tech::wo_register<0xc000> VRC1::window3Control;
 
 extern "C" void _start();
 
@@ -14,15 +14,15 @@ extern "C" fixed void _reset() {
 }
 
 /*
- * BANKED CALL, Phase 1 smoke test: exercises BANKED()+Call<Fn> through the
- * always-mapped fixed-bank path (bank_layout<fixed_bank_tag>::always_mapped
+ * BANKED CALL, Phase 1 smoke test: exercises VRC1_BANKED()+Call<Fn> through
+ * the always-mapped fixed-bank path (bank_layout<fixed_bank_tag>::always_mapped
  * == true, so this collapses to a bare call at runtime -- Call<Fn>'s
  * non-fixed branch isn't reachable until a real bank_layout<Tag>
  * specialization exists, Phase 2+). No existing ::fixed-tagged function had
- * a real C++ call site to convert instead: ::Long and
- * vrc1_detail::CallInWindow are templates, out of BANKED()'s scope (see
+ * a real C++ call site to convert instead: ::VRC1::Long and
+ * VRC1::Detail::CallInWindow are templates, out of VRC1_BANKED()'s scope (see
  * BANKED_CALL_THEORY.txt); ::_reset is a raw reset-vector target with no
- * C++ caller to route through Call<Fn>. Remove once a real BANKED()-tagged
+ * C++ caller to route through Call<Fn>. Remove once a real VRC1_BANKED()-tagged
  * fixed-bank function exists to stand in for it.
  *
  * noinline alone isn't enough: it blocks inlining, but a body with no
@@ -31,7 +31,7 @@ extern "C" fixed void _reset() {
  * entirely at link time, silently testing nothing. The volatile write
  * below is what actually forces this call to survive to the final link.
  */
-BANKED(".prg_rom_fixed", fixed_bank, void, BankedCallSmokeTest);
+VRC1_BANKED(".prg_rom_fixed", fixed_bank, void, BankedCallSmokeTest);
 
 volatile u8 bankedCallSmokeTestMarker = 0;
 
@@ -41,7 +41,7 @@ volatile u8 bankedCallSmokeTestMarker = 0;
 
 /*
  * BANKED CALL, Phase 2 smoke test: exercises Call<Fn> through a REAL
- * switchable-window round trip (vrc1_detail::CallInSection), not just the
+ * switchable-window round trip (VRC1::Detail::CallInSection), not just the
  * always-mapped short-circuit Phase 1 covered.
  *
  * window_test_tag's section() IS a fixed, hand-picked address (0xdfc0,
@@ -55,14 +55,14 @@ volatile u8 bankedCallSmokeTestMarker = 0;
  */
 struct window_test_tag {};
 
-template <> struct bank_layout<window_test_tag> {
+template <> struct VRC1::bank_layout<window_test_tag> {
     static constexpr bool always_mapped = false;
     static constexpr section_t section() {
         return { 0xdfc0, 6 };
     }
 };
 
-BANKED(".banked_call_window_test", window_test, void, BankedCallWindowTest);
+VRC1_BANKED(".banked_call_window_test", window_test, void, BankedCallWindowTest);
 
 volatile u8 bankedCallWindowTestMarker = 0;
 
@@ -75,9 +75,10 @@ volatile u8 bankedCallWindowTestMarker = 0;
  * window3Control now has TWO distinct physical banks that can appear at
  * $C000-$DFFF (bank 2, window_test_tag's default bank above, and bank 3,
  * here), so CallInSection has to write the CORRECT one each time instead of
- * reasserting the one bank that was always right (::Long's own doc comment
- * on the project's old degenerate assumption). See PRG-ROM growing to 40 KiB
- * and prg_rom_bank3 in vrc1.ld for the ORIGIN-encoding this depends on.
+ * reasserting the one bank that was always right (::VRC1::Long's own doc
+ * comment on the project's old degenerate assumption). See PRG-ROM growing
+ * to 40 KiB and prg_rom_bank3 in vrc1.ld for the ORIGIN-encoding this
+ * depends on.
  *
  * bank3_test_tag's section() hand-encodes bank 3 directly into rom_address's
  * high bits ((3 << 16) | 0xc000) -- CallInSection extracts it back out with
@@ -99,7 +100,7 @@ volatile u8 bankedCallWindowTestMarker = 0;
  */
 struct bank3_test_tag {};
 
-template <> struct bank_layout<bank3_test_tag> {
+template <> struct VRC1::bank_layout<bank3_test_tag> {
     static constexpr bool always_mapped = false;
     static constexpr section_t section() {
         // (3u << 16) is WRONG here: unsigned int is only 16 bits wide on
@@ -110,13 +111,13 @@ template <> struct bank_layout<bank3_test_tag> {
     }
 };
 
-BANKED(".prg_rom_bank3", bank3_test, void, BankedCallBank3Test);
+VRC1_BANKED(".prg_rom_bank3", bank3_test, void, BankedCallBank3Test);
 
 volatile u8 bankedCallBank3TestMarker = 0;
 
 [[gnu::noinline]] void BankedCallBank3Test() {
     bankedCallBank3TestMarker = 3;
-    Call<BankedCallWindowTest>();
+    VRC1::Call<BankedCallWindowTest>();
 }
 
 /*
@@ -147,7 +148,7 @@ struct oversized_tag {};
 
 extern "C" const u8 __oversized_domain_size[];
 
-template <> struct bank_layout<oversized_tag> {
+template <> struct VRC1::bank_layout<oversized_tag> {
     static constexpr bool always_mapped = false;
     static section_t section() {
         // Base bank (4) IS hand-entered and constexpr-safe -- it's the
@@ -157,8 +158,8 @@ template <> struct bank_layout<oversized_tag> {
     }
 };
 
-BANKED(".prg_rom_oversized", oversized, void, OversizedFuncLow);
-BANKED(".prg_rom_oversized", oversized, void, OversizedFuncHigh);
+VRC1_BANKED(".prg_rom_oversized", oversized, void, OversizedFuncLow);
+VRC1_BANKED(".prg_rom_oversized", oversized, void, OversizedFuncHigh);
 
 volatile u8 oversizedFuncLowMarker = 0;
 volatile u8 oversizedFuncHighMarker = 0;
@@ -213,7 +214,7 @@ volatile u8 oversizedFuncHighMarker = 0;
  */
 [[gnu::noinline]] void OversizedFuncHigh() {
     oversizedFuncHighMarker = 1;
-    Call<BankedCallWindowTest>();
+    VRC1::Call<BankedCallWindowTest>();
 }
 
 /**
@@ -221,37 +222,37 @@ volatile u8 oversizedFuncHighMarker = 0;
  *        already poked into hardware.
  *
  * Runs as an ordinary global constructor -- i.e. after crt0's .bss zeroing,
- * which is what makes writing through ::SwitchBank safe here but not in
- * ::_reset (see its comment). By this point the switchable windows are
+ * which is what makes writing through ::VRC1::SwitchBank safe here but not
+ * in ::_reset (see its comment). By this point the switchable windows are
  * already correctly banked by hardware; this only brings the RAM shadows
  * (read by wo_register::get()) into agreement with them, so later code
  * that reads e.g. window2Control.get() sees 1, not a stale post-.bss-zero 0.
  */
 __attribute__((constructor(101)))
 static void SyncBankShadows() {
-    SwitchBank(window1Control, 0);
-    SwitchBank(window2Control, 1);
-    SwitchBank(window3Control, 2);
-    Call<BankedCallSmokeTest>();
+    VRC1::SwitchBank(VRC1::window1Control, 0);
+    VRC1::SwitchBank(VRC1::window2Control, 1);
+    VRC1::SwitchBank(VRC1::window3Control, 2);
+    VRC1::Call<BankedCallSmokeTest>();
     // Safe here specifically because it comes AFTER the three SwitchBank
     // calls above: CallInSection's SHADOW-based save/restore (inside
     // CallInWindow) needs window1/2/3Control's RAM shadows to already
     // reflect real hardware state, which is exactly what this function
     // exists to establish -- see this function's own doc comment.
-    Call<BankedCallWindowTest>();
+    VRC1::Call<BankedCallWindowTest>();
     // Nested cross-bank call: switches window3Control to bank 3, runs,
     // and (from BankedCallBank3Test's own body) nests a Call<> back to
     // bank 2's BankedCallWindowTest before returning -- see
     // BankedCallBank3Test's own comment for why this is the real test.
-    Call<BankedCallBank3Test>();
+    VRC1::Call<BankedCallBank3Test>();
     // Oversized domain: maps window2Control=bank4 AND window3Control=bank5
     // simultaneously (CallInWindows2), runs OversizedFuncLow, which bare-
     // calls OversizedFuncHigh (both windows still mapped, ordinary
     // addressing) and nests a single-window Call<> before either window
     // gets restored -- see OversizedFuncLow/High's own comments.
-    Call<OversizedFuncLow>();
+    VRC1::Call<OversizedFuncLow>();
 }
 
-tech::wo_register<0x9000> chrHighBits;
-tech::wo_register<0xe000> chr0Control;
-tech::wo_register<0xf000> chr1Control;
+tech::wo_register<0x9000> VRC1::chrHighBits;
+tech::wo_register<0xe000> VRC1::chr0Control;
+tech::wo_register<0xf000> VRC1::chr1Control;

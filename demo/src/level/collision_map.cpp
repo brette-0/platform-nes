@@ -4,7 +4,6 @@
 #include "../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
 
 #include <array>
-#include "../types.hpp"
 
 using namespace br0::intsh;
 
