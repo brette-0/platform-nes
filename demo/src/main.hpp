@@ -4,12 +4,6 @@
 #include "actor.hpp"
 #include "level/player.hpp"
 
-enum class spriteZeroStatus : u8 {
-    S0_DO_CALCULATE,
-    S0_DO_CHECK_PERFORM,
-    S0_BEING_PERFORMED
-};
-
 /** @brief Viewport width in metatiles (tiles / 2). */
 constexpr u16 viewport_mx() { return video::viewport_tx() >> 1; }
 /** @brief Viewport height in metatiles (tiles / 2). */
@@ -29,7 +23,6 @@ extern atomic u16 lastXWorldSpace;
 
 extern oam::sprite_t OAMBuffer[64];
 
-void SpriteZeroHandler();
 extern u8 TileBuffer[56];
 
 extern demo::level::Player player1;
