@@ -79,6 +79,9 @@ static constexpr int ATLAS_W       = ATLAS_TILES_X * 8;          // 128
 static constexpr int ATLAS_H       = (512 / ATLAS_TILES_X) * 8;  // 256
 static u8       *chr_atlas = nullptr;
 static GXTexObj  chrTexObj;
+// Generation of ::ppu::chrGeneration the atlas above was last built from.
+// Sentinel (not 0, ::chrGeneration's own initial value) forces the first build.
+static u32       chr_built_gen = ~0u;
 
 // Per-palette TLUTs, rebuilt each frame from paletteRAM. CI4 needs 16 entries.
 // 32-byte aligned: GX_LoadTlut DMAs the source by physical address and requires
@@ -122,12 +125,16 @@ static inline u16 rgb5a3_opaque(const u32 argb) {
     return static_cast<u16>(0x8000 | ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3));
 }
 
-// Convert the whole 8 KB CHR ROM into the CI4 atlas. CHR is static cartridge
-// data here, so this runs once at init.
+// Convert the CHR ROM into the CI4 atlas, resolving each of the 512 PPU tile
+// slots through the mapper's currently-bound translator (see ::ppu::ResolveTile
+// and ::ppu::chrGeneration). NROM's translator is the identity function, so
+// for a non-bank-switching game this is byte-for-byte the old init-only bake;
+// a bank-switching mapper (MMC3) instead needs this re-run whenever it
+// switches a CHR bank -- see render_gx's dirty check.
 static void build_chr_atlas() {
     constexpr int blocks_per_row = ATLAS_W / 8;   // 16
     for (int ti = 0; ti < 512; ti++) {
-        const u8 *tile = CHR_ROM + ti * 16;
+        const u8 *tile = CHR_ROM + ppu::ResolveTile(static_cast<u16>(ti * 16));
         u8       *blk  = chr_atlas + (static_cast<size_t>((ti >> 4)) * blocks_per_row
                                        + (ti & 15)) * 32;
         for (int row = 0; row < 8; row++) {
@@ -252,8 +259,11 @@ static void draw_bg_band(const int y0, const int y1, const u16 xs, const u16 ys)
 // is transparent (alpha-test discarded). y is +1 vs OAM (matches the PPU).
 static void draw_sprites(const bool behind) {
     const oam::sprite_t *oam = emu::OamShadow();
-    const int vpw    = video::viewport_px();
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
+    const int  vpw    = video::viewport_px();
+    const bool tall   = ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE;
+    const int  height = tall ? 16 : 8;
+    const int  atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
+    const int  quads_per_sprite = tall ? 2 : 1;
 
     GX_SetScissor(0, 0, fbW, efbH);
 
@@ -265,7 +275,7 @@ static void draw_sprites(const bool behind) {
             if (((o.attributes & 0x20) != 0) != behind) continue;
             const int sx = static_cast<int>(o.x);
             const int sy = static_cast<int>(o.y) + 1;
-            if (sx <= -8 || sx >= vpw || sy <= -8 || sy >= 240) continue;
+            if (sx <= -8 || sx >= vpw || sy <= -height || sy >= 240) continue;
             n++;
         }
         if (!n) continue;
@@ -273,17 +283,29 @@ static void draw_sprites(const bool behind) {
         GX_LoadTlut(&tlutSprObj[p], GX_TLUT0);
         GX_InitTexObjTlut(&chrTexObj, GX_TLUT0);
         GX_LoadTexObj(&chrTexObj, GX_TEXMAP0);
-        GX_Begin(GX_QUADS, GX_VTXFMT0, n * 4);
+        GX_Begin(GX_QUADS, GX_VTXFMT0, n * 4 * quads_per_sprite);
         for (int s = 0; s < OAM_SPRITES; s++) {
             const oam::sprite_t &o = oam[s];
             if ((o.attributes & 0x03) != p)            continue;
             if (((o.attributes & 0x20) != 0) != behind) continue;
             const int sx = static_cast<int>(o.x);
             const int sy = static_cast<int>(o.y) + 1;
-            if (sx <= -8 || sx >= vpw || sy <= -8 || sy >= 240) continue;
-            const int ti = atlas0 + o.tile;
-            quad((ti & 15) * 8, (ti >> 4) * 8, sx, sy,
-                 (o.attributes & 0x40) != 0, (o.attributes & 0x80) != 0);
+            if (sx <= -8 || sx >= vpw || sy <= -height || sy >= 240) continue;
+            const bool flipH = (o.attributes & 0x40) != 0;
+            const bool flipV = (o.attributes & 0x80) != 0;
+            if (!tall) {
+                const int ti = atlas0 + o.tile;
+                quad((ti & 15) * 8, (ti >> 4) * 8, sx, sy, flipH, flipV);
+                continue;
+            }
+            // 8x16: tile bit 0 selects the pattern table (overriding SPRITE_ADDR),
+            // tile & 0xFE is the top-half tile of the pair. A vertical flip swaps
+            // which half draws on top as well as flipping each half's rows.
+            const int pair = (o.tile & 1) * 256 + (o.tile & 0xFE);
+            const int top_ti = pair + (flipV ? 1 : 0);
+            const int bot_ti = pair + (flipV ? 0 : 1);
+            quad((top_ti & 15) * 8, (top_ti >> 4) * 8, sx, sy,     flipH, flipV);
+            quad((bot_ti & 15) * 8, (bot_ti >> 4) * 8, sx, sy + 8, flipH, flipV);
         }
         GX_End();
     }
@@ -422,6 +444,17 @@ static void render_gx() {
     gx_mode_tiles();
 
     if (bg || spr) {
+        // A mapper (MMC3) switched a CHR bank since the atlas was last built --
+        // re-expand all 512 tiles through the translator. Gated on the
+        // generation counter so an unbanked (NROM) game never pays this cost
+        // past the one build already done in init(). GX_InvalidateTexAll below
+        // already runs unconditionally every frame (for the TLUT rebuild), so
+        // it covers invalidating the GPU's cached copy of chr_atlas too.
+        if (chr_built_gen != ppu::chrGeneration) {
+            build_chr_atlas();
+            chr_built_gen = ppu::chrGeneration;
+        }
+
         build_tluts();
         GX_InvalidateTexAll();
 
@@ -586,6 +619,7 @@ void irq::init() {
     // --- GX-NATIVE resources ----------------------------------------------
     chr_atlas = static_cast<u8 *>(memalign(32, ATLAS_W * ATLAS_H / 2));
     build_chr_atlas();
+    chr_built_gen = ppu::chrGeneration;
     GX_InitTexObjCI(&chrTexObj, chr_atlas, ATLAS_W, ATLAS_H, GX_TF_CI4,
                     GX_CLAMP, GX_CLAMP, GX_FALSE, GX_TLUT0);
     GX_InitTexObjFilterMode(&chrTexObj, GX_NEAR, GX_NEAR);

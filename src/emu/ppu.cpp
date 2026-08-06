@@ -35,6 +35,7 @@ bool mirroring;
 namespace ppu {
 u8 PPUCTRL;
 u8 PPUMASK;
+u32 chrGeneration;
 }   // namespace ppu
 
 const u8 *patternTable = CHR_ROM;
@@ -54,6 +55,10 @@ static ppu::TileTranslator tileTranslator = &NROM::GetTileLMA;
 
 void ppu::BindTileTranslator(const TileTranslator fn) {
     tileTranslator = fn;
+}
+
+u32 ppu::ResolveTile(const u16 tileVMA) {
+    return tileTranslator(tileVMA);
 }
 
 static constexpr u32 nes_rgb[64] = {
@@ -122,6 +127,7 @@ void GenerateFrame(u32 *fb, const int stride) {
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
     const int spr_base = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
+    const int spr_h    = (ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE) ? 16 : 8;
 
     /* PPU Y counter: the absolute VRAM row currently being sourced.
      * Initialised from yScroll, then auto-incremented after each scanline.
@@ -139,7 +145,7 @@ void GenerateFrame(u32 *fb, const int stride) {
         int n_line = 0;
         if (ppu::PPUMASK & ppu::mask::SPRITE) {
             for (size_t s = 0; s < OAM_SPRITES && n_line < 64; s++) {
-                if (const int sy = static_cast<int>(oamShadow[s].y) + 1; py >= sy && py < sy + 8)
+                if (const int sy = static_cast<int>(oamShadow[s].y) + 1; py >= sy && py < sy + spr_h)
                     line_spr[n_line++] = static_cast<int>(s);
             }
         }
@@ -229,11 +235,24 @@ void GenerateFrame(u32 *fb, const int stride) {
                         if (px < sx || px >= sx + 8) continue;
                         const int sy      = static_cast<int>(y + 1);
                         const u8 att = attributes;
-                        const int row     = (att & 0x80) ? (7 - (py - sy)) : (py - sy);
+                        const int row     = (att & 0x80) ? (spr_h - 1 - (py - sy)) : (py - sy);
                         const int col_bit = (att & 0x40) ? (px - sx) : (7 - (px - sx));
-                        const int addr    = spr_base + tile * 16 + row;
-                        const int cidx    = ((patternTable[addr]      >> col_bit) & 1)
-                                          | (((patternTable[addr + 8]  >> col_bit) & 1) << 1);
+                        /* 8x16 mode: tile bit 0 selects the pattern table (overriding
+                         * SPRITE_ADDR) and row>>3 picks the top/bottom tile of the pair;
+                         * row already accounts for vertical flip above, so this falls out
+                         * of the same formula real hardware uses. */
+                        const int addr    = (spr_h == 16)
+                            ? ((tile & 1) ? 0x1000 : 0x0000) + (tile & 0xFE) * 16 + (row >> 3) * 16 + (row & 7)
+                            : spr_base + tile * 16 + row;
+                        /* Route through the mapper's tile translator, same as the BG
+                         * fetch above -- CHR-bank-switching mappers (MMC3) need this to
+                         * pick the right physical bank for sprites too. addr already
+                         * sits in $0000-$1FFF PPU space, so in 8x16 mode it naturally
+                         * lands in whichever half (R0/R1 vs R2-R5 windows) the tile's
+                         * pattern-table bit selected -- no extra bank logic needed here. */
+                        const u32 spr_lma = tileTranslator(static_cast<u16>(addr));
+                        const int cidx    = ((patternTable[spr_lma]      >> col_bit) & 1)
+                                          | (((patternTable[spr_lma + 8]  >> col_bit) & 1) << 1);
                         if (cidx == 0) continue;
                         spr_nes    = paletteRAM[0x10 + (att & 0x03) * 4 + cidx];
                         spr_behind = att & 0x20;

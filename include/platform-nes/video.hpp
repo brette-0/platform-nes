@@ -482,7 +482,11 @@ namespace ppu {
           GEN_NMI     = 0x80, /**< Generate NMI on VBlank. */
           POLARITY    = 0x04, /**< VRAM address auto-increment direction (horizontal/vertical). */
           BG_ADDR     = 0x10, /**< Background pattern table at \$1000 (otherwise \$0000). */
-          SPRITE_ADDR = 0x08  /**< Sprite pattern table at \$1000 (otherwise \$0000). */
+          SPRITE_ADDR = 0x08, /**< Sprite pattern table at \$1000 (otherwise \$0000). Ignored in 8x16 mode. */
+          /** @brief 8x16 sprites. ::oam::sprite_t::tile bit 0 then selects the
+           *  pattern table (overriding ::SPRITE_ADDR) and bits 7-1 select the tile
+           *  pair: top tile is `tile & 0xFE`, bottom tile is `(tile & 0xFE) + 1`. */
+          SPRITE_SIZE = 0x20
       };
     }
 
@@ -577,6 +581,36 @@ namespace ppu {
      * @param fn Translator to install; replaces whatever was bound before.
      */
     void BindTileTranslator(TileTranslator fn);
+
+    /**
+     * @brief Resolves a PPU-space tile address through the currently-bound
+     *        ::TileTranslator.
+     *
+     * The emu PPU's own per-pixel background/sprite fetches (src/emu/ppu.cpp)
+     * call the bound translator directly and don't need this. It exists for
+     * the native-hardware-2D backends (GBA/DS/3DS/GameCube-Wii), which bake a
+     * whole tile atlas rather than fetching per pixel and so need to resolve
+     * CHR bank state without holding the translator function pointer
+     * themselves -- see ::chrGeneration for how they know when to call it.
+     *
+     * @param tileVMA PPU pattern-table address, 0x0000-0x1FFF.
+     * @return        Byte offset to index ::CHR_ROM with.
+     */
+    u32 ResolveTile(u16 tileVMA);
+
+    /**
+     * @brief Bumped by a mapper every time it switches a CHR bank off-NES.
+     *
+     * The per-pixel software rasterizer (src/emu/ppu.cpp) re-resolves every
+     * tile fetch through ::TileTranslator already, so it never needs this.
+     * It exists for the native-hardware-2D backends (GBA/DS/3DS/GameCube-Wii)
+     * that instead bake a whole tile atlas once and index into it by NES tile
+     * number: they compare this counter once per frame against the value they
+     * last rebuilt at, and re-bake the atlas (through ::TileTranslator) only
+     * when it has moved, rather than re-expanding all 512 tiles every frame
+     * regardless of whether any CHR bank actually changed.
+     */
+    extern u32 chrGeneration;
 #endif
 }
 #if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)

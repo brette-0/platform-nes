@@ -91,8 +91,12 @@ int  g_bg = 0;                                   // bgInit() handle for BG0
 // BG tilemap shadow (built in RAM, DMA'd to VRAM during VBlank). 64x32 entries
 // laid out as two side-by-side 32x32 screenblocks (the BgSize_T_512x256 layout).
 alignas(4) u16 g_map_shadow[MAP_COLS * MAP_ROWS];
-// 4bpp CHR staged in RAM at init, then uploaded to BG + OBJ tile VRAM.
+// 4bpp CHR staged in RAM at init and whenever a mapper (e.g. MMC3) switches a
+// CHR bank, then uploaded to BG + OBJ tile VRAM.
 alignas(4) u8  g_chr4[CHR_TILES * DS_TILE_SZ];
+// Generation of ::ppu::chrGeneration the atlas above was last built from.
+// Sentinel (not 0, ::chrGeneration's own initial value) forces the first build.
+u32 g_chr_built_gen = ~0u;
 
 // Per-scanline scroll. The main thread builds into sh_*; the HBlank ISR reads
 // the live g_* copies. They are swapped during VBlank so the ISR never reads a
@@ -119,6 +123,23 @@ void expand_tile(const u8* nes, u8* out) {
             const u8 vr = ((p0 >> (7 - cr)) & 1) | (((p1 >> (7 - cr)) & 1) << 1);
             out[row * 4 + c2] = static_cast<u8>(vl | (vr << 4));
         }
+    }
+}
+
+// Rebuild the 4bpp CHR atlas from CHR_ROM, resolving each of the 512 PPU tile
+// slots through the mapper's currently-bound translator. NROM's translator is
+// the identity function, so this is byte-for-byte what the old one-shot init
+// loop did; a bank-switching mapper (MMC3) instead pulls each tile from
+// whatever physical CHR bank is presently switched into that PPU address, the
+// same resolution the per-pixel software rasterizer does on every fetch. Only
+// touches g_chr4 (RAM) -- safe to run any time; the VRAM upload is a separate
+// step (see WaitForPresent) deferred to VBlank like this backend's other
+// VRAM commits. Called only when ::ppu::chrGeneration has moved since the
+// last build.
+void build_chr_atlas() {
+    for (int t = 0; t < CHR_TILES; t++) {
+        const u32 lma = ppu::ResolveTile(static_cast<u16>(t * 16));
+        expand_tile(CHR_ROM + lma, g_chr4 + t * DS_TILE_SZ);
     }
 }
 
@@ -170,7 +191,9 @@ void build_map() {
 // map to OBJ 0..63; off-screen sprites are hidden.
 void build_sprites() {
     const oam::sprite_t* oam = emu::OamShadow();
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
+    const bool tall   = ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE;
+    const int  height = tall ? 16 : 8;
+    const int  atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
 
     // Sprites carry raw NES screen-space Y -- physics always runs on the full
     // 240-line frame regardless of the shorter DS panel -- so every OBJ must be
@@ -192,7 +215,7 @@ void build_sprites() {
         const int sx = static_cast<int>(o.x);
         const int sy = static_cast<int>(o.y) + 1 - voff;
 
-        if (sx <= -8 || sx >= 256 || sy <= -8 || sy >= SCREEN_H) {
+        if (sx <= -8 || sx >= 256 || sy <= -height || sy >= SCREEN_H) {
             oamClearSprite(&oamMain, s);
             continue;
         }
@@ -201,11 +224,14 @@ void build_sprites() {
         const bool behind = (o.attributes & 0x20) != 0;
         const bool hflip  = (o.attributes & 0x40) != 0;
         const bool vflip  = (o.attributes & 0x80) != 0;
-        const int  ti     = atlas0 + o.tile;
+        // 8x16: tile bit 0 selects the pattern table (overriding SPRITE_ADDR/atlas0);
+        // libnds reads tile N then N+1 for a 1D-mapped 8x16 OBJ, matching the NES's
+        // (tile & 0xFE)/(tile & 0xFE)+1 pair, so no extra per-row work is needed.
+        const int  ti     = tall ? ((o.tile & 1) * 256 + (o.tile & 0xFE)) : (atlas0 + o.tile);
 
         oamSet(&oamMain, s, sx, sy,
                behind ? PRIO_SPR_BEHIND : PRIO_SPR_FRONT,
-               pal, SpriteSize_8x8, SpriteColorFormat_16Color,
+               pal, tall ? SpriteSize_8x16 : SpriteSize_8x8, SpriteColorFormat_16Color,
                oamGetGfxPtr(&oamMain, ti),
                -1, false, false, hflip, vflip, false);
     }
@@ -245,6 +271,14 @@ void WaitForPresent() {
     const bool bg  = ppu::PPUMASK & ppu::mask::BG;
     const bool spr = ppu::PPUMASK & ppu::mask::SPRITE;
 
+    // A mapper (MMC3) switched a CHR bank since the atlas was last built --
+    // re-expand all 512 tiles through the translator (VRAM upload is deferred
+    // to the VBlank window below, alongside every other VRAM commit this
+    // backend makes). Gated on the generation counter so an unbanked (NROM)
+    // game never pays this cost past the one build already done in init().
+    const bool chr_dirty = g_chr_built_gen != ppu::chrGeneration;
+    if (chr_dirty) build_chr_atlas();
+
     // Default the scroll table so disabled / empty scanlines are well-defined.
     for (int i = 0; i < SCREEN_H; i++) { sh_h[i] = 0; sh_v[i] = 0; }
 
@@ -260,6 +294,13 @@ void WaitForPresent() {
 
     // Pace to the hardware frame, then commit all VRAM writes during VBlank.
     swiWaitForVBlank();
+
+    if (chr_dirty) {
+        DC_FlushRange(g_chr4, sizeof g_chr4);
+        dmaCopy(g_chr4, bgGetGfxPtr(g_bg),         sizeof g_chr4);
+        dmaCopy(g_chr4, oamGetGfxPtr(&oamMain, 0), sizeof g_chr4);
+        g_chr_built_gen = ppu::chrGeneration;
+    }
 
     build_palettes();
 
@@ -304,15 +345,18 @@ void irq::init() {
 
     oamInit(&oamMain, SpriteMapping_1D_32, false);
 
-    // Expand the whole CHR ROM to 4bpp once and upload it to both BG and OBJ tile
-    // VRAM. With 1D_32 OBJ mapping an 8x8 16-colour tile is exactly one 32-byte
-    // slot, so the BG tile layout and the OBJ tile layout are identical and one
-    // staged buffer feeds both.
-    for (int t = 0; t < CHR_TILES; t++)
-        expand_tile(CHR_ROM + t * 16, g_chr4 + t * DS_TILE_SZ);
+    // Expand the CHR ROM to 4bpp and upload it to both BG and OBJ tile VRAM.
+    // With 1D_32 OBJ mapping an 8x8 16-colour tile is exactly one 32-byte
+    // slot, so the BG tile layout and the OBJ tile layout are identical and
+    // one staged buffer feeds both. build_chr_atlas resolves through the
+    // mapper's tile translator, so this also picks up NROM's default
+    // (unbanked) CHR. The display isn't running yet, so (unlike the
+    // per-frame path) the VRAM upload can happen immediately.
+    build_chr_atlas();
     DC_FlushRange(g_chr4, sizeof g_chr4);
     dmaCopy(g_chr4, bgGetGfxPtr(g_bg),            sizeof g_chr4);
     dmaCopy(g_chr4, oamGetGfxPtr(&oamMain, 0),    sizeof g_chr4);
+    g_chr_built_gen = ppu::chrGeneration;
 
     // video::vram_bytes() (video.hpp): the DS's 32x24 viewport is at or under
     // the NES's native 32x30, so this resolves to the NES-hardware minimum

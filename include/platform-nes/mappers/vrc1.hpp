@@ -24,6 +24,9 @@
 #include <utility>
 
 #include <platform-nes/technology.hpp>
+#ifndef TARGET_NES
+#include <platform-nes/video.hpp>
+#endif
 
 using namespace br0::intsh;
 
@@ -213,6 +216,7 @@ public:
         (void)reg;
         constexpr u8 idx = (addr == 0xe000) ? 0 : 1;
         chrBanks[idx] = bank & 0x1F;
+        ++ppu::chrGeneration;
 #endif
     }
 

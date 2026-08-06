@@ -119,6 +119,8 @@ inline u16 BGCNT_CHARBASE(int n) { return static_cast<u16>(n << 2); }  // bits 2
 inline u16 BGCNT_MAPBASE(int n)  { return static_cast<u16>(n << 8); }  // bits 8-12
 
 constexpr u16 ATTR0_DISABLE = 0x0200;   // affine flag 0 + disable bit -> hidden
+// libgba's gba_sprites.h already defines ATTR0_TALL (OBJ_SHAPE(TALL), bits 14-15
+// = 10b); size 00b under that shape is 8x16, so no extra size OR term is needed.
 constexpr u16 ATTR1_HFLIP   = 0x1000;
 constexpr u16 ATTR1_VFLIP   = 0x2000;
 // 16-colour (attr0 bit13=0), square shape (attr0 bits14-15=0) and 8x8 size
@@ -144,12 +146,15 @@ struct ObjAttr { u16 a0, a1, a2, fill; };
 // Kept in IWRAM (the default .bss section on the GBA) so build_map's per-frame
 // writes are zero-waitstate.
 alignas(4) u16 g_map_shadow[MAP_COLS * MAP_ROWS];
-// 4bpp CHR staged at init, then uploaded to BG + OBJ tile VRAM. This buffer is
-// 16 KB and used ONLY at init, so it is parked in EWRAM rather than eating half
-// of the scarce 32 KB IWRAM -- that space is reserved for the per-frame .bss
-// shadows above and the hot IWRAM_CODE functions below. (EWRAM is otherwise
-// idle on this backend, and init-time speed is irrelevant.)
+// 4bpp CHR staged at init and whenever a mapper (e.g. MMC3) switches a CHR
+// bank, then uploaded to BG + OBJ tile VRAM. This buffer is 16 KB and rebuilt
+// only on a CHR bank change (see build_chr_atlas), so it is parked in EWRAM
+// rather than eating half of the scarce 32 KB IWRAM -- that space is reserved
+// for the per-frame .bss shadows above and the hot IWRAM_CODE functions below.
 EWRAM_BSS alignas(4) u8 g_chr4[CHR_TILES * GBA_TILE_SZ];
+// Generation of ::ppu::chrGeneration the atlas above was last built from.
+// Sentinel (not 0, ::chrGeneration's own initial value) forces the first build.
+u32 g_chr_built_gen = ~0u;
 // OAM shadow (all 128 OBJ); built each frame, DMA'd to OAM during VBlank.
 alignas(4) ObjAttr g_oam_shadow[128];
 
@@ -178,6 +183,29 @@ void expand_tile(const u8* nes, u8* out) {
             const u8 vr = ((p0 >> (7 - cr)) & 1) | (((p1 >> (7 - cr)) & 1) << 1);
             out[row * 4 + c2] = static_cast<u8>(vl | (vr << 4));
         }
+    }
+}
+
+// Rebuild the 4bpp CHR atlas from CHR_ROM, resolving each of the 512 PPU tile
+// slots through the mapper's currently-bound translator. NROM's translator is
+// the identity function, so this is byte-for-byte what the old one-shot init
+// loop did; a bank-switching mapper (MMC3) instead pulls each tile from
+// whatever physical CHR bank is presently switched into that PPU address, the
+// same resolution the per-pixel software rasterizer does on every fetch. Only
+// called when ::ppu::chrGeneration has moved since the last build (see
+// WaitForPresent), since re-expanding all 512 tiles every frame regardless
+// would cost real time on this backend's wait-stated ARM7.
+// IWRAM_CODE: runs whenever a CHR bank switch lands mid-gameplay, not just at
+// init, so it needs to be off the slow GamePak ROM bus like the other hot
+// per-frame builders.
+// Only touches g_chr4 (EWRAM) -- safe to run any time, including outside
+// VBlank. The VRAM upload is a separate step (see WaitForPresent) so it can
+// be deferred to the VBlank window like every other VRAM commit this backend
+// makes, keeping this one's extra CPU cost off the tear-sensitive path.
+IWRAM_CODE void build_chr_atlas() {
+    for (int t = 0; t < CHR_TILES; t++) {
+        const u32 lma = ppu::ResolveTile(static_cast<u16>(t * 16));
+        expand_tile(CHR_ROM + lma, g_chr4 + t * GBA_TILE_SZ);
     }
 }
 
@@ -239,7 +267,9 @@ IWRAM_CODE void build_map() {
 // IWRAM_CODE: runs every frame (64 OBJ); kept off the ROM bus like build_map.
 IWRAM_CODE void build_sprites() {
     const oam::sprite_t* oam = emu::OamShadow();
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
+    const bool tall   = ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE;
+    const int  height = tall ? 16 : 8;
+    const int  atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
 
     // Sprites carry raw NES screen-space Y -- physics always runs on the full
     // 240-line frame regardless of the shorter GBA panel -- so every OBJ must be
@@ -259,7 +289,7 @@ IWRAM_CODE void build_sprites() {
         const int sy = static_cast<int>(o.y) + 1 - voff;
 
         // Clip against the 240x160 panel (narrower AND shorter than the NES).
-        if (sx <= -8 || sx >= 240 || sy <= -8 || sy >= SCREEN_H) {
+        if (sx <= -8 || sx >= 240 || sy <= -height || sy >= SCREEN_H) {
             g_oam_shadow[s].a0 = ATTR0_DISABLE;
             continue;
         }
@@ -268,12 +298,18 @@ IWRAM_CODE void build_sprites() {
         const bool behind = (o.attributes & 0x20) != 0;
         const bool hflip  = (o.attributes & 0x40) != 0;
         const bool vflip  = (o.attributes & 0x80) != 0;
-        const int  ti     = atlas0 + o.tile;
+        // 8x16: tile bit 0 selects the pattern table (overriding SPRITE_ADDR/atlas0)
+        // and the low tile of the pair (tile & 0xFE) is the top half; the CHR atlas
+        // already lays tiles 0-255/256-511 out as the two pattern tables, and 1D OBJ
+        // mapping reads tile N then N+1 for a 1-tile-wide, 2-tile-tall OBJ -- which is
+        // exactly the NES's (tile & 0xFE)/(tile & 0xFE)+1 pair, so hardware does the
+        // rest with no extra per-row work.
+        const int  ti     = tall ? ((o.tile & 1) * 256 + (o.tile & 0xFE)) : (atlas0 + o.tile);
         const int  prio   = behind ? PRIO_SPR_BEHIND : PRIO_SPR_FRONT;
 
         // OAM x is 9-bit and y 8-bit; masking lets a sprite straddle the left/top
         // edge via hardware wrap (the clip above already drops fully-off ones).
-        g_oam_shadow[s].a0 = static_cast<u16>(sy & 0xFF);
+        g_oam_shadow[s].a0 = static_cast<u16>((sy & 0xFF) | (tall ? ATTR0_TALL : 0));
         g_oam_shadow[s].a1 = static_cast<u16>((sx & 0x1FF)
                                             | (hflip ? ATTR1_HFLIP : 0)
                                             | (vflip ? ATTR1_VFLIP : 0));
@@ -336,6 +372,14 @@ IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
     const bool bg  = ppu::PPUMASK & ppu::mask::BG;
     const bool spr = ppu::PPUMASK & ppu::mask::SPRITE;
 
+    // A mapper (MMC3) switched a CHR bank since the atlas was last built --
+    // re-expand all 512 tiles through the translator (VRAM upload is deferred
+    // to the VBlank window below, alongside every other VRAM commit this
+    // backend makes). Gated on the generation counter so an unbanked (NROM)
+    // game never pays this cost past the one build already done in init().
+    const bool chr_dirty = g_chr_built_gen != ppu::chrGeneration;
+    if (chr_dirty) build_chr_atlas();
+
     // Default the scroll table so disabled / empty scanlines are well-defined.
     for (int i = 0; i < SCREEN_H; i++) { sh_h[i] = 0; sh_v[i] = 0; }
 
@@ -351,6 +395,12 @@ IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
 
     // Pace to the hardware frame, then commit all VRAM writes during VBlank.
     VBlankIntrWait();
+
+    if (chr_dirty) {
+        dmaCopy(g_chr4, bg_tiles(),  sizeof g_chr4);
+        dmaCopy(g_chr4, obj_tiles(), sizeof g_chr4);
+        g_chr_built_gen = ppu::chrGeneration;
+    }
 
     build_palettes();
 
@@ -404,14 +454,17 @@ void irq::init() {
     // charblock 0, map in screenblock 8 (right after the 16 KB tile atlas).
     REG_BG0CNT = static_cast<u16>(PRIO_BG | BGCNT_CHARBASE(0) | BGCNT_MAPBASE(8) | BGCNT_512x256);
 
-    // Expand the whole CHR ROM to 4bpp once and upload it to both BG and OBJ tile
-    // VRAM. With 1D OBJ mapping an 8x8 16-colour tile is exactly one 32-byte slot,
-    // so the BG tile layout and the OBJ tile layout are identical and one staged
-    // buffer feeds both.
-    for (int t = 0; t < CHR_TILES; t++)
-        expand_tile(CHR_ROM + t * 16, g_chr4 + t * GBA_TILE_SZ);
+    // Expand the CHR ROM to 4bpp and upload it to both BG and OBJ tile VRAM.
+    // With 1D OBJ mapping an 8x8 16-colour tile is exactly one 32-byte slot, so
+    // the BG tile layout and the OBJ tile layout are identical and one staged
+    // buffer feeds both. build_chr_atlas resolves through the mapper's tile
+    // translator, so this also picks up NROM's default (unbanked) CHR. The
+    // display isn't running yet, so (unlike the per-frame path) the VRAM
+    // upload can happen immediately rather than waiting for VBlank.
+    build_chr_atlas();
     dmaCopy(g_chr4, bg_tiles(),  sizeof g_chr4);
     dmaCopy(g_chr4, obj_tiles(), sizeof g_chr4);
+    g_chr_built_gen = ppu::chrGeneration;
 
     // Hide every OBJ up front (the 64 NES sprites use OBJ 0..63; 64..127 stay off).
     for (int s = 0; s < 128; s++) g_oam_shadow[s].a0 = ATTR0_DISABLE;

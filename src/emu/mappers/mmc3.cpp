@@ -39,6 +39,7 @@ u8   mmc3::banks[6] = {};
 
 void mmc3::NotifyCHRWrite(const u8 index, const u8 bank) {
     banks[index] = bank;
+    ++ppu::chrGeneration;
 }
 
 void mmc3::SetCHRMode(const bool largeWindowsAtFront) {

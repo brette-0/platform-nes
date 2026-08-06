@@ -71,6 +71,9 @@ static C3D_Tex   atlas_spr[4];
 static u32      *atlas_scratch;          // linear ARGB->tex staging (ATLAS_W*ATLAS_H)
 static u8        palette_cache[32];      // last paletteRAM seen
 static bool      palette_valid = false;
+// Generation of ::ppu::chrGeneration the atlases were last baked from.
+// Sentinel (not 0, ::chrGeneration's own initial value) forces the first bake.
+static u32       chr_built_gen = ~0u;
 
 // The fixed NES master palette (ARGB8888, 0xAARRGGBB), shared verbatim with the
 // software PPU in src/emu/ppu.cpp; here it only seeds the baked atlases.
@@ -117,7 +120,7 @@ static inline u32 to_tex(const u32 argb) {
 static void bake_atlas(u32 *buf, const int p, const bool spr) {
     const int base = (spr ? 0x10 : 0) + p * 4;
     for (int ti = 0; ti < 512; ti++) {
-        const u8 *tile = CHR_ROM + ti * 16;
+        const u8 *tile = CHR_ROM + ppu::ResolveTile(static_cast<u16>(ti * 16));
         const int ax = (ti & 15) * 8;
         const int ay = (ti >> 4) * 8;
         for (int ry = 0; ry < 8; ry++) {
@@ -148,12 +151,14 @@ static void upload_atlas(u32 *buf, C3D_Tex *tex) {
         GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
 }
 
-// Rebuild every atlas iff paletteRAM changed since the last frame. The bake +
-// eight display transfers are the only per-pixel work in the backend, and they
-// run only on a genuine palette change (near-never in this demo). Must run
-// outside C3D_FrameBegin/End.
+// Rebuild every atlas iff paletteRAM or the mapper's CHR banks (MMC3 etc. --
+// see ::ppu::chrGeneration) changed since the last frame. The bake + eight
+// display transfers are the only per-pixel work in the backend, and they run
+// only on a genuine palette or CHR-bank change (near-never in this demo).
+// Must run outside C3D_FrameBegin/End.
 static void maybe_rebuild_atlases() {
-    if (palette_valid && std::memcmp(palette_cache, paletteRAM, 32) == 0) return;
+    const bool chr_dirty = chr_built_gen != ppu::chrGeneration;
+    if (!chr_dirty && palette_valid && std::memcmp(palette_cache, paletteRAM, 32) == 0) return;
     for (int p = 0; p < 4; p++) {
         bake_atlas(atlas_scratch, p, false);
         upload_atlas(atlas_scratch, &atlas_bg[p]);
@@ -161,7 +166,8 @@ static void maybe_rebuild_atlases() {
         upload_atlas(atlas_scratch, &atlas_spr[p]);
     }
     std::memcpy(palette_cache, paletteRAM, 32);
-    palette_valid = true;
+    palette_valid  = true;
+    chr_built_gen  = ppu::chrGeneration;
 }
 
 // citro2d UVs are bottom-up: v == 1.0 is texel row 0, so texel row R maps to
@@ -295,8 +301,10 @@ static void draw_bg_band(const int y0, const int y1, const u16 xs, const u16 ys)
 // the PPU). Mirrors OGC draw_sprites.
 static void draw_sprites(const bool behind) {
     const oam::sprite_t *oam = emu::OamShadow();
-    const int vpw    = video::viewport_px();
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
+    const int  vpw    = video::viewport_px();
+    const bool tall   = ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE;
+    const int  height = tall ? 16 : 8;
+    const int  atlas0 = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 256 : 0;
 
     for (int p = 0; p < 4; p++) {
         for (int s = 0; s < OAM_SPRITES; s++) {
@@ -305,9 +313,19 @@ static void draw_sprites(const bool behind) {
             if (((o.attributes & 0x20) != 0) != behind) continue;
             const int sx = static_cast<int>(o.x);
             const int sy = static_cast<int>(o.y) + 1;
-            if (sx <= -8 || sx >= vpw || sy <= -8 || sy >= 240) continue;
-            draw_spr_tile(&atlas_spr[p], atlas0 + o.tile, sx, sy,
-                          (o.attributes & 0x40) != 0, (o.attributes & 0x80) != 0);
+            if (sx <= -8 || sx >= vpw || sy <= -height || sy >= 240) continue;
+            const bool flipH = (o.attributes & 0x40) != 0;
+            const bool flipV = (o.attributes & 0x80) != 0;
+            if (!tall) {
+                draw_spr_tile(&atlas_spr[p], atlas0 + o.tile, sx, sy, flipH, flipV);
+                continue;
+            }
+            // 8x16: tile bit 0 selects the pattern table (overriding SPRITE_ADDR),
+            // tile & 0xFE is the top-half tile of the pair. A vertical flip swaps
+            // which half draws on top as well as flipping each half's rows.
+            const int pair = (o.tile & 1) * 256 + (o.tile & 0xFE);
+            draw_spr_tile(&atlas_spr[p], pair + (flipV ? 1 : 0), sx, sy,          flipH, flipV);
+            draw_spr_tile(&atlas_spr[p], pair + (flipV ? 0 : 1), sx, sy + 8,      flipH, flipV);
         }
     }
 }
