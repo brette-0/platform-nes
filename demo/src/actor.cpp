@@ -46,8 +46,8 @@ static void TranslateWorldSpace(vec2<u16>& worldSpace, const vec2<i8> delta) {
 void Actor::Start() {this->start(this);}
 void Actor::Update() {this->update(this);}
 
-oam::oam_t AdjustSpriteY(const Actor* self, const u16 i) {
-    return static_cast<oam::oam_t>(self->screen.y + (i >> 1) * 8);
+oam::oam_t AdjustSpriteY(const Actor* self, const u16) {
+    return static_cast<oam::oam_t>(self->screen.y);
 }
 
 oam::oam_t AdjustSpriteX(const Actor* self, const u16 i) {

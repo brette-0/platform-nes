@@ -21,10 +21,17 @@ CHARACTER_ROM_BEGIN(chrSprite0)
 #embed "../../chr/sprites/sprite0.chr"
 CHARACTER_ROM_END(chrSprite0, CHR_ORIGIN);
 
+// chrSprite0 is a single tile, landing chrPlayerStanding on an odd tile id.
+// Hardware 8x16 sprites pack the top/bottom tile of a pair as (tile & 0xFE) /
+// (tile & 0xFE) + 1, so the pair's top tile must sit at an even local index --
+// pad one tile here to align chrPlayerStanding to an even boundary.
+CHARACTER_ROM_PAD_TO(chrSpriteAlignGap, chrSprite0,
+                      (chrSprite0_tile + chrSprite0_ntiles + 1) & ~1);
+
 // player sprite graphics
 CHARACTER_ROM_BEGIN(chrPlayerStanding)
 #embed "../../chr/sprites/player/standing.chr"
-CHARACTER_ROM_END(chrPlayerStanding, chrSprite0);
+CHARACTER_ROM_END(chrPlayerStanding, chrSpriteAlignGap);
 
 // power sprite graphics
 CHARACTER_ROM_BEGIN(chrBerries)

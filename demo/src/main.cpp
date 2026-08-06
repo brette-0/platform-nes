@@ -169,7 +169,7 @@ RESET {
     player2.Reset();
 #endif
     oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
-    ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
+    ppu::EnableRendering(ppu::ctrl::SPRITE_SIZE | ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
     apu::DisableFrameIRQ();
     apu::DisableDMCIRQ();
@@ -249,7 +249,7 @@ interrupt nmiHandler() {
 
 interrupt irqHandler() {
     mmc3::AcknowledgeScanlineIRQ();
-    tech::SpinWait(40);
+    tech::SpinWait(0);
     ApplyHudSplit();
 }
 

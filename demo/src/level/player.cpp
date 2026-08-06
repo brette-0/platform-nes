@@ -20,20 +20,18 @@ static u8 PlayerPort(const Player* p)     { return p == &player1 ? port1     : p
 static u8 PlayerLastPort(const Player* p) { return p == &player1 ? lastPort1 : lastPort2; }
 
 // Direct OAM writes replace OAMFromProvider's per-sprite function-pointer calls
-// (4 indirect JSRs + loop overhead ~140 cycles) with 4 plain stores each.
-// AdjustSpriteY: y + (i>>1)*8  →  rows 0,1 get sy; rows 2,3 get sy+8.
-// AdjustSpriteX: x + (i&1)*8   →  cols 0,2 get sx; cols 1,3 get sx+8.
+// (2 indirect JSRs + loop overhead) with 2 plain stores each. Mary is two
+// hardware 8x16 columns (see msMary in metasprites.cpp), so each is 16px
+// tall already -- no per-row Y split needed, just the left/right X offset.
 static void PlayerRefreshY(const Player* p) {
     oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
     const oam::oam_t sy = p->actor.screen.y;
     s[0].y = sy;         s[1].y = sy;
-    s[2].y = sy + 8u;    s[3].y = sy + 8u;
 }
 static void PlayerRefreshX(const Player* p) {
     oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
     const oam::oam_t sx = p->actor.screen.x;
     s[0].x = sx;         s[1].x = sx + 8u;
-    s[2].x = sx;         s[3].x = sx + 8u;
 }
 
 // ---------------------------------------------------------------------------
