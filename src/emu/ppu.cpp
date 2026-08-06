@@ -137,8 +137,6 @@ void GenerateFrame(u32 *fb, const int stride) {
     int ppu_y = (int)yScroll;
     yScroll_written = 0;
 
-    bool irq_fired = false;
-
     for (int py = 0; py < vph; py++) {
         /* Sprites use screen-space Y -- they don't scroll with the background. */
         int line_spr[64];
@@ -152,17 +150,21 @@ void GenerateFrame(u32 *fb, const int stride) {
 
         int seg_start = 0;
         while (seg_start < vpw) {
-            /* Check whether the single pending IRQ falls on this scanline. */
+            /* Check whether the pending IRQ falls on this scanline. Consuming
+             * it (clearing irqPendingValid) rather than latching a local
+             * "already fired this frame" flag lets the handler re-arm a new
+             * position for the next hunk -- we keep seeking forward and can
+             * fire again later in the same frame, as many times as needed. */
             int seg_end = vpw;
             int fire    = 0;
-            if (!irq_fired && irq::irqPendingValid) {
-                const irq::irq_t& ev = irq::irqPending;
-                if (static_cast<int>(ev.py) < py
-                    || (static_cast<int>(ev.py) == py && static_cast<int>(ev.px) < seg_start)) {
-                    /* Already past — treat as fired without calling the handler. */
-                    irq_fired = true;
-                } else if (static_cast<int>(ev.py) == py) {
-                    seg_end = static_cast<int>(ev.px);
+            if (irq::irqPendingValid) {
+                const vec2<u16>& pos = irq::irqPosition;
+                if (static_cast<int>(pos.y) < py
+                    || (static_cast<int>(pos.y) == py && static_cast<int>(pos.x) < seg_start)) {
+                    /* Already past — consume without calling the handler. */
+                    irq::irqPendingValid = false;
+                } else if (static_cast<int>(pos.y) == py) {
+                    seg_end = static_cast<int>(pos.x);
                     fire    = 1;
                 }
             }
@@ -300,8 +302,10 @@ void GenerateFrame(u32 *fb, const int stride) {
              * If so, reset ppu_y to the new value -- the next segment (which
              * starts at seg_end) will derive wy from the updated counter. */
             if (fire) {
-                irq_fired = true;
-                if (irq::irqPending.fn) irq::irqPending.fn();
+                /* Clear before calling so a re-arm from inside the handler
+                 * (a new irqPosition for the next hunk) survives the call. */
+                irq::irqPendingValid = false;
+                if (irq::irqHandler) irq::irqHandler();
                 if (yScroll_written) {
                     ppu_y = static_cast<int>(yScroll);
                     yScroll_written = 0;
@@ -331,27 +335,32 @@ void GenerateBands(const band_emit_fn emit) {
     const int vph = video::viewport_py();
 
     yScroll_written = 0;
-    bool irq_fired  = false;
     int  band_start = 0;
     u16  cur_xs = xScroll;
     u16  cur_ys = yScroll;
 
     for (int py = 0; py < vph; py++) {
-        /* Fire the single pending IRQ when its scanline is reached. We band at
+        /* Fire the pending IRQ when its scanline is reached. We band at
          * scanline granularity (the px within a line is irrelevant to a tile
          * renderer), but still run the handler so game logic and the scroll
-         * write happen at the right raster position. */
-        if (!irq_fired && irq::irqPendingValid) {
-            const irq::irq_t& ev = irq::irqPending;
-            if (static_cast<int>(ev.py) < py) {
-                irq_fired = true;   // stale — past without firing
-            } else if (static_cast<int>(ev.py) == py) {
-                irq_fired = true;
+         * write happen at the right raster position. Consuming irqPendingValid
+         * here (rather than latching a local "already fired" flag) lets the
+         * handler re-arm a new position for the next hunk -- we keep seeking
+         * forward and can fire again later in the same frame, as many times
+         * as needed. */
+        if (irq::irqPendingValid) {
+            const vec2<u16>& pos = irq::irqPosition;
+            if (static_cast<int>(pos.y) < py) {
+                irq::irqPendingValid = false;   // stale — past without firing
+            } else if (static_cast<int>(pos.y) == py) {
                 if (py > band_start) {
                     emit(band_start, py, cur_xs, cur_ys);
                     band_start = py;
                 }
-                if (ev.fn) ev.fn();
+                /* Clear before calling so a re-arm from inside the handler
+                 * survives the call. */
+                irq::irqPendingValid = false;
+                if (irq::irqHandler) irq::irqHandler();
                 if (yScroll_written) {
                     cur_xs = xScroll;
                     cur_ys = yScroll;
@@ -551,6 +560,7 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     *latch = true;
     video::SetSpriteZeroHandler(px, py, fn);
-    irq::irqPending      = (irq::irq_t){ .fn = fn, .px = px, .py = py };
+    irq::irqHandler      = fn;
+    irq::irqPosition     = { px, py };
     irq::irqPendingValid = true;
 }

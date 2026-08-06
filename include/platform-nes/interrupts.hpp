@@ -21,6 +21,7 @@
 #include <intsh>
 using namespace br0::intsh;
 #include <cstddef>
+#include "types.hpp"
 
 /**
  * @brief Tags a function as an interrupt entry point.
@@ -58,25 +59,18 @@ namespace irq {
 typedef void (*irq_handler_fn)();
 
 /**
- * @brief A pending IRQ event queued for the renderer (desktop only).
- */
-typedef struct irq_t {
- irq_handler_fn fn; /**< Handler to invoke when this scanline fires. */
- u16 px; /**< Pixel X coordinate at which the IRQ should fire. */
- u16 py; /**< Pixel Y coordinate at which the IRQ should fire. */
-} irq_t;
-
-/**
- * @brief The single pending IRQ event for the renderer (desktop only).
+ * @brief Handler for the single pending IRQ event (desktop only).
  *
  * Callers write this slot directly to arm the next scanline IRQ --
  * overwriting it is a set, not an enqueue, so only one IRQ can be pending
- * at a time. Set ::irqPendingValid alongside it. The renderer fires it at
- * the matching pixel coordinate and clears ::irqPendingValid.
+ * at a time. Set alongside ::irqPosition and ::irqPendingValid. The
+ * renderer fires it at ::irqPosition and clears ::irqPendingValid.
  */
-extern irq_t   irqPending;
-/** @brief Non-zero when ::irq::irqPending holds a valid event. */
-extern bool    irqPendingValid;
+extern irq_handler_fn irqHandler;
+/** @brief Pixel coordinate at which ::irqHandler should fire (desktop only). */
+extern vec2<u16>      irqPosition;
+/** @brief Non-zero when ::irq::irqHandler / ::irq::irqPosition hold a valid event. */
+extern bool           irqPendingValid;
 
 #endif
 
@@ -420,7 +414,16 @@ void nmi_vector()
  * @brief Declares the IRQ handler on non-NES builds.
  *
  * Non-NES equivalent of ::NMI, for symmetry with NES source that defines
- * both vectors; not currently driven by any renderer backend.
+ * both vectors. Unlike ::NMI it isn't called directly by the renderer --
+ * instead it's the single fixed entry point that library code arms as
+ * ::irq::irqHandler for any *real* interrupt source (e.g.
+ * ::mmc3::ScheduleScanlineIRQ), matching the NES side where the hardware
+ * IRQ vector is one compile-time-fixed function no matter which mapper
+ * feature raised the interrupt -- only ::irq::irqPosition (the scanline)
+ * varies per source. Application-level convenience handlers that don't
+ * go through a real interrupt source (e.g.
+ * ::video::WaitThenReactToSpriteZero) instead arm their own callback
+ * directly and never touch this function.
  *
  * @note Named `irq_vector`, not `irq`, so it doesn't collide with the
  * `::irq` namespace at global scope -- see the NES-side ::IRQ's @note.
@@ -429,6 +432,18 @@ void nmi_vector()
  */
 #define IRQ                     \
 void irq_vector()
+
+/**
+ * @brief Forward declaration of the application's ::IRQ handler (non-NES).
+ *
+ * Lets library code that schedules a real interrupt (e.g.
+ * ::mmc3::ScheduleScanlineIRQ) arm ::irq::irqHandler with this fixed
+ * entry point without depending on the application's translation unit.
+ * Defined once by the application's own `IRQ() { ... }`, the same way
+ * every backend's `extern void nmi_vector();` pairs with the
+ * application's `NMI() { ... }`.
+ */
+extern void irq_vector();
 
 /**
  * @brief Non-NES equivalent of ::NAKED_NMI.

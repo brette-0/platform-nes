@@ -23,6 +23,7 @@
  */
 #include <platform-nes/mappers/mmc3.hpp>
 #include <platform-nes/video.hpp>
+#include <platform-nes/interrupts.hpp>
 
 mmc3::Register<6> mmc3::window1Control;
 mmc3::Register<7> mmc3::window2Control;
@@ -48,6 +49,28 @@ void mmc3::SetCHRMode(const bool largeWindowsAtFront) {
 
 void mmc3::SetMirroring(const bool horizontal) {
     mirroring = horizontal;
+}
+
+/**
+ * @brief Off-NES stand-in for the real $C000/$C001/$E001 MMC3 IRQ-arming
+ * sequence: there's no scanline-counter hardware to poke, so this just arms
+ * the shared single-slot ::irq::irqPending mechanism with the application's
+ * fixed ::IRQ entry point (::irq_vector) at pixel column 0 of @p scanline --
+ * the same handler the real hardware IRQ vector would reach, only the
+ * position varies. Matches ::video::WaitThenReactToSpriteZero's shape, but
+ * always targets ::irq_vector rather than a caller-supplied callback, since
+ * a real interrupt source has exactly one destination, chosen at compile
+ * time -- never a runtime-supplied function pointer.
+ */
+void mmc3::ScheduleScanlineIRQ(const u8 scanline) {
+    irq::irqHandler      = irq_vector;
+    irq::irqPosition     = { 0, scanline };
+    irq::irqPendingValid = true;
+}
+
+/** @brief Off-NES stand-in for the real $E000 disable+acknowledge write. */
+void mmc3::AcknowledgeScanlineIRQ() {
+    irq::irqPendingValid = false;
 }
 
 /**
