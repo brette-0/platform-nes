@@ -86,13 +86,14 @@ void poke(const u16 addr, const u8 data) {
 /**
  * @brief Busy-waits for a precise number of CPU cycles.
  *
- * Total elapsed time -- measured from the `jsr` that calls this function
- * to the instant execution resumes after it returns -- is exactly
- * `c + 27` CPU cycles, for *any* `c` value (the full `u8` range), i.e.
- * anywhere from 27 to 282 cycles. 27 is a hard floor: `jsr`+`rts` alone
- * already cost 12 of those cycles, and there is no way to shave that down
- * through a real function call. For a shorter, compile-time-known wait,
- * hand-pick a NOP/BIT sled instead (nesdev.org/wiki/Fixed_cycle_delay).
+ * `always_inline`: this asm body is spliced directly into the caller, with
+ * no `jsr`/`rts` around it. Total elapsed time -- measured from the
+ * instruction immediately before this call to the instant execution
+ * resumes after it -- is exactly `c + 15` CPU cycles, for *any* `c` value
+ * (the full `u8` range), i.e. anywhere from 15 to 270 cycles. That is the
+ * asm body's own cost, independent of however the caller happens to get
+ * @p c into place. For a shorter, compile-time-known wait, hand-pick a
+ * NOP/BIT sled instead (nesdev.org/wiki/Fixed_cycle_delay).
  *
  * Implementation is the NESdev "Delay code" article's runtime-variable
  * "A + 27 cycles of delay" callable function (nesdev.org/wiki/Delay_code),
@@ -104,25 +105,9 @@ void poke(const u16 addr, const u8 data) {
  * way. Cross-checked against the wiki's own published figures by an
  * independent from-scratch cycle-stepping simulation of this exact
  * compiled instruction stream (`sec`/`sbc`/`bcs`/`adc`/`bcc`/`lsr`/`beq`)
- * over all 256 possible inputs: every one lands on `c + 15` inline,
- * `+ 12` more once `jsr`/`rts` are counted.
- *
- * `noinline` is load-bearing, not decorative: LTO will otherwise fold this
- * single-basic-block asm body straight into the caller (confirmed by
- * inspecting the compiled output with and without it), silently deleting
- * the `jsr`/`rts` this formula's `+27` accounts for and shifting the real
- * delay by 12 cycles depending on optimisation level.
- *
- * @warning Also confirmed by inspecting compiled output: if this function
- * has exactly one call site in the whole program *and* that call passes a
- * compile-time-constant @p c, whole-program LTO may hoist the constant's
- * `lda`/`ldx`/`ldy` out of the caller and into this function's own body
- * (ahead of the `sec`) instead, adding ~2-3 uncounted cycles the `+27`
- * formula doesn't budget for. This does not happen with two or more call
- * sites, nor with a non-constant (runtime-computed) @p c -- both confirmed
- * empirically -- which covers essentially every real use of a *runtime*
- * delay selector. If a single literal call site is genuinely unavoidable,
- * verify the actual disassembly for that build.
+ * over all 256 possible inputs: every one lands on `c + 15` -- the wiki's
+ * own published figure assumes a `jsr`-called, non-inlined body (`+ 27`,
+ * 12 more for `jsr`/`rts`); inlined here, only the `+ 15` survives.
  *
  * @warning Same assumptions the wiki source makes: no branch inside this
  * routine crosses a page boundary (link-time code placement decides that,
@@ -131,9 +116,9 @@ void poke(const u16 addr, const u8 data) {
  * ::irq::DisableInterrupts first if that matters); and no DMA is stealing
  * cycles concurrently.
  *
- * @param c Delay selector; total wait is `c + 27` CPU cycles.
+ * @param c Delay selector; total wait is `c + 15` CPU cycles.
  */
-inline __attribute__((noinline))
+inline __attribute__((always_inline))
 void SpinWait(const u8 c) {
     __asm__ volatile (
         "sec\n"

@@ -27,9 +27,8 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
-// Forward-declared so NMI can call it directly once the real sp
-// rite-0 hit
-// lands (see WaitThenReactToSpriteZero in NMI).
+// Forward-declared so irqHandler can call it directly once the MMC3
+// scanline IRQ fires below the HUD (see kHudSplitLatch / irqHandler).
 static void ApplyHudSplit();
 
 constexpr u8 kCoinVramCap = 48;         // 16 tile writes = 4 coins (2x2 each)
@@ -79,8 +78,6 @@ u16 edgeRAbs;
 // it each frame because the PPU scroll register is integer-pixel only.
 u16 cameraX;
 
-atomic u8 spriteZeroHandled;
-
 oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
 atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
@@ -102,25 +99,6 @@ RESET {
     // and mmc3::GetTileLMA only exist off-NES (see video.hpp/mmc3.hpp).
     ppu::BindTileTranslator(mmc3::GetTileLMA);
 #endif
-    // init bank state -- window1Control/window2Control and chr0Control-
-    // chr5Control are MMC3 registers, defined for every target (see
-    // mmc3.hpp/mmc3.cpp -- NES pokes real hardware, off-NES tracks bank
-    // state for ppu::BindTileTranslator above). mmc3.cpp's own
-    // ::_reset/SyncBankShadows already set
-    // window1Control/window2Control to banks 0/1 at boot -- reasserted here
-    // for the same "this is the demo's own explicit choice, not just
-    // trusting boilerplate" reason the old VRC1 version did (there is no
-    // window3Control/bank-2 equivalent to reassert: MMC3 in PRG mode 0 has
-    // no register for $C000 at all, see mmc3.hpp's own file comment).
-    //
-    // CHR: VRC1's chr0Control/chr1Control were two 4 KiB windows (pattern
-    // tables 0/1). MMC3 carves the same 8 KiB CHR space into six finer
-    // windows instead -- R0/R1 (2 KiB each) cover $0000-$0FFF, R2-R5
-    // (1 KiB each) cover $1000-$1FFF -- so VRC1's chr0Control=0 (physical
-    // bytes [0,4096)) becomes R0=0/R1=1 (bytes [0,2048)+[2048,4096)), and
-    // chr1Control=1 (bytes [4096,8192)) becomes R2=4/R3=5/R4=6/R5=7 (four
-    // consecutive 1 KiB banks covering the same [4096,8192) range) -- same
-    // physical CHR-ROM content, just addressed at MMC3's own granularity.
     mmc3::SwitchBank(mmc3::window1Control, 0);
     mmc3::SwitchBank(mmc3::window2Control, 1);
     mmc3::SwitchCHRBank(mmc3::chr0Control, 0);
@@ -129,23 +107,6 @@ RESET {
     mmc3::SwitchCHRBank(mmc3::chr3Control, 5);
     mmc3::SwitchCHRBank(mmc3::chr4Control, 6);
     mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
-
-    // Mirroring ($A000) is the one MMC3 register nothing above reasserts, and
-    // mmc3.cpp's own ::_reset deliberately leaves it alone (real hardware
-    // powers it up undefined -- see that function's comment). VRC1 had no
-    // mirroring register at all, so this engine's column-streaming address
-    // math (nt_h selects PPU A10 as the horizontal-neighbor bit -- see
-    // player.cpp's PushCoinVram) was implicitly relying on VERTICAL mirroring
-    // (side-by-side nametables) the whole time without ever having to say so.
-    // Under MMC3 that assumption is no longer free: with the register
-    // unwritten, mirroring is whatever the mapper happens to power up with on
-    // a given board/emulator, and if that lands on HORIZONTAL instead, PPU
-    // A10 stops being the live nametable-select bit -- every other 32-tile
-    // world-screen then aliases onto the SAME physical attribute byte as its
-    // neighbour, so a column build for one screen silently corrupts an
-    // attribute nibble that's still on screen from the other. Bit 0: 0 =
-    // vertical, 1 = horizontal (opposite polarity from the iNES header's own
-    // mirroring bit -- a well-known MMC3 gotcha, not a typo).
     mmc3::SetMirroring(false);
 
     if (!level::LoadLevel(0)) {
@@ -155,12 +116,6 @@ RESET {
     ppu::Flush(chrHUDWhitespace_tile, 0x11);
 
     oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
-
-    // Sprite-0 hit anchor: placed at OAM (0,0) → renders at scanline 1 pixel 1
-    // due to the OAM Y+1 offset.  The hit fires at a fixed PPU dot each frame;
-    // NMI spin-waits for it directly (see WaitThenReactToSpriteZero below).
-    // Requires a non-transparent BG pixel at nametable (0,0).
-    OAMBuffer[0] = { 0, chrSprite0_tile, 0, 0 };
 
     // fill in with mario metatiles
     oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary,  kMarySprites);
@@ -206,10 +161,6 @@ RESET {
     audio::AudioInit();
     audio::TrackPlay(0);
 
-    // Seed the shared composite-metatile window over columns [0..kColMapWidth-1]
-    // from the level start: a static Cursor and a dynamic Cursor both parked on
-    // (col 0, row 0), composited per cell.  cameraX is 0 here, so the window is
-    // already centred; ColMapTrack slides it as the camera scrolls.
     level::ColMapSeed(0, { level::TileData }, { level::DynLengths, level::DynData, 0 });
 
     player1.Reset();
@@ -241,8 +192,6 @@ RESET {
 
         level::ColMapTrack(cameraX >> 4);
 
-        OAMBuffer[0] = { 7, chrSprite0_tile, 0, 0 };   // re-assert after player update
-
         ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
         audio::AudioUpdate();
         ppu::SetColorPriority(0);
@@ -256,12 +205,13 @@ RESET {
     }
 }
 
+constexpr u8 kHudSplitRow   = 16;
+constexpr u8 kHudSplitMMC3  = 16 - 1;
+
 interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
     input::PollControllers(&port1, &port2);
     oam::RefreshSprites(OAMBuffer);
-
-    spriteZeroHandled = 0;
 
     using enum eLevelStreamCommands;
     if (levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_DONE) SHADOW(ppu::PPUMASK) {
@@ -292,9 +242,15 @@ interrupt nmiHandler() {
     }
 
     ppu::SetColorPriority(0);
-    video::WaitThenReactToSpriteZero(0, 16, ApplyHudSplit, &spriteZeroHandled);
+    mmc3::ScheduleScanlineIRQ(kHudSplitMMC3);
 
     nmi_done = true;
+}
+
+interrupt irqHandler() {
+    mmc3::AcknowledgeScanlineIRQ();
+    tech::SpinWait(40);
+    ApplyHudSplit();
 }
 
 static oam::oam_t Clear(const u16 _) {
@@ -317,8 +273,8 @@ static i16 ClampRow(const u16 y) {
     return r < level::levelHeight ? r : level::levelHeight - 1;
 }
 
-// Reaction passed to ::WaitThenReactToSpriteZero (called directly from NMI):
-// the actual HUD split, applied once the beam is confirmed at (0, 16).
+// Called directly from irqHandler once the MMC3 scanline IRQ confirms the
+// beam is in HBlank just above kHudSplitRow: the actual HUD split.
 static void ApplyHudSplit() {
     #if defined(TARGET_NDS) || defined(TARGET_GBA)
         const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
@@ -327,8 +283,9 @@ static void ApplyHudSplit() {
         const i16 bump   = raw < 0 ? 0 : (raw > anchor ? anchor : raw);
         ppu::SetScroll(cameraX, static_cast<u16>(16 + bump));
     #else
-        ppu::SetScroll(cameraX, 16);
+        ppu::SetScroll(cameraX, kHudSplitRow);
     #endif
 }
 
 NAKED_NMI { JUMP(nmiHandler); }
+NAKED_IRQ { JUMP(irqHandler); }

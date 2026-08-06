@@ -27,8 +27,6 @@ extern i8 lastDeltaScroll;
 
 extern atomic u16 lastXWorldSpace;
 
-extern atomic u8 spriteZeroHandled;
-
 extern oam::sprite_t OAMBuffer[64];
 
 void SpriteZeroHandler();
