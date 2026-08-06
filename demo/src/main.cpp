@@ -101,10 +101,10 @@ RESET {
 #endif
     mmc3::SwitchBank(mmc3::window1Control, 0);
     mmc3::SwitchBank(mmc3::window2Control, 1);
-    mmc3::SwitchCHRBank(mmc3::chr0Control, 0);
-    mmc3::SwitchCHRBank(mmc3::chr1Control, 1);
-    mmc3::SwitchCHRBank(mmc3::chr2Control, 4);
-    mmc3::SwitchCHRBank(mmc3::chr3Control, 5);
+    mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
+    mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
+    mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
+    mmc3::SwitchCHRBank(mmc3::chr3Control, 1);
     mmc3::SwitchCHRBank(mmc3::chr4Control, 6);
     mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
     mmc3::SetMirroring(false);
@@ -169,7 +169,7 @@ RESET {
     player2.Reset();
 #endif
     oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
-    ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
+    ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
     apu::DisableFrameIRQ();
     apu::DisableDMCIRQ();
@@ -254,7 +254,7 @@ interrupt irqHandler() {
 }
 
 static oam::oam_t Clear(const u16 _) {
-    return 0xef;
+    return 0xf0;
 }
 
 // Provider shims: oam::PopulateFromProvider hands the callback only the sprite
