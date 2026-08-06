@@ -110,80 +110,6 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
 } // namespace irq
 
 /**
- * @brief Busy-waits for a precise number of CPU cycles.
- *
- * Total elapsed time -- measured from the `jsr` that calls this function
- * to the instant execution resumes after it returns -- is exactly
- * `cycles + 27` CPU cycles, for *any* `cycles` value (the full `u8` range),
- * i.e. anywhere from 27 to 282 cycles. 27 is a hard floor: `jsr`+`rts`
- * alone already cost 12 of those cycles, and there is no way to shave that
- * down through a real function call. For a shorter, compile-time-known
- * wait, hand-pick a NOP/BIT sled instead (nesdev.org/wiki/Fixed_cycle_delay).
- *
- * Implementation is the NESdev "Delay code" article's runtime-variable
- * "A + 27 cycles of delay" callable function (nesdev.org/wiki/Delay_code),
- * transcribed instruction-for-instruction: a `sec`/`sbc #5`/`bcs` loop
- * peels off 5-cycle slices of @p cycles until fewer than 5 remain, then a
- * short cascade of conditionally-taken branches burns the 0-4-cycle
- * remainder, each branch contributing exactly 2 or 3 cycles depending on
- * which way it goes so the total lands on the exact requested count either
- * way. Cross-checked against the wiki's own published figures by an
- * independent from-scratch cycle-stepping simulation of this exact
- * compiled instruction stream (`sec`/`sbc`/`bcs`/`adc`/`bcc`/`lsr`/`beq`)
- * over all 256 possible inputs: every one lands on `cycles + 15` inline,
- * `+ 12` more once `jsr`/`rts` are counted.
- *
- * `noinline` is load-bearing, not decorative: LTO will otherwise fold this
- * single-basic-block asm body straight into the caller (confirmed by
- * inspecting the compiled output with and without it), silently deleting
- * the `jsr`/`rts` this formula's `+27` accounts for and shifting the real
- * delay by 12 cycles depending on optimisation level.
- *
- * @warning Also confirmed by inspecting compiled output: if this function
- * has exactly one call site in the whole program *and* that call passes a
- * compile-time-constant @p cycles, whole-program LTO may hoist the
- * constant's `lda`/`ldx`/`ldy` out of the caller and into this function's
- * own body (ahead of the `sec`) instead, adding ~2-3 uncounted cycles the
- * `+27` formula doesn't budget for. This does not happen with two or more
- * call sites, nor with a non-constant (runtime-computed) @p cycles -- both
- * confirmed empirically -- which covers essentially every real use of a
- * *runtime* delay selector. If a single literal call site is genuinely
- * unavoidable, verify the actual disassembly for that build.
- *
- * @warning Same assumptions the wiki source makes: no branch inside this
- * routine crosses a page boundary (link-time code placement decides that,
- * outside this function's control -- a probabilistic, not absolute,
- * guarantee); no interrupt fires during the wait (pair with
- * ::DisableInterrupts first if that matters); and no DMA is stealing
- * cycles concurrently.
- *
- * @param cycles Delay selector; total wait is `cycles + 27` CPU cycles.
- */
-namespace irq {
-inline __attribute__((noinline))
-void SpinWaitCycles(const u8 cycles) {
-    __asm__ volatile (
-        "sec\n"
-        "1:\n"
-        "sbc #5\n"
-        "bcs 1b\n"
-        "adc #3\n"
-        "bcc 2f\n"
-        "lsr a\n"
-        "beq 3f\n"
-        "2:\n"
-        "lsr a\n"
-        "3:\n"
-        "bcs 4f\n"
-        "4:\n"
-        :
-        : "a" (cycles)
-        : "p"
-    );
-}
-} // namespace irq
-
-/**
  * @brief Declares the NMI handler on NES builds.
  *
  * The resulting function is tagged `used` so the linker keeps it, and
@@ -496,18 +422,6 @@ inline void EnableInterrupts()  {}
  * @note This function does nothing on non-NES targets; see ::irq::EnableInterrupts.
  */
 inline void DisableInterrupts() {}
-
-/**
- * @brief No-op off NES.
- *
- * @note The desktop/emulated backends have no cycle-exact CPU timing
- * model -- they schedule IRQs by pixel/scanline position
- * (::irq::irqPending), not by counting CPU cycles -- so there
- * is nothing meaningful to busy-wait on here. See the NES-side
- * ::irq::SpinWaitCycles for the real implementation and its
- * exact-cycle guarantee.
- */
-inline void SpinWaitCycles(const u8) {}
 } // namespace irq
 
 #endif
