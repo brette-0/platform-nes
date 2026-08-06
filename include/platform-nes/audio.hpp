@@ -41,15 +41,17 @@ typedef struct {
  * @brief A single sound effect.
  *
  * NES effects reference two FamiStudio sound banks (regular and
- * sample); desktop effects wrap a raw PCM buffer plus its length.
+ * sample). Desktop/console-port effects are a filesystem path to a
+ * one-shot PCM/ogg/wav source, mirroring ::music_t's desktop shape;
+ * each backend decodes it once at init into its own internal mixing
+ * buffer, the same way it does for ::tracks.
  */
 typedef struct {
 #ifdef TARGET_NES
     const u8* pSFX;          /**< Pointer to the FamiStudio SFX bank. */
     const u8* pSSFX;         /**< Pointer to the FamiStudio sample-SFX bank. */
 #else
-    u8 *pcm;                 /**< Decoded PCM sample data. */
-    float pcm_len;                /**< Length of ::pcm in samples. */
+    const char* fp;          /**< Filesystem path to the PCM/ogg/wav source. */
 #endif
 } sfx_t;
 
@@ -83,6 +85,30 @@ extern const u8 nTracks;
 #define TRACKS(...)                         \
     const audio::music_t  tracks[] = {__VA_ARGS__ }; \
     const u8 nTracks = sizeof(tracks) / sizeof(audio::music_t);
+
+/** @brief Application-defined SFX table; defined via ::SFX. Each backend
+ *         provides a weak zero-entry default, so apps that declare no SFX
+ *         still link. */
+extern const audio::sfx_t sfxs[];
+/** @brief Number of entries in ::sfxs. */
+extern const u8 nSfx;
+
+/**
+ * @brief Declares the application's one-shot SFX table (desktop/console-port build).
+ *
+ * Expands to definitions of ::sfxs and ::nSfx. Use once at file scope with
+ * a brace-enclosed list of ::audio::sfx_t initialisers.
+ *
+ * @code
+ *   SFX(
+ *     { "assets/jump.wav" },
+ *     { "assets/coin.wav" },
+ *   )
+ * @endcode
+ */
+#define SFX(...)                            \
+    const audio::sfx_t sfxs[] = {__VA_ARGS__ }; \
+    const u8 nSfx = sizeof(sfxs) / sizeof(audio::sfx_t);
 #else
 /** @brief Pointer to the FamiStudio music bank (NES build). */
 extern const u8* tracks;
@@ -123,6 +149,11 @@ void TrackStop();
 
 /**
  * @brief Plays a sound effect on a specific mixer channel.
+ *
+ * A channel is a fixed voice slot: starting a new effect on a channel that
+ * is still playing cuts the old one off, matching FamiStudio's own SFX
+ * engine on the NES. Channels are otherwise independent and mix together.
+ *
  * @param index   SFX bank index.
  * @param channel Target audio channel.
  */
