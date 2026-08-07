@@ -206,7 +206,7 @@ RESET {
 }
 
 constexpr u8 kHudSplitRow   = 16;
-constexpr u8 kHudSplitMMC3  = 16 - 1;
+constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
 
 interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
@@ -249,7 +249,7 @@ interrupt nmiHandler() {
 
 interrupt irqHandler() {
     mmc3::AcknowledgeScanlineIRQ();
-    tech::SpinWait(0);
+    tech::SpinWait(58);
     ApplyHudSplit();
 }
 
