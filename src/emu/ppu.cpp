@@ -57,6 +57,40 @@ void ppu::BindTileTranslator(const TileTranslator fn) {
     tileTranslator = fn;
 }
 
+/* Default ::ppu::NametableRouter: every nametable/attribute address answers
+ * from ::VideoRAM, unchanged -- a board with no cart-routed storage at all
+ * (NROM, VRC1, MMC3 without ALTERNATIVE_NAMETABLE) never needs to call
+ * ::ppu::BindNametableRouter, the same way it never needs to call
+ * ::ppu::BindTileTranslator. */
+static bool DefaultRoutesToCart(u16) { return false; }
+static u16  DefaultGetSystemOffset(const u16 logical) { return logical; }
+static u8   DefaultGetTile(u16) { return 0; }
+static void DefaultSetTile(u16, u8) {}
+static void DefaultGenerateVideoMemory(u16) {}
+
+static ppu::NametableRouter nametableRouter = {
+    &DefaultRoutesToCart, &DefaultGetSystemOffset,
+    &DefaultGetTile, &DefaultSetTile, &DefaultGenerateVideoMemory,
+    1   // rowCount: system VRAM's one row, same as every board before this existed.
+};
+
+void ppu::BindNametableRouter(const NametableRouter router) {
+    nametableRouter = router;
+}
+
+/* Every nametable/attribute VideoRAM access funnels through these two --
+ * see ::ppu::NametableRouter's own doc comment (video.hpp) for why. */
+static inline u8 ReadNametableByte(const u16 logical) {
+    return nametableRouter.routesToCart(logical)
+        ? nametableRouter.getTile(logical)
+        : VideoRAM[nametableRouter.getSystemOffset(logical)];
+}
+
+static inline void WriteNametableByte(const u16 logical, const u8 value) {
+    if (nametableRouter.routesToCart(logical)) nametableRouter.setTile(logical, value);
+    else VideoRAM[nametableRouter.getSystemOffset(logical)] = value;
+}
+
 u32 ppu::ResolveTile(const u16 tileVMA) {
     return tileTranslator(tileVMA);
 }
@@ -126,6 +160,16 @@ void GenerateFrame(u32 *fb, const int stride) {
 
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
+    // Vertical counterpart to world_w/nt_cols: how many stacked 240px
+    // nametable rows the currently-bound mapper actually provides storage
+    // for (::ppu::NametableRouter::rowCount -- 1 for every board except
+    // MMC3 four-screen). Folding ppu_y through this instead of a hardcoded
+    // 240 is what lets the background walk reach a second row (nt_row 1)
+    // at all; without it every board (including four-screen ones) would be
+    // structurally unable to scroll into anything but nt_row 0. Bounding it
+    // to exactly what the router says exists is what keeps that walk from
+    // ever computing an address into memory a 1-row board never allocated.
+    const int world_h  = static_cast<int>(nametableRouter.rowCount) * 240;
     const int spr_base = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
     const int spr_h    = (ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE) ? 16 : 8;
 
@@ -172,8 +216,11 @@ void GenerateFrame(u32 *fb, const int stride) {
             /* Derive Y source from ppu_y (the PPU's current absolute row).
              * This is computed once per segment: ppu_y only changes at IRQ
              * boundaries, so it is constant within a segment. xScroll is
-             * added to px inside the loop for the horizontal scan offset. */
-            const int wy        = ppu_y % 240;
+             * added to px inside the loop for the horizontal scan offset.
+             * wy wraps at world_h (a whole number of 240px nametable rows,
+             * see its own comment above), the same way wx0 below wraps at
+             * world_w -- nt_row falls out of that the same way nt_col does. */
+            const int wy        = ppu_y % world_h;
             const int tile_row  = wy / 8;
             const int local_row = tile_row % 30;
             const int nt_row    = tile_row / 30;
@@ -204,8 +251,8 @@ void GenerateFrame(u32 *fb, const int stride) {
             u8 plane0 = 0, plane1 = 0, tile_pal = 0;
             auto load_tile = [&]() {
                 const int nt_off = (nt_col + ntrow_b) * 0x400;
-                const u8 tile_id = VideoRAM[nt_off + row32 + local_col];
-                const u8 attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
+                const u8 tile_id = ReadNametableByte(static_cast<u16>(nt_off + row32 + local_col));
+                const u8 attr    = ReadNametableByte(static_cast<u16>(nt_off + 0x3C0 + at_roff + (local_col >> 2)));
                 tile_pal = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
                 const int chr_base = chr_tbl + tile_id * 16 + fine_y;
                 const u32 chr_lma  = tileTranslator(static_cast<u16>(chr_base));
@@ -324,6 +371,7 @@ void GenerateFrame(u32 *fb, const int stride) {
 void InitMemory(const unsigned vram_bytes) {
     paletteRAM = static_cast<u8 *>(malloc(32));
     VideoRAM   = static_cast<u8 *>(malloc(vram_bytes));
+    nametableRouter.generateVideoMemory(static_cast<u16>(video::nametable_bank_bytes()));
 }
 
 /* Raster-timeline walk for the GX backend. Same IRQ-dispatch and yScroll-reset
@@ -415,11 +463,11 @@ void Flush(const u8 nt, const u8 at) {
     const u16 vpw = video::viewport_px();
     for (u16 page = 0; vpw < 512 ? page < 2 : page < vpw; page++) {
         for (u16 i = 0; i < 0x3c0; i++) {
-            VideoRAM[page * 0x400 + i] = nt;
+            WriteNametableByte(static_cast<u16>(page * 0x400 + i), nt);
         }
 
         for (u16 i = 0; i < 0x40; i++) {
-            VideoRAM[page * 0x400 + 0x3c0 + i] = at;
+            WriteNametableByte(static_cast<u16>(page * 0x400 + 0x3c0 + i), at);
         }
     }
 }
@@ -431,20 +479,20 @@ void WriteFromBufferToNameTable(
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = source[i];
+        WriteNametableByte(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), source[i]);
     }
 }
 
 void WriteSingleToNameTable(const u16 x, const u16 y, u8 value) {
     const u16 offset = xy_to_nt_addr(x, y);
-    VideoRAM[offset] = value;
+    WriteNametableByte(offset, value);
 }
 
 // Address overload: @p address is the 0-based VRAM offset CartesianToAddress returns
-// on this backend (xy_to_nt_addr is already 0-based here), so it indexes VideoRAM
-// directly -- the desktop mirror of the NES poke-by-address path.
+// on this backend (xy_to_nt_addr is already 0-based here), so it routes through the
+// same nametable router -- the desktop mirror of the NES poke-by-address path.
 void WriteSingleToNameTable(const int address, u8 value) {
-    VideoRAM[address] = value;
+    WriteNametableByte(static_cast<u16>(address), value);
 }
 
 void SetScroll(const u16 x, const u16 y) {
@@ -468,7 +516,7 @@ void WriteFromProviderToNameTable(
 
     const u16 offset = xy_to_nt_addr(x, y);
     for (Idx i = 0; i < amt; ++i) {
-        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
+        WriteNametableByte(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), fn(i));
     }
 }
 
@@ -483,13 +531,13 @@ void WriteFromBufferToAttributeTable(
 ) {
     const u16 offset = xy_to_at_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (polarity ? 8 : 1)] = source[i];
+        WriteNametableByte(static_cast<u16>(offset + i * (polarity ? 8 : 1)), source[i]);
     }
 }
 
 void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const u16 offset = xy_to_at_addr(x, y);
-    VideoRAM[offset] = value;
+    WriteNametableByte(offset, value);
 }
 
 u16 CartesianToAddress(const u16 x, const u16 y) {
@@ -551,7 +599,7 @@ namespace ppu {
 
 void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
     for (u8 i = 0; i < size; i++) {
-        target[i] = VideoRAM[offset + i];
+        target[i] = ReadNametableByte(static_cast<u16>(offset + i));
     }
 }
 

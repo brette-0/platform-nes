@@ -48,6 +48,22 @@
 
 using namespace br0::intsh;
 
+// Alternative nametable wiring -- see nes2.hpp's own comment on the same
+// macro (it defines this default, but only under TARGET_NES; this file is
+// also compiled off-NES, by every emu backend, where CMake may not always
+// pass it through, so it needs its own fallback default here too). Only
+// value 1 has a real implementation below (::mmc3::RoutesToCart etc.) --
+// see the static_assert just below the class.
+#ifndef ALTERNATIVE_NAMETABLE
+#define ALTERNATIVE_NAMETABLE 0
+#endif
+
+static_assert(ALTERNATIVE_NAMETABLE == 0 || ALTERNATIVE_NAMETABLE == 1,
+    "mmc3: ALTERNATIVE_NAMETABLE must be 0 (switchable, 2 banks) or 1 "
+    "(four-screen: +2KiB cartridge VRAM) -- other nonzero values are "
+    "reserved for a genuinely different alternative-wiring scheme, not "
+    "folded into 1's meaning, and none is implemented yet.");
+
 /**
  * @brief Pins a function or variable into MMC3's fixed PRG-ROM bank
  *        ($E000-$FFFF).
@@ -131,6 +147,15 @@ private:
     /// hardware here). Defined in the emu-side mmc3.cpp
     /// (src/emu/mappers/mmc3.cpp), not the NES-side one.
     static void NotifyCHRWrite(u8 index, u8 bank);
+
+    /// Storage backing ::GetTile/::SetTile/::GenerateVideoMemory -- the
+    /// software stand-in for the extra 2 KiB VRAM chip a real four-screen
+    /// MMC3 board carries (see this file's own ALTERNATIVE_NAMETABLE
+    /// static_assert, above the class). Null (and never allocated) when
+    /// ALTERNATIVE_NAMETABLE != 1: nothing ever routes to it in that
+    /// configuration (::RoutesToCart is unconditionally false), so there's
+    /// nothing for it to back. Defined in the emu-side mmc3.cpp.
+    static u8* cartVRAM;
 #endif
 
 public:
@@ -169,6 +194,94 @@ public:
      *                            only mode); false inverts it.
      */
     static void SetCHRMode(bool largeWindowsAtFront);
+
+    /*
+     * Nametable/attribute VRAM router (::ppu::NametableRouter, video.hpp) --
+     * these five, plus ::kNametableRowCount, match that struct's members
+     * exactly so a caller (e.g. demo/src/main.cpp, alongside its
+     * ::ppu::BindTileTranslator call) can pass them straight to
+     * ::ppu::BindNametableRouter:
+     *
+     *   ppu::BindNametableRouter({ &mmc3::RoutesToCart, &mmc3::GetSystemOffset,
+     *                               &mmc3::GetTile, &mmc3::SetTile,
+     *                               &mmc3::GenerateVideoMemory,
+     *                               mmc3::kNametableRowCount });
+     *
+     * Every logical address here is the same flattened 12-bit nametable+
+     * attribute offset ::ppu::CartesianToAddress / the internal
+     * xy_to_nt_addr / xy_to_at_addr already compute -- $000-$FFF, one real
+     * NES nametable bank (0x400 bytes) per quadrant, same order the real
+     * PPU's own $2000/$2400/$2800/$2C00 do.
+     */
+
+    /**
+     * @brief How many stacked 240px nametable rows this board provides
+     *        storage for -- see ::ppu::NametableRouter::rowCount's own doc
+     *        comment for why the emu PPU's vertical scroll walk needs this.
+     *
+     * 1 under ALTERNATIVE_NAMETABLE != 1 (system VRAM's row only, matching
+     * every other board). 2 under ALTERNATIVE_NAMETABLE == 1: system VRAM's
+     * row (nt_row 0, $2000/$2400) plus ::cartVRAM's row (nt_row 1,
+     * $2800/$2C00) -- exactly the two rows ::RoutesToCart already
+     * distinguishes, so the walk landing on nt_row 1 and ::RoutesToCart
+     * answering true agree by construction, not by coincidence.
+     */
+    static constexpr u8 kNametableRowCount =
+#if ALTERNATIVE_NAMETABLE == 1
+        2;
+#else
+        1;
+#endif
+
+    /**
+     * @brief True if @p logical is answered by ::cartVRAM instead of the
+     *        console's own ::VideoRAM.
+     *
+     * ALTERNATIVE_NAMETABLE != 1: unconditionally false -- MMC3's ordinary
+     * two banks both live in system VRAM regardless of mirroring.
+     *
+     * ALTERNATIVE_NAMETABLE == 1: true for $800-$FFF (the $2800/$2C00
+     * quadrants), matching how real four-screen MMC3 boards are wired --
+     * the cartridge's own extra VRAM chip answers for the upper half of the
+     * $2000-$2FFF nametable space, while $2000-$27FF stays on the console's
+     * onboard CIRAM. Fixed at compile time: there is no runtime mirroring
+     * concept left to branch on here (see ::SetMirroring).
+     */
+    static bool RoutesToCart(u16 logical);
+
+    /**
+     * @brief For a system-routed @p logical (::RoutesToCart false): offset
+     *        to index ::VideoRAM with.
+     *
+     * Identity today on every ALTERNATIVE_NAMETABLE value: MMC3's runtime
+     * H/V mirroring switch (::SetMirroring) isn't modeled off-NES yet --
+     * this preserves that existing (pre-router) behavior rather than
+     * silently changing it, so fixing runtime mirroring emulation stays a
+     * separate, later change.
+     */
+    static u16 GetSystemOffset(u16 logical);
+
+    /**
+     * @brief For a cart-routed @p logical (::RoutesToCart true): reads one
+     *        byte out of ::cartVRAM.
+     */
+    static u8 GetTile(u16 logical);
+
+    /** @brief For a cart-routed @p logical: writes one byte into ::cartVRAM. */
+    static void SetTile(u16 logical, u8 value);
+
+    /**
+     * @brief A prompt, not an instruction: allocates ::cartVRAM.
+     *
+     * Handed the size of ONE nametable bank (::video::nametable_bank_bytes,
+     * called once from ::emu::InitMemory alongside ::VideoRAM's own
+     * allocation) and decides for itself how much it actually needs --
+     * two banks' worth (the $2800/$2C00 quadrants ::RoutesToCart answers
+     * for) under ALTERNATIVE_NAMETABLE == 1, nothing at all otherwise.
+     *
+     * @param nametableBankBytes Size of one nametable bank, in bytes.
+     */
+    static void GenerateVideoMemory(u16 nametableBankBytes);
 #endif
 
     mmc3() = delete;
@@ -257,14 +370,22 @@ public:
     /**
      * @brief Selects nametable mirroring ($A000).
      *
-     * On NES: a direct $A000 write (bit 0: 0 = vertical, 1 = horizontal --
-     * opposite polarity from the iNES header's own mirroring bit, a
-     * well-known MMC3 gotcha, not a typo). Off-NES: no hardware to write, so
-     * this instead writes the emu PPU's own library-visible ::mirroring
-     * global (video.hpp) directly, for the emu side to consult later.
+     * On NES, ALTERNATIVE_NAMETABLE != 1: a direct $A000 write (bit 0: 0 =
+     * vertical, 1 = horizontal -- opposite polarity from the iNES header's
+     * own mirroring bit, a well-known MMC3 gotcha, not a typo). Off-NES,
+     * same configuration: no hardware to write, so this instead writes the
+     * emu PPU's own library-visible ::mirroring global (video.hpp) directly,
+     * for ::GetSystemOffset to consult later.
+     *
+     * ALTERNATIVE_NAMETABLE == 1: a no-op. Real four-screen MMC3 boards
+     * disallow writing this register at all -- there are no aliased banks
+     * left to pick between, each of the four quadrants already has its own
+     * fixed physical storage (see ::RoutesToCart) -- so this call has
+     * nothing left to do in that configuration, on either target.
      *
      * @param horizontal false selects vertical mirroring (side-by-side
-     *                   nametables); true selects horizontal.
+     *                   nametables); true selects horizontal. Ignored under
+     *                   ALTERNATIVE_NAMETABLE == 1.
      */
     static void SetMirroring(bool horizontal);
 

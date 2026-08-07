@@ -98,6 +98,17 @@ RESET {
     // software tile-address translation to bind there. ppu::BindTileTranslator
     // and mmc3::GetTileLMA only exist off-NES (see video.hpp/mmc3.hpp).
     ppu::BindTileTranslator(mmc3::GetTileLMA);
+    // Same reasoning for nametable/attribute VRAM routing: this board builds
+    // with ALTERNATIVE_NAMETABLE == 1 (four-screen, +2KiB cartridge VRAM),
+    // and only the mapper -- not the shared emu PPU -- knows how that extra
+    // storage is wired. A board without any cart-routed nametable storage
+    // wouldn't need this call at all, the same way NROM/VRC1 never call
+    // BindTileTranslator.
+    ppu::BindNametableRouter({
+        &mmc3::RoutesToCart, &mmc3::GetSystemOffset,
+        &mmc3::GetTile, &mmc3::SetTile, &mmc3::GenerateVideoMemory,
+        mmc3::kNametableRowCount
+    });
 #endif
     mmc3::SwitchBank(mmc3::window1Control, 0);
     mmc3::SwitchBank(mmc3::window2Control, 1);

@@ -25,6 +25,8 @@
 #include <platform-nes/video.hpp>
 #include <platform-nes/interrupts.hpp>
 
+#include <cstdlib>
+
 mmc3::Register<6> mmc3::window1Control;
 mmc3::Register<7> mmc3::window2Control;
 
@@ -37,6 +39,7 @@ mmc3::Register<5> mmc3::chr5Control;
 
 bool mmc3::shape = true;   // hardware's mode 0 (large windows at front) -- see mmc3.hpp's own comment.
 u8   mmc3::banks[6] = {};
+u8*  mmc3::cartVRAM = nullptr;
 
 void mmc3::NotifyCHRWrite(const u8 index, const u8 bank) {
     banks[index] = bank;
@@ -48,7 +51,59 @@ void mmc3::SetCHRMode(const bool largeWindowsAtFront) {
 }
 
 void mmc3::SetMirroring(const bool horizontal) {
+#if ALTERNATIVE_NAMETABLE == 1
+    // Real four-screen MMC3 boards disallow writing $A000 at all -- see
+    // mmc3.hpp's own doc comment on this function.
+    (void)horizontal;
+#else
     mirroring = horizontal;
+#endif
+}
+
+/**
+ * @brief ::ppu::NametableRouter members -- see mmc3.hpp's own doc comments
+ * on each. @p logical throughout is the flattened 12-bit nametable+
+ * attribute offset ::ppu::CartesianToAddress already computes: $000-$FFF,
+ * one 0x400-byte bank per real NES nametable quadrant, same order as the
+ * PPU's own $2000/$2400/$2800/$2C00.
+ */
+
+bool mmc3::RoutesToCart(const u16 logical) {
+#if ALTERNATIVE_NAMETABLE == 1
+    // $2800/$2C00 (logical bit 11 set) -> cartridge's own extra VRAM chip.
+    // $2000/$2400 stay on the console's own CIRAM. Matches how real
+    // four-screen MMC3 boards (e.g. Tengen's Gauntlet) are wired.
+    return (logical & 0x800u) != 0;
+#else
+    (void)logical;
+    return false;
+#endif
+}
+
+u16 mmc3::GetSystemOffset(const u16 logical) {
+    // Identity: MMC3's runtime H/V mirroring switch isn't modeled off-NES
+    // yet (see mmc3.hpp's own comment) -- this preserves existing,
+    // pre-router behavior rather than silently changing it.
+    return logical;
+}
+
+u8 mmc3::GetTile(const u16 logical) {
+    return cartVRAM[logical & 0x7FFu];
+}
+
+void mmc3::SetTile(const u16 logical, const u8 value) {
+    cartVRAM[logical & 0x7FFu] = value;
+}
+
+void mmc3::GenerateVideoMemory(const u16 nametableBankBytes) {
+#if ALTERNATIVE_NAMETABLE == 1
+    // Two banks' worth -- the $2800/$2C00 quadrants ::RoutesToCart answers
+    // for above. Never freed: lives for the process's whole run, same as
+    // ::VideoRAM itself (see ::emu::InitMemory).
+    cartVRAM = static_cast<u8 *>(malloc(2u * nametableBankBytes));
+#else
+    (void)nametableBankBytes;
+#endif
 }
 
 /**

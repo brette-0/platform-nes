@@ -14,7 +14,13 @@ tech::wo_register<0xa001> mmc3::prgRamProtect;
 tech::wo_register<0xc000> mmc3::irqLatch;
 
 void mmc3::SetMirroring(const bool horizontal) {
+#if ALTERNATIVE_NAMETABLE == 1
+    // Real four-screen MMC3 boards disallow writing $A000 at all -- see
+    // mmc3.hpp's own doc comment on this function.
+    (void)horizontal;
+#else
     tech::poke(0xa000, horizontal ? 1 : 0);
+#endif
 }
 
 void mmc3::ScheduleScanlineIRQ(const u8 scanline) {
