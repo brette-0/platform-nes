@@ -169,20 +169,24 @@ public:
      *        $1000-$1FFF). Each holds the full 5-bit bank number directly --
      *        off-NES there's no shared chrHighBits port to split it across, so
      *        ::SwitchCHRBank just stores the whole value here. Consulted by
-     *        ::GetTileLMA to resolve a tile fetch, bound to the emu PPU through
-     *        ::ppu::BindTileTranslator. Defined in the emu-side vrc1.cpp
-     *        (src/emu/mappers/vrc1.cpp), not the NES-side one.
+     *        ::GetTileLMA to resolve a tile fetch. Defined in the emu-side
+     *        vrc1.cpp (src/emu/mappers/vrc1.cpp), not the NES-side one.
      */
     static u8 chrBanks[2];
 
     /**
      * @brief Translates a tile's PPU pattern-table address (0x0000-0x1FFF) into
      *        a byte offset in the flat CHR-ROM image, resolving it through
-     *        ::chrBanks. Matches ::ppu::TileTranslator's signature, so it can be
-     *        handed straight to ::ppu::BindTileTranslator (e.g.
-     *        `ppu::BindTileTranslator(&VRC1::GetTileLMA)`). Library-internal,
-     *        like ::mmc3::GetTileLMA: the emu PPU is the intended caller, not
-     *        game/user code -- select banks through ::SwitchCHRBank instead.
+     *        ::chrBanks.
+     *
+     * Library-internal: the only caller is this module's own strong
+     * `ppu::ResolveTile` override (src/emu/mappers/vrc1.cpp), which the emu
+     * PPU (src/emu/ppu.cpp) calls unconditionally for every tile fetch -- see
+     * that function's own doc comment (video.hpp) for the weak/strong
+     * relationship. Public rather than private purely because its caller is
+     * a free function, not a member of this class -- C++ access control has
+     * no "same translation unit" exemption. A game selects banks through
+     * ::SwitchCHRBank instead.
      */
     static u32 GetTileLMA(u16 tileVMA);
 #endif

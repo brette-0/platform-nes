@@ -319,7 +319,9 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
  * same header, hence ODR-identical, so folding is well-defined.) */
 #define _CHR_EMIT_IMAGE(name, total_bytes)                             \
   [[gnu::section(_CHR_SECTION), gnu::used, gnu::retain]]               \
-  inline constexpr auto chr_rom_image = nes_chr::pad<total_bytes>(name##_accum)
+  inline constexpr auto chr_rom_image = nes_chr::pad<total_bytes>(name##_accum); \
+  [[gnu::used, gnu::retain]]                                          \
+  inline constexpr unsigned ppu::chrRomBytes = (total_bytes)
 
 /**
  * @brief Close the FINAL blob in the chain and, in the emitting TU, emit the
@@ -461,6 +463,27 @@ namespace oam {
 }
 
 namespace ppu {
+    /**
+     * @brief Total bytes of the embedded flat CHR ROM image (the same
+     *        @p total_bytes ::CHARACTER_ROM_END_FINAL pads it to) -- defined
+     *        by that macro alongside the image itself, so it always matches
+     *        exactly what's actually embedded, on every target.
+     *
+     * Declared unconditionally (not `#ifndef TARGET_NES`) because
+     * ::CHARACTER_ROM_END_FINAL itself is called unconditionally by every
+     * game (it embeds CHR data for the real NES ROM too) and a preprocessor
+     * macro's own replacement list can't itself branch on TARGET_NES to skip
+     * defining this on NES -- so the symbol exists there too, simply unused
+     * (real NES hardware needs no software CHR-address translation at all).
+     * A mapper's off-NES tile-address translator (e.g.
+     * src/emu/mappers/mmc3.cpp's ::mmc3::GetTileLMA) wraps its resolved
+     * offset against this so a bank register value that addresses past what
+     * this build actually embeds can't read out of bounds of ::CHR_ROM --
+     * the software counterpart to how a real, physically-smaller CHR-ROM
+     * chip's own address pins simply alias/wrap past its own capacity.
+     */
+    extern const unsigned chrRomBytes;
+
     namespace raw {
         enum PPU {
             PPUCTRL     = 0x2000, /**< Base nametable, VRAM increment, NMI enable. */
@@ -550,48 +573,28 @@ namespace ppu {
 
 #ifndef TARGET_NES
     /**
-     * @brief Signature of a mapper's tile-address translator.
+     * @brief Resolves a tile's PPU pattern-table address (0x0000-0x1FFF, the
+     *        same value the emu PPU would otherwise index ::patternTable
+     *        with directly) into the byte offset to actually index
+     *        ::patternTable with -- i.e. that address resolved through
+     *        whatever CHR banks are currently switched in.
      *
-     * Takes a tile's PPU pattern-table address (0x0000-0x1FFF, the same
-     * value the emu PPU would otherwise index ::patternTable with directly)
-     * and returns the byte offset to actually index ::patternTable with --
-     * i.e. that address resolved through whatever CHR banks are currently
-     * switched in. Not a fetch: the translator returns an address, the
-     * caller still does the array read. ::NROM::GetTileLMA (identity, the
-     * default) and ::MMC3::GetTileLMA are the two implementations so far.
-     */
-    using TileTranslator = u32 (*)(u16);
-
-    /**
-     * @brief Binds the mapper-specific tile-address translator the emu PPU
-     *        (src/emu/ppu.cpp) resolves every background/sprite tile fetch
-     *        through.
-     *
-     * Off-NES only: real NES hardware performs CHR bank switching in
-     * silicon, so there is nothing for this to do there -- the emu PPU is
-     * the only consumer, since it renders straight from a flat, non-bank-
-     * switched CHR-ROM image (::patternTable) and needs a software stand-in
-     * for whatever the cartridge's mapper would otherwise be doing on the
-     * PPU's own address bus. Defaults to ::NROM::GetTileLMA (identity) so a
-     * non-bank-switching game needs to call this at all; a game using a
-     * bank-switching mapper (e.g. MMC3) should call this once, early, with
-     * that mapper's own translator (e.g. `ppu::BindTileTranslator(&MMC3::GetTileLMA)`),
-     * the same way it already sets up that mapper's initial CHR banks.
-     *
-     * @param fn Translator to install; replaces whatever was bound before.
-     */
-    void BindTileTranslator(TileTranslator fn);
-
-    /**
-     * @brief Resolves a PPU-space tile address through the currently-bound
-     *        ::TileTranslator.
+     * Not a fetch: this returns an address, the caller still does the array
+     * read. Weak default (src/emu/ppu.cpp): identity, matching a board with
+     * no CHR bank switching at all. A bank-switching mapper's own emu-side
+     * TU (e.g. src/emu/mappers/mmc3.cpp) supplies a strong definition of this
+     * exact symbol that resolves through its own currently-switched banks
+     * instead; since a build's game code always references other symbols
+     * from that same mapper TU directly (bank-select calls, IRQ scheduling,
+     * ...), the mapper's object file is never "optional" in the link, so its
+     * strong definition always wins over the weak one with no runtime
+     * dispatch and no setup call needed.
      *
      * The emu PPU's own per-pixel background/sprite fetches (src/emu/ppu.cpp)
-     * call the bound translator directly and don't need this. It exists for
-     * the native-hardware-2D backends (GBA/DS/3DS/GameCube-Wii), which bake a
-     * whole tile atlas rather than fetching per pixel and so need to resolve
-     * CHR bank state without holding the translator function pointer
-     * themselves -- see ::chrGeneration for how they know when to call it.
+     * call this directly for every tile. The native-hardware-2D backends
+     * (GBA/DS/3DS/GameCube-Wii), which bake a whole tile atlas rather than
+     * fetching per pixel, also call it -- see ::chrGeneration for how they
+     * know when to re-bake.
      *
      * @param tileVMA PPU pattern-table address, 0x0000-0x1FFF.
      * @return        Byte offset to index ::CHR_ROM with.
@@ -602,15 +605,97 @@ namespace ppu {
      * @brief Bumped by a mapper every time it switches a CHR bank off-NES.
      *
      * The per-pixel software rasterizer (src/emu/ppu.cpp) re-resolves every
-     * tile fetch through ::TileTranslator already, so it never needs this.
+     * tile fetch through ::ResolveTile already, so it never needs this.
      * It exists for the native-hardware-2D backends (GBA/DS/3DS/GameCube-Wii)
      * that instead bake a whole tile atlas once and index into it by NES tile
      * number: they compare this counter once per frame against the value they
-     * last rebuilt at, and re-bake the atlas (through ::TileTranslator) only
+     * last rebuilt at, and re-bake the atlas (through ::ResolveTile) only
      * when it has moved, rather than re-expanding all 512 tiles every frame
      * regardless of whether any CHR bank actually changed.
      */
     extern u32 chrGeneration;
+
+    /**
+     * @brief Reads one byte of nametable/attribute VRAM at a flattened
+     *        logical offset -- the same 12-bit-and-up value
+     *        ::CartesianToAddress / the internal xy_to_nt_addr / xy_to_at_addr
+     *        already compute: 0x000-0x3FF per real NES nametable quadrant, in
+     *        $2000/$2400/$2800/$2C00 order, however many quadrants the linked
+     *        board's ::nametableRows spans.
+     *
+     * Weak default (src/emu/ppu.cpp): `return VideoRAM[logical];` -- every
+     * board's storage is the console's own ::VideoRAM unless a mapper says
+     * otherwise. A board that routes some of that space to its own
+     * cartridge-side storage instead (e.g. an MMC3 four-screen board's extra
+     * 2 KiB VRAM chip answering the $2800/$2C00 quadrants) supplies a strong
+     * definition of this exact symbol in its own emu-side TU, the same
+     * weak/strong relationship as ::ResolveTile -- see that function's own
+     * comment for why the mapper's object file is always linked regardless.
+     *
+     * @param logical Flattened nametable/attribute offset.
+     * @return        The byte at that offset, from whichever storage answers it.
+     */
+    u8 ReadNametable(u16 logical);
+
+    /**
+     * @brief Writes one byte of nametable/attribute VRAM. Write counterpart
+     *        of ::ReadNametable -- see its own comment for the addressing
+     *        and weak/strong relationship.
+     *
+     * @param logical Flattened nametable/attribute offset.
+     * @param value   Byte to store.
+     */
+    void WriteNametable(u16 logical, u8 value);
+
+    /**
+     * @brief How many stacked 240px-tall nametable "rows" the linked board
+     *        provides storage for -- 1 for every board that only ever
+     *        occupies the console's own ::VideoRAM (every board today except
+     *        MMC3 four-screen, which is 2: ::VideoRAM's row plus its own
+     *        cartridge VRAM's row, routed through ::ReadNametable/
+     *        ::WriteNametable).
+     *
+     * The emu PPU's per-pixel vertical scroll walk (src/emu/ppu.cpp's
+     * ::emu::GenerateFrame) and the native-hardware-2D backends' own
+     * tilemap bakes need this to know how far it's safe to let the
+     * background wrap vertically before folding back to row 0 -- without it,
+     * a board with only 1 row of real storage would have no way to stop the
+     * walk from deriving an address into storage it never allocated.
+     *
+     * Weak default (src/emu/ppu.cpp): `1`, same idiom as ::sfxs/::nSfx
+     * (audio.hpp) -- a board that needs a different value supplies its own
+     * strong definition of this exact symbol, same weak/strong relationship
+     * as ::ResolveTile.
+     */
+    extern const u8 nametableRows;
+
+    /**
+     * @brief A prompt, not an instruction: called once, from
+     *        ::emu::InitMemory right after it allocates ::VideoRAM. A board
+     *        that routes part of nametable space to its own cartridge-side
+     *        storage (see ::ReadNametable) allocates that storage here,
+     *        sized via ::video::nametable_row_bytes() -- the same per-row
+     *        page count the emu PPU's own render walk (src/emu/ppu.cpp's
+     *        ::emu::GenerateFrame) and the nametable-write API
+     *        (::CartesianToAddress's internal xy_to_nt_addr) already agree
+     *        on, so the cart-routed row's boundary always lines up exactly
+     *        with where those callers stop treating an offset as row 0.
+     *        Deliberately NOT sized from whatever ::emu::InitMemory happened
+     *        to allocate ::VideoRAM with (::video::vram_bytes()): that value
+     *        can be larger than one row's actual footprint on viewports
+     *        ::video::vram_bytes()'s own bank-count rounds up more
+     *        aggressively than ::video::nametable_row_bytes() does, and
+     *        sizing from it once left a real row-1 boundary mismatch (a
+     *        wider-than-native desktop window, and structurally 3DS/Switch/
+     *        Wii U's fixed viewports) that routed row-1 addresses into
+     *        ::VideoRAM's own unwritten tail instead of the cart storage
+     *        meant to answer them.
+     *
+     * Weak default (src/emu/ppu.cpp): no-op -- a board with no cart-routed
+     * storage has nothing to allocate. Same weak/strong relationship as
+     * ::ResolveTile.
+     */
+    void InitCartVRAM();
 #endif
 }
 #if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
@@ -770,6 +855,33 @@ namespace video {
         const unsigned banks_x = (static_cast<unsigned>(viewport_tx()) + 31) / 32;
         const unsigned banks_y = (static_cast<unsigned>(viewport_ty()) + 29) / 30;
         return 2u * banks_x * banks_y * 0x400u;
+    }
+
+    /**
+     * @brief Bytes of nametable/attribute storage one 240px-tall row spans,
+     *        for a board whose nametable "rows" are counted with
+     *        ::ppu::nametableRows -- the boundary the emu PPU's own render
+     *        walk (src/emu/ppu.cpp's ::emu::GenerateFrame) and the
+     *        nametable-write API (::ppu::CartesianToAddress's internal
+     *        xy_to_nt_addr) already agree divides row 0 from row 1.
+     *
+     * NOT the same quantity as ::vram_bytes(): that sizes the actual
+     * ::VideoRAM allocation, rounding viewport width up to whole 32-tile
+     * banks (::viewport_tx()-based) and always doubling for horizontal-
+     * scroll lookahead; this instead mirrors GenerateFrame's own nt_cols --
+     * a pixel-width threshold (::viewport_px()-based) -- so it can diverge
+     * from (and land below) ::vram_bytes() on a viewport wider than native
+     * but short of double-wide. That's exactly the case a mapper's
+     * ::ppu::InitCartVRAM must size its own cart-routed row against, not
+     * ::vram_bytes(): sizing from the wrong one leaves a real gap between
+     * where ::VideoRAM's own row 0 content actually ends and where a
+     * board's cart storage starts answering, silently routing row-1 reads
+     * into ::VideoRAM's own unwritten tail instead.
+     */
+    constexpr unsigned nametable_row_bytes() {
+        const unsigned vpw = viewport_px();
+        const unsigned nt_cols = vpw < 512 ? 2u : (vpw + 255u) / 256u;
+        return nt_cols * 0x400u;
     }
 }
 

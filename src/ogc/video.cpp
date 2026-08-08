@@ -200,6 +200,10 @@ static void draw_bg_band(const int y0, const int y1, const u16 xs, const u16 ys)
     const int vpw      = video::viewport_px();
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
+    // Vertical counterpart to world_w/nt_cols -- see ppu.cpp's GenerateFrame
+    // (src/emu/ppu.cpp), which folds ppu_y through the identical
+    // ppu::nametableRows-derived height for the same reason.
+    const int world_h  = static_cast<int>(ppu::nametableRows) * 240;
     const int atlas0   = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
 
     bg_count[0] = bg_count[1] = bg_count[2] = bg_count[3] = 0;
@@ -209,9 +213,10 @@ static void draw_bg_band(const int y0, const int y1, const u16 xs, const u16 ys)
 
     for (int syt = sy0; syt < y1; syt += 8) {
         const int world_y = static_cast<int>(ys) + (syt - y0);
-        const int wym       = ((world_y % 240) + 240) % 240;
+        const int wym       = ((world_y % world_h) + world_h) % world_h;
         const int trow      = wym / 8;
         const int local_row = trow % 30;
+        const int nt_row    = trow / 30;
         const int at_roff   = (local_row >> 2) * 8;
         const int at_rbits  = ((local_row >> 1) & 1) * 4;
         const int row32     = local_row * 32;
@@ -222,10 +227,10 @@ static void draw_bg_band(const int y0, const int y1, const u16 xs, const u16 ys)
             const int tcol      = wxm / 8;
             const int local_col = tcol % 32;
             const int nt_col    = tcol / 32;
-            const int nt_off    = nt_col * 0x400;
+            const int nt_off    = (nt_col + nt_row * nt_cols) * 0x400;
 
-            const u8 tile_id = VideoRAM[nt_off + row32 + local_col];
-            const u8 attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
+            const u8 tile_id = ppu::ReadNametable(static_cast<u16>(nt_off + row32 + local_col));
+            const u8 attr    = ppu::ReadNametable(static_cast<u16>(nt_off + 0x3C0 + at_roff + (local_col >> 2)));
             const int pal    = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
 
             const int ti = atlas0 + tile_id;

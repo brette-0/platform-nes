@@ -93,12 +93,6 @@ static oam::oam_t SpriteX2(u16 i);
 static i16  ClampRow(u16 y);
 
 RESET {
-#ifndef TARGET_NES
-    // Real NES hardware does CHR bank switching in silicon -- there's no
-    // software tile-address translation to bind there. ppu::BindTileTranslator
-    // and mmc3::GetTileLMA only exist off-NES (see video.hpp/mmc3.hpp).
-    ppu::BindTileTranslator(mmc3::GetTileLMA);
-#endif
     mmc3::SwitchBank(mmc3::window1Control, 0);
     mmc3::SwitchBank(mmc3::window2Control, 1);
     mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
@@ -242,7 +236,7 @@ interrupt nmiHandler() {
     }
 
     ppu::SetColorPriority(0);
-    mmc3::ScheduleScanlineIRQ(kHudSplitMMC3);
+    mmc3::ScheduleScanlineIRQ(kHudSplitMMC3);   // TODO: MAKE IT GOOD
 
     nmi_done = true;
 }

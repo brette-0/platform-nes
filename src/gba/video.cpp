@@ -90,7 +90,14 @@ static constexpr u32 nes_rgb[64] = {
 static constexpr int SCREEN_H    = 160;          // visible scanlines
 static constexpr unsigned LINES_TOTAL = 228;     // total scanlines (160 visible + 68 vblank)
 static constexpr int MAP_COLS    = 64;           // 512px / 8
-static constexpr int MAP_ROWS    = 32;           // 256px / 8
+// g_map_shadow's own row capacity: sized for the WORST case (a four-screen
+// board's two stacked 240px nametable rows, ::ppu::nametableRows == 2) --
+// 512px / 8 x2. An ordinary (::ppu::nametableRows == 1) board only ever
+// fills/DMAs the first half (build_map's own activeRows, below); the
+// unused second half costs a fixed ~4 KB of IWRAM but keeps this file free
+// of any board-specific #if (see mmc3.hpp's own comment on
+// ALTERNATIVE_NAMETABLE for why this TU must not presume that).
+static constexpr int MAP_ROWS    = 64;           // 2 x (256px / 8)
 static constexpr int CHR_TILES   = 512;          // NES tiles in 8 KB CHR
 static constexpr int GBA_TILE_SZ = 32;           // bytes per 4bpp 8x8 GBA tile
 
@@ -115,6 +122,7 @@ constexpr u32 DCNT_OBJ_1D   = 0x0040;   // 1D OBJ tile mapping (bit 6)
 constexpr u16 DSTAT_HBL_IRQ = 0x0010;   // DISPSTAT HBlank-IRQ enable (bit 4)
 
 constexpr u16 BGCNT_512x256 = 0x4000;   // size field = 1 (bits 14-15)
+constexpr u16 BGCNT_512x512 = 0xC000;   // size field = 3 (bits 14-15) -- four screenblocks, 2x2
 inline u16 BGCNT_CHARBASE(int n) { return static_cast<u16>(n << 2); }  // bits 2-3
 inline u16 BGCNT_MAPBASE(int n)  { return static_cast<u16>(n << 8); }  // bits 8-12
 
@@ -141,10 +149,12 @@ inline void* oam_mem()  { return reinterpret_cast<void*>(0x07000000); }
 // leave at 0 since no sprite is affine).
 struct ObjAttr { u16 a0, a1, a2, fill; };
 
-// BG tilemap shadow (built in RAM, DMA'd to VRAM during VBlank). 64x32 entries
-// laid out as two side-by-side 32x32 screenblocks (the 512x256 text layout).
-// Kept in IWRAM (the default .bss section on the GBA) so build_map's per-frame
-// writes are zero-waitstate.
+// BG tilemap shadow (built in RAM, DMA'd to VRAM during VBlank). 64x64 entries
+// (MAP_ROWS's own comment), laid out as four 32x32 screenblocks in the
+// standard 2x2 text-BG arrangement (0/1 top row, 2/3 bottom row) -- an
+// ordinary single-row board only ever populates/uses the top row (0/1, the
+// 512x256 layout REG_BG0CNT selects at init). Kept in IWRAM (the default
+// .bss section on the GBA) so build_map's per-frame writes are zero-waitstate.
 alignas(4) u16 g_map_shadow[MAP_COLS * MAP_ROWS];
 // 4bpp CHR staged at init and whenever a mapper (e.g. MMC3) switches a CHR
 // bank, then uploaded to BG + OBJ tile VRAM. This buffer is 16 KB and rebuilt
@@ -187,8 +197,8 @@ void expand_tile(const u8* nes, u8* out) {
 }
 
 // Rebuild the 4bpp CHR atlas from CHR_ROM, resolving each of the 512 PPU tile
-// slots through the mapper's currently-bound translator. NROM's translator is
-// the identity function, so this is byte-for-byte what the old one-shot init
+// slots through ::ppu::ResolveTile. An unbanked board's default is the
+// identity function, so this is byte-for-byte what the old one-shot init
 // loop did; a bank-switching mapper (MMC3) instead pulls each tile from
 // whatever physical CHR bank is presently switched into that PPU address, the
 // same resolution the per-pixel software rasterizer does on every fetch. Only
@@ -224,21 +234,35 @@ IWRAM_CODE void build_palettes() {
     bg_pal()[0] = to_bgr555(nes_rgb[paletteRAM[0] & 0x3F]);
 }
 
-// Rebuild the 64x32 BG tilemap shadow from the two NES nametables in VideoRAM.
-// Mirrors the tile/attribute decode the software PPU and GX/DS backends use; NES
-// vertical wrap at 240 (30 rows) is reproduced with `row % 30`.
+// Rebuild the BG tilemap shadow from the linked board's nametables in
+// VideoRAM/cart VRAM (::ppu::ReadNametable). Mirrors the tile/attribute
+// decode the software PPU and GX/DS backends use; NES vertical wrap within
+// one 240px row (30 tile-rows) is reproduced with `tile_row % 30`, the same
+// way ppu.cpp's GenerateFrame does.
 //
-// IWRAM_CODE: this is the backend's per-frame hot spot -- 64x32 = 2048 entries,
-// each with two VideoRAM reads + an attribute decode. On the 16.78 MHz ARM7
-// running from GamePak ROM (wait states) that alone is multiple milliseconds and
-// is the main reason a frame can overrun its 16.7 ms budget; executing it from
-// zero-waitstate IWRAM (with VideoRAM/g_map_shadow also in IWRAM) is the single
-// biggest lever against dropped frames on this backend.
+// activeRows -- not the fixed MAP_ROWS capacity -- bounds the loop: an
+// ordinary single-row board (::ppu::nametableRows == 1) only ever fills the
+// first 32 GBA tile-rows (one screenblock-row), the same footprint and cost
+// this loop always had before four-screen support existed, and never calls
+// ::ppu::ReadNametable with an offset past what that board's VideoRAM
+// actually covers.
+//
+// IWRAM_CODE: this is the backend's per-frame hot spot -- up to 64x64 = 4096
+// entries on a four-screen board (2048 on an ordinary one), each with two
+// nametable reads + an attribute decode. On the 16.78 MHz ARM7 running from
+// GamePak ROM (wait states) that alone is multiple milliseconds and is the
+// main reason a frame can overrun its 16.7 ms budget; executing it from
+// zero-waitstate IWRAM (with VideoRAM/g_map_shadow also in IWRAM) is the
+// single biggest lever against dropped frames on this backend.
 IWRAM_CODE void build_map() {
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
+    const int atlas0     = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
+    const int activeRows = 32 * static_cast<int>(ppu::nametableRows);
+    const int rowMod     = 30 * static_cast<int>(ppu::nametableRows);
 
-    for (int row = 0; row < MAP_ROWS; row++) {
-        const int local_row = row % 30;
+    for (int row = 0; row < activeRows; row++) {
+        const int tile_row  = row % rowMod;
+        const int local_row = tile_row % 30;
+        const int nt_row    = tile_row / 30;
         const int row32     = local_row * 32;
         const int at_roff   = (local_row >> 2) * 8;
         const int at_rbits  = ((local_row >> 1) & 1) * 4;
@@ -246,16 +270,18 @@ IWRAM_CODE void build_map() {
         for (int col = 0; col < MAP_COLS; col++) {
             const int nt_col    = col >> 5;          // 0 or 1 (which nametable)
             const int local_col = col & 31;
-            const int nt_off    = nt_col * 0x400;
+            const int nt_off    = (nt_col + nt_row * 2) * 0x400;
 
-            const u8  tile_id = VideoRAM[nt_off + row32 + local_col];
-            const u8  attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
+            const u8  tile_id = ppu::ReadNametable(static_cast<u16>(nt_off + row32 + local_col));
+            const u8  attr    = ppu::ReadNametable(static_cast<u16>(nt_off + 0x3C0 + at_roff + (local_col >> 2)));
             const int pal     = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
 
             const u16 entry = static_cast<u16>((atlas0 + tile_id) | (pal << 12));
-            // Two side-by-side 32x32 screenblocks: left cols -> block 0, right -> 1.
-            const int sb  = col >> 5;
-            const int idx = sb * 1024 + row * 32 + local_col;
+            // Four screenblocks in the standard 2x2 text-BG arrangement: 0/1
+            // top row (nt_row 0), 2/3 bottom row (nt_row 1) -- row & 31 is
+            // the row's position within its own 32-tall screenblock.
+            const int sb  = (col >> 5) + nt_row * 2;
+            const int idx = sb * 1024 + (row & 31) * 32 + local_col;
             g_map_shadow[idx] = entry;
         }
     }
@@ -450,17 +476,23 @@ void irq::init() {
     REG_DISPSTAT |= DSTAT_HBL_IRQ;
     irqEnable(IRQ_HBLANK);
 
-    // BG0: 512x256 text map (two horizontal NES nametables), 16-colour tiles in
-    // charblock 0, map in screenblock 8 (right after the 16 KB tile atlas).
-    REG_BG0CNT = static_cast<u16>(PRIO_BG | BGCNT_CHARBASE(0) | BGCNT_MAPBASE(8) | BGCNT_512x256);
+    // BG0: 16-colour tiles in charblock 0, map in screenblock 8 (right after
+    // the 16 KB tile atlas). Map size follows the linked board's own
+    // ::ppu::nametableRows (video.hpp): 512x256 (two horizontal NES
+    // nametables, one row) for an ordinary board, 512x512 (four screenblocks,
+    // a four-screen board's second stacked row) otherwise -- see
+    // build_map's own comment for how activeRows keeps an ordinary board's
+    // per-frame cost identical to before this was possible at all.
+    REG_BG0CNT = static_cast<u16>(PRIO_BG | BGCNT_CHARBASE(0) | BGCNT_MAPBASE(8)
+        | (ppu::nametableRows > 1 ? BGCNT_512x512 : BGCNT_512x256));
 
     // Expand the CHR ROM to 4bpp and upload it to both BG and OBJ tile VRAM.
     // With 1D OBJ mapping an 8x8 16-colour tile is exactly one 32-byte slot, so
     // the BG tile layout and the OBJ tile layout are identical and one staged
     // buffer feeds both. build_chr_atlas resolves through the mapper's tile
-    // translator, so this also picks up NROM's default (unbanked) CHR. The
-    // display isn't running yet, so (unlike the per-frame path) the VRAM
-    // upload can happen immediately rather than waiting for VBlank.
+    // translator, so this also picks up an unbanked (NROM-like) board's default
+    // (identity) CHR. The display isn't running yet, so (unlike the per-frame
+    // path) the VRAM upload can happen immediately rather than waiting for VBlank.
     build_chr_atlas();
     dmaCopy(g_chr4, bg_tiles(),  sizeof g_chr4);
     dmaCopy(g_chr4, obj_tiles(), sizeof g_chr4);

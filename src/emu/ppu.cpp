@@ -13,7 +13,6 @@
 
 #include <platform-nes/video.hpp>
 #include <platform-nes/interrupts.hpp>
-#include <platform-nes/mappers/nrom.hpp>
 
 #include <cstdlib>
 #include <cstring>
@@ -48,18 +47,36 @@ void video::SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
     sprite0_zero = (video::spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
 }
 
-/* Mapper-supplied tile-address translator (::ppu::BindTileTranslator). Defaults
- * to NROM's identity mapping so a non-bank-switching game needs no setup call;
- * a bank-switching mapper (e.g. MMC3) overrides it once, early. */
-static ppu::TileTranslator tileTranslator = &NROM::GetTileLMA;
-
-void ppu::BindTileTranslator(const TileTranslator fn) {
-    tileTranslator = fn;
+/* Weak default ::ppu::ResolveTile: identity, matching a board with no CHR
+ * bank switching at all -- a bank-switching mapper's own emu-side TU (e.g.
+ * src/emu/mappers/mmc3.cpp) supplies a strong definition of this exact
+ * symbol instead. See this function's own doc comment (video.hpp) for why
+ * that always wins over this one with no runtime dispatch. */
+__attribute__((weak)) u32 ppu::ResolveTile(const u16 tileVMA) {
+    return tileVMA;
 }
 
-u32 ppu::ResolveTile(const u16 tileVMA) {
-    return tileTranslator(tileVMA);
+/* Weak default ::ppu::nametableRows: every board answers nametable/attribute
+ * reads from ::VideoRAM's own single row unless a mapper says otherwise --
+ * see this symbol's own doc comment (video.hpp). Same idiom as audio.hpp's
+ * ::sfxs/::nSfx (src/SDL3/audio.cpp). */
+__attribute__((weak)) extern const u8 ppu::nametableRows = 1;
+
+/* Weak default ::ppu::ReadNametable/::WriteNametable: every nametable/
+ * attribute VRAM access funnels through these two -- see ::ppu::ReadNametable's
+ * own doc comment (video.hpp) for the weak/strong relationship a mapper with
+ * its own cart-routed storage (e.g. MMC3 four-screen) overrides. */
+__attribute__((weak)) u8 ppu::ReadNametable(const u16 logical) {
+    return VideoRAM[logical];
 }
+
+__attribute__((weak)) void ppu::WriteNametable(const u16 logical, const u8 value) {
+    VideoRAM[logical] = value;
+}
+
+/* Weak default ::ppu::InitCartVRAM: a board with no cart-routed nametable
+ * storage has nothing to allocate. See its own doc comment (video.hpp). */
+__attribute__((weak)) void ppu::InitCartVRAM() {}
 
 static constexpr u32 nes_rgb[64] = {
     0xFF626262, 0xFF012090, 0xFF1B0CA4, 0xFF3B009E,
@@ -126,6 +143,13 @@ void GenerateFrame(u32 *fb, const int stride) {
 
     const int nt_cols  = vpw < 512 ? 2 : (vpw + 255) / 256;
     const int world_w  = nt_cols * 256;
+    /* How many stacked 240px-tall nametable rows the linked board provides
+     * storage for (::ppu::nametableRows -- 1 for every board except MMC3
+     * four-screen). Folding ppu_y through this instead of a hardcoded 240 is
+     * what lets the background walk reach a second row at all; bounding it to
+     * exactly what the linked board says exists is what keeps that walk from
+     * ever deriving an address into storage that board never allocated. */
+    const int world_h  = static_cast<int>(ppu::nametableRows) * 240;
     const int spr_base = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
     const int spr_h    = (ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE) ? 16 : 8;
 
@@ -173,7 +197,7 @@ void GenerateFrame(u32 *fb, const int stride) {
              * This is computed once per segment: ppu_y only changes at IRQ
              * boundaries, so it is constant within a segment. xScroll is
              * added to px inside the loop for the horizontal scan offset. */
-            const int wy        = ppu_y % 240;
+            const int wy        = ppu_y % world_h;
             const int tile_row  = wy / 8;
             const int local_row = tile_row % 30;
             const int nt_row    = tile_row / 30;
@@ -204,11 +228,11 @@ void GenerateFrame(u32 *fb, const int stride) {
             u8 plane0 = 0, plane1 = 0, tile_pal = 0;
             auto load_tile = [&]() {
                 const int nt_off = (nt_col + ntrow_b) * 0x400;
-                const u8 tile_id = VideoRAM[nt_off + row32 + local_col];
-                const u8 attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
+                const u8 tile_id = ppu::ReadNametable(static_cast<u16>(nt_off + row32 + local_col));
+                const u8 attr    = ppu::ReadNametable(static_cast<u16>(nt_off + 0x3C0 + at_roff + (local_col >> 2)));
                 tile_pal = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
                 const int chr_base = chr_tbl + tile_id * 16 + fine_y;
-                const u32 chr_lma  = tileTranslator(static_cast<u16>(chr_base));
+                const u32 chr_lma  = ppu::ResolveTile(static_cast<u16>(chr_base));
                 plane0 = patternTable[chr_lma];
                 plane1 = patternTable[chr_lma + 8];
             };
@@ -252,7 +276,7 @@ void GenerateFrame(u32 *fb, const int stride) {
                          * sits in $0000-$1FFF PPU space, so in 8x16 mode it naturally
                          * lands in whichever half (R0/R1 vs R2-R5 windows) the tile's
                          * pattern-table bit selected -- no extra bank logic needed here. */
-                        const u32 spr_lma = tileTranslator(static_cast<u16>(addr));
+                        const u32 spr_lma = ppu::ResolveTile(static_cast<u16>(addr));
                         const int cidx    = ((patternTable[spr_lma]      >> col_bit) & 1)
                                           | (((patternTable[spr_lma + 8]  >> col_bit) & 1) << 1);
                         if (cidx == 0) continue;
@@ -324,6 +348,7 @@ void GenerateFrame(u32 *fb, const int stride) {
 void InitMemory(const unsigned vram_bytes) {
     paletteRAM = static_cast<u8 *>(malloc(32));
     VideoRAM   = static_cast<u8 *>(malloc(vram_bytes));
+    ppu::InitCartVRAM();
 }
 
 /* Raster-timeline walk for the GX backend. Same IRQ-dispatch and yScroll-reset
@@ -415,11 +440,11 @@ void Flush(const u8 nt, const u8 at) {
     const u16 vpw = video::viewport_px();
     for (u16 page = 0; vpw < 512 ? page < 2 : page < vpw; page++) {
         for (u16 i = 0; i < 0x3c0; i++) {
-            VideoRAM[page * 0x400 + i] = nt;
+            ppu::WriteNametable(static_cast<u16>(page * 0x400 + i), nt);
         }
 
         for (u16 i = 0; i < 0x40; i++) {
-            VideoRAM[page * 0x400 + 0x3c0 + i] = at;
+            ppu::WriteNametable(static_cast<u16>(page * 0x400 + 0x3c0 + i), at);
         }
     }
 }
@@ -431,20 +456,20 @@ void WriteFromBufferToNameTable(
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
     const u16 offset = xy_to_nt_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = source[i];
+        ppu::WriteNametable(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), source[i]);
     }
 }
 
 void WriteSingleToNameTable(const u16 x, const u16 y, u8 value) {
     const u16 offset = xy_to_nt_addr(x, y);
-    VideoRAM[offset] = value;
+    ppu::WriteNametable(offset, value);
 }
 
 // Address overload: @p address is the 0-based VRAM offset CartesianToAddress returns
-// on this backend (xy_to_nt_addr is already 0-based here), so it indexes VideoRAM
-// directly -- the desktop mirror of the NES poke-by-address path.
+// on this backend (xy_to_nt_addr is already 0-based here), so it routes through the
+// same nametable accessor -- the desktop mirror of the NES poke-by-address path.
 void WriteSingleToNameTable(const int address, u8 value) {
-    VideoRAM[address] = value;
+    ppu::WriteNametable(static_cast<u16>(address), value);
 }
 
 void SetScroll(const u16 x, const u16 y) {
@@ -468,7 +493,7 @@ void WriteFromProviderToNameTable(
 
     const u16 offset = xy_to_nt_addr(x, y);
     for (Idx i = 0; i < amt; ++i) {
-        VideoRAM[offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)] = fn(i);
+        ppu::WriteNametable(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), fn(i));
     }
 }
 
@@ -483,13 +508,13 @@ void WriteFromBufferToAttributeTable(
 ) {
     const u16 offset = xy_to_at_addr(x, y);
     for (u8 i = 0; i < sBuffer; i++) {
-        VideoRAM[offset + i * (polarity ? 8 : 1)] = source[i];
+        ppu::WriteNametable(static_cast<u16>(offset + i * (polarity ? 8 : 1)), source[i]);
     }
 }
 
 void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const u16 offset = xy_to_at_addr(x, y);
-    VideoRAM[offset] = value;
+    ppu::WriteNametable(offset, value);
 }
 
 u16 CartesianToAddress(const u16 x, const u16 y) {
@@ -551,7 +576,7 @@ namespace ppu {
 
 void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
     for (u8 i = 0; i < size; i++) {
-        target[i] = VideoRAM[offset + i];
+        target[i] = ppu::ReadNametable(static_cast<u16>(offset + i));
     }
 }
 

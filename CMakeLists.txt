@@ -473,6 +473,15 @@ elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
         set(PLATFORM_DEFINE TARGET_WII)
     endif()
 
+    # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+    # above): a fact about which board a build is modeling, not something
+    # exclusive to the NES target itself, so this desktop/console preview
+    # needs the same define to route mmc3.cpp's strong ppu::ReadNametable/
+    # WriteNametable overrides correctly off-NES too.
+    if(DEFINED ALTERNATIVE_NAMETABLE)
+        list(APPEND PLATFORM_DEFINE "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+    endif()
+
     # The OGC backend presents the shared software PPU (src/emu) through GX: the
     # emulator and all the nametable/OAM/palette write functions are
     # platform-agnostic and compiled here alongside the GX-specific
@@ -571,6 +580,12 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
     # TARGET_CTR is the group the engine headers gate on (emulated PPU like SDL,
     # but a fixed 32x30 viewport and no SDL headers -- same family as TARGET_OGC).
     target_compile_definitions(platform-nes PUBLIC TARGET_CTR)
+    # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+    # near the top of this file): a fact about which board a build is
+    # modeling, not something exclusive to the NES target itself.
+    if(DEFINED ALTERNATIVE_NAMETABLE)
+        target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+    endif()
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
@@ -650,6 +665,12 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # TARGET_NX is the group the engine headers gate on (emulated PPU, fixed
         # 32x30 viewport, no SDL headers -- same family as TARGET_OGC/TARGET_CTR).
         target_compile_definitions(platform-nes PUBLIC TARGET_NX)
+        # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+        # near the top of this file): a fact about which board a build is
+        # modeling, not something exclusive to the NES target itself.
+        if(DEFINED ALTERNATIVE_NAMETABLE)
+            target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+        endif()
         target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
         file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
@@ -762,6 +783,12 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # the Switch (TARGET_NX) family for the widescreen 52x30 (416x240)
         # viewport, and exclude the SDL3 headers (this backend uses SDL2).
         target_compile_definitions(platform-nes PUBLIC TARGET_WIIU)
+        # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+        # near the top of this file): a fact about which board a build is
+        # modeling, not something exclusive to the NES target itself.
+        if(DEFINED ALTERNATIVE_NAMETABLE)
+            target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+        endif()
         target_link_libraries(platform-nes PUBLIC SDL2::SDL2-static br0::intsh br0::tuple)
 
         # The music is EMBEDDED in the .rpx, not loaded from disk: a native Wii U
@@ -1002,6 +1029,12 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         if(TARGET_PLATFORM STREQUAL "dsi")
             target_compile_definitions(platform-nes PUBLIC TARGET_DSI)
         endif()
+        # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+        # near the top of this file): a fact about which board a build is
+        # modeling, not something exclusive to the NES target itself.
+        if(DEFINED ALTERNATIVE_NAMETABLE)
+            target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+        endif()
         target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
         file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
@@ -1095,6 +1128,12 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # TARGET_GBA is the group the engine headers gate on (native 2D hardware,
         # 30x20 viewport -- the first target narrower than the NES, no SDL headers).
         target_compile_definitions(platform-nes PUBLIC TARGET_GBA)
+        # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+        # near the top of this file): a fact about which board a build is
+        # modeling, not something exclusive to the NES target itself.
+        if(DEFINED ALTERNATIVE_NAMETABLE)
+            target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+        endif()
         target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
         file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
@@ -1165,6 +1204,17 @@ else()
         set(PLATFORM_DEFINE TARGET_WEB)
     else()
         message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux, web")
+    endif()
+
+    # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+    # above): this is a fact about which board a build is modeling, not
+    # something exclusive to the NES target itself, so the desktop preview
+    # needs the same define to route mmc3.cpp's strong ppu::ReadNametable/
+    # WriteNametable overrides correctly off-NES too -- otherwise
+    # ALTERNATIVE_NAMETABLE reads as 0 in every #if here regardless of what
+    # local.cmake actually sets.
+    if(DEFINED ALTERNATIVE_NAMETABLE)
+        list(APPEND PLATFORM_DEFINE "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
     endif()
 
     # ------------------------------------------------------------------

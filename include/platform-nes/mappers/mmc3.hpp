@@ -48,6 +48,25 @@
 
 using namespace br0::intsh;
 
+// Alternative nametable wiring (NES2.0 flags 6, bit 3 -- the "four-screen"
+// bit; see headers/nes2.hpp's own comment on the same macro, which defines
+// this default under TARGET_NES from the CMake -D flag). This file is also
+// compiled off-NES, by every emu backend, where CMake may not always pass
+// the define through -- so it needs its own fallback default here too, in
+// the shared header rather than just mmc3.cpp, since every TU that sees
+// ::mmc3's class layout (below) must agree on which members exist. Only
+// value 1 has a real implementation (src/emu/mappers/mmc3.cpp's strong
+// ::ppu::ReadNametable/::WriteNametable overrides) -- see the static_assert.
+#ifndef ALTERNATIVE_NAMETABLE
+#define ALTERNATIVE_NAMETABLE 0
+#endif
+
+static_assert(ALTERNATIVE_NAMETABLE == 0 || ALTERNATIVE_NAMETABLE == 1,
+    "mmc3: ALTERNATIVE_NAMETABLE must be 0 (ordinary switchable 2-screen "
+    "mirroring) or 1 (four-screen: +2KiB cartridge VRAM) -- other nonzero "
+    "values are reserved for a genuinely different alternative-wiring "
+    "scheme, not folded into 1's meaning, and none is implemented yet.");
+
 /**
  * @brief Pins a function or variable into MMC3's fixed PRG-ROM bank
  *        ($E000-$FFFF).
@@ -143,16 +162,49 @@ public:
      * This is a tile ADDRESS translator, not a tile fetch: it returns an
      * offset for the caller to index into CHR-ROM itself (e.g.
      * `patternTable[GetTileLMA(chr_base)]`), it does not read any bytes
-     * itself. Matches ::ppu::TileTranslator's signature so it can be handed
-     * straight to ::ppu::BindTileTranslator.
+     * itself.
      *
-     * Conditionally declared (off-NES only): only the emu PPU
-     * (src/emu/ppu.cpp) is meant to call this, via the bound function
-     * pointer -- LIBRARY code, not USER code. A game selects banks through
-     * the ordinary ::SwitchCHRBank(chr0Control, ...) call sites (shared with
-     * the NES build) and never calls this directly.
+     * Library-internal, like ::NotifyCHRWrite: the only caller is this
+     * module's own strong `ppu::ResolveTile` override
+     * (src/emu/mappers/mmc3.cpp), which the emu PPU (src/emu/ppu.cpp) calls
+     * unconditionally for every tile fetch -- see that function's own doc
+     * comment (video.hpp) for the weak/strong relationship. Public rather
+     * than private purely because its caller is a free function, not a
+     * member of this class -- C++ access control has no "same translation
+     * unit" exemption the way `poke_only`'s access to ::NotifyCHRWrite gets
+     * for free (::Register is a *nested* class of ::mmc3, so it already has
+     * member-level access). A game selects banks through the ordinary
+     * ::SwitchCHRBank(chr0Control, ...) call sites (shared with the NES
+     * build) and never calls this directly.
      */
     static u32 GetTileLMA(u16 tileVMA);
+
+#if ALTERNATIVE_NAMETABLE == 1
+    /**
+     * @brief Backing storage for this module's strong ::ppu::ReadNametable/
+     *        ::ppu::WriteNametable overrides (src/emu/mappers/mmc3.cpp) --
+     *        the software stand-in for the extra 2 KiB VRAM chip a real
+     *        four-screen MMC3 board carries. Sized and allocated by the
+     *        strong ::ppu::InitCartVRAM override, once, from
+     *        ::emu::InitMemory.
+     *
+     * Only declared under ALTERNATIVE_NAMETABLE == 1: a board without this
+     * wiring never routes anywhere but the console's own ::VideoRAM (the
+     * weak ::ppu::ReadNametable/::WriteNametable defaults already do that),
+     * so it has nothing to back. Public for the same free-function reason as
+     * ::GetTileLMA, above -- not part of this class's intended user-facing
+     * API.
+     */
+    static u8* cartVRAM;
+
+    /// Byte length of one nametable row (::video::nametable_row_bytes(),
+    /// NOT ::VideoRAM's own allocated size -- see ::ppu::InitCartVRAM's own
+    /// doc comment, video.hpp, for why those can differ): everything below
+    /// this logical offset answers from ::VideoRAM, everything at or above
+    /// it answers from ::cartVRAM (offset by this same amount). Set
+    /// alongside ::cartVRAM by ::ppu::InitCartVRAM.
+    static unsigned cartVRAMRowBytes;
+#endif
 
     /**
      * @brief Sets the emu-side CHR mode bit (see ::shape).
@@ -239,13 +291,17 @@ public:
     /**
      * @brief MMC3's six CHR-select registers (R0-R5).
      *
-     * chr0Control/chr1Control select 2 KiB banks (PPU $0000/$0800 under CHR
-     * mode 0); the low bit of the written value is ignored by hardware at that
-     * granularity, though nothing here masks it away -- the shadow simply holds
-     * whatever was written. chr2Control-chr5Control select 1 KiB banks (PPU
-     * $1000/$1400/$1800/$1C00), full 8-bit range (up to 256 KiB CHR-ROM). Named
-     * chrNControl to match VRC1's chr0Control/chr1Control convention as closely
-     * as this chip's extra granularity allows.
+     * chr0Control/chr1Control select 2 KiB windows (PPU $0000/$0800 under CHR
+     * mode 0), but -- like every CHR register on this chip -- the value
+     * written still counts banks in 1 KiB units; the low bit is ignored by
+     * hardware (an odd bank can't be selected, since it wouldn't be 2 KiB-
+     * aligned), though nothing here masks it away -- the shadow simply holds
+     * whatever was written, so a consumer resolving a tile address (e.g.
+     * ::GetTileLMA) must mask it off itself, not just multiply by 2 KiB.
+     * chr2Control-chr5Control select 1 KiB banks (PPU $1000/$1400/$1800/
+     * $1C00), full 8-bit range (up to 256 KiB CHR-ROM). Named chrNControl to
+     * match VRC1's chr0Control/chr1Control convention as closely as this
+     * chip's extra granularity allows.
      */
     static Register<0> chr0Control; ///< CHR-select R0, 2 KiB @ PPU $0000.
     static Register<1> chr1Control; ///< CHR-select R1, 2 KiB @ PPU $0800.
@@ -311,9 +367,11 @@ public:
      *
      * @param reg  chr0Control through chr5Control; any other instantiation is a
      *             compile error.
-     * @param bank Target bank (0-31 for chr0Control/chr1Control's 2 KiB
-     *             granularity -- the low bit is ignored by hardware; 0-255 for
-     *             chr2Control-chr5Control's 1 KiB granularity).
+     * @param bank Target bank, full 8-bit range (0-255) for every CHR
+     *             register, all in 1 KiB units -- for chr0Control/chr1Control
+     *             specifically, an odd value's low bit is ignored by hardware
+     *             (see ::chr0Control's own comment), so only even values
+     *             actually select a distinct 2 KiB window.
      */
     template <u8 Index>
     static constexpr void SwitchCHRBank(Register<Index> &reg, u8 bank) {

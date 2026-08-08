@@ -75,7 +75,14 @@ static constexpr u32 nes_rgb[64] = {
 // ---------------------------------------------------------------------------
 static constexpr int SCREEN_H   = 192;          // visible scanlines
 static constexpr int MAP_COLS   = 64;           // 512px / 8
-static constexpr int MAP_ROWS   = 32;           // 256px / 8
+// g_map_shadow's own row capacity: sized for the WORST case (a four-screen
+// board's two stacked 240px nametable rows, ::ppu::nametableRows == 2) --
+// 512px / 8 x2. An ordinary (::ppu::nametableRows == 1) board only ever
+// fills/DMAs the first half (build_map's own activeRows, below); the
+// unused second half costs a fixed amount of RAM but keeps this file free
+// of any board-specific #if (see mmc3.hpp's own comment on
+// ALTERNATIVE_NAMETABLE for why this TU must not presume that).
+static constexpr int MAP_ROWS   = 64;           // 2 x (256px / 8)
 static constexpr int CHR_TILES  = 512;          // NES tiles in 8 KB CHR
 static constexpr int DS_TILE_SZ = 32;           // bytes per 4bpp 8x8 DS tile
 
@@ -88,8 +95,11 @@ static constexpr int PRIO_SPR_BEHIND = 3;
 namespace {
 
 int  g_bg = 0;                                   // bgInit() handle for BG0
-// BG tilemap shadow (built in RAM, DMA'd to VRAM during VBlank). 64x32 entries
-// laid out as two side-by-side 32x32 screenblocks (the BgSize_T_512x256 layout).
+// BG tilemap shadow (built in RAM, DMA'd to VRAM during VBlank). 64x64
+// entries (MAP_ROWS's own comment), laid out as four 32x32 screenblocks in
+// the standard 2x2 text-BG arrangement (0/1 top row, 2/3 bottom row) -- an
+// ordinary single-row board only ever populates/uses the top row (0/1, the
+// BgSize_T_512x256 layout bgInit selects at init).
 alignas(4) u16 g_map_shadow[MAP_COLS * MAP_ROWS];
 // 4bpp CHR staged in RAM at init and whenever a mapper (e.g. MMC3) switches a
 // CHR bank, then uploaded to BG + OBJ tile VRAM.
@@ -127,8 +137,8 @@ void expand_tile(const u8* nes, u8* out) {
 }
 
 // Rebuild the 4bpp CHR atlas from CHR_ROM, resolving each of the 512 PPU tile
-// slots through the mapper's currently-bound translator. NROM's translator is
-// the identity function, so this is byte-for-byte what the old one-shot init
+// slots through ::ppu::ResolveTile. An unbanked board's default is the
+// identity function, so this is byte-for-byte what the old one-shot init
 // loop did; a bank-switching mapper (MMC3) instead pulls each tile from
 // whatever physical CHR bank is presently switched into that PPU address, the
 // same resolution the per-pixel software rasterizer does on every fetch. Only
@@ -156,14 +166,27 @@ void build_palettes() {
     BG_PALETTE[0] = to_bgr555(nes_rgb[paletteRAM[0] & 0x3F]);
 }
 
-// Rebuild the 64x32 BG tilemap shadow from the two NES nametables in VideoRAM.
-// Mirrors the tile/attribute decode the software PPU and GX backend use; NES
-// vertical wrap at 240 (30 rows) is reproduced with `row % 30`.
+// Rebuild the BG tilemap shadow from the linked board's nametables in
+// VideoRAM/cart VRAM (::ppu::ReadNametable). Mirrors the tile/attribute
+// decode the software PPU and GX backend use; NES vertical wrap within one
+// 240px row (30 tile-rows) is reproduced with `tile_row % 30`, the same way
+// ppu.cpp's GenerateFrame does.
+//
+// activeRows -- not the fixed MAP_ROWS capacity -- bounds the loop: an
+// ordinary single-row board (::ppu::nametableRows == 1) only ever fills the
+// first 32 DS tile-rows (one screenblock-row), the same footprint and cost
+// this loop always had before four-screen support existed, and never calls
+// ::ppu::ReadNametable with an offset past what that board's VideoRAM
+// actually covers.
 void build_map() {
-    const int atlas0 = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
+    const int atlas0     = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
+    const int activeRows = 32 * static_cast<int>(ppu::nametableRows);
+    const int rowMod     = 30 * static_cast<int>(ppu::nametableRows);
 
-    for (int row = 0; row < MAP_ROWS; row++) {
-        const int local_row = row % 30;
+    for (int row = 0; row < activeRows; row++) {
+        const int tile_row  = row % rowMod;
+        const int local_row = tile_row % 30;
+        const int nt_row    = tile_row / 30;
         const int row32     = local_row * 32;
         const int at_roff   = (local_row >> 2) * 8;
         const int at_rbits  = ((local_row >> 1) & 1) * 4;
@@ -171,16 +194,18 @@ void build_map() {
         for (int col = 0; col < MAP_COLS; col++) {
             const int nt_col    = col >> 5;          // 0 or 1 (which nametable)
             const int local_col = col & 31;
-            const int nt_off    = nt_col * 0x400;
+            const int nt_off    = (nt_col + nt_row * 2) * 0x400;
 
-            const u8  tile_id = VideoRAM[nt_off + row32 + local_col];
-            const u8  attr    = VideoRAM[nt_off + 0x3C0 + at_roff + (local_col >> 2)];
+            const u8  tile_id = ppu::ReadNametable(static_cast<u16>(nt_off + row32 + local_col));
+            const u8  attr    = ppu::ReadNametable(static_cast<u16>(nt_off + 0x3C0 + at_roff + (local_col >> 2)));
             const int pal     = (attr >> (((local_col >> 1) & 1) * 2 + at_rbits)) & 3;
 
             const u16 entry = static_cast<u16>((atlas0 + tile_id) | (pal << 12));
-            // Two side-by-side 32x32 screenblocks: left cols -> block 0, right -> 1.
-            const int sb  = col >> 5;
-            const int idx = sb * 1024 + row * 32 + local_col;
+            // Four screenblocks in the standard 2x2 text-BG arrangement: 0/1
+            // top row (nt_row 0), 2/3 bottom row (nt_row 1) -- row & 31 is
+            // the row's position within its own 32-tall screenblock.
+            const int sb  = (col >> 5) + nt_row * 2;
+            const int idx = sb * 1024 + (row & 31) * 32 + local_col;
             g_map_shadow[idx] = entry;
         }
     }
@@ -338,9 +363,16 @@ void irq::init() {
     vramSetBankA(VRAM_A_MAIN_BG);       // 128 KB: BG map + tiles
     vramSetBankB(VRAM_B_MAIN_SPRITE);   // 128 KB: OBJ tiles
 
-    // 512x256 text BG so the two horizontal NES nametables fit and X scroll wraps
-    // at the 512px world width. map at base 0 (0-4 KB), tiles at base 1 (16 KB).
-    g_bg = bgInit(0, BgType_Text4bpp, BgSize_T_512x256, 0, 1);
+    // Text BG so the NES nametable(s) fit and X scroll wraps at the 512px
+    // world width; map at base 0, tiles at base 1 (16 KB). Size follows the
+    // linked board's own ::ppu::nametableRows (video.hpp): 512x256 (two
+    // horizontal NES nametables, one row) for an ordinary board, 512x512
+    // (four screenblocks, a four-screen board's second stacked row)
+    // otherwise -- see build_map's own comment for how activeRows keeps an
+    // ordinary board's per-frame cost identical to before this was possible
+    // at all.
+    g_bg = bgInit(0, BgType_Text4bpp,
+        ppu::nametableRows > 1 ? BgSize_T_512x512 : BgSize_T_512x256, 0, 1);
     bgSetPriority(g_bg, PRIO_BG);
 
     oamInit(&oamMain, SpriteMapping_1D_32, false);

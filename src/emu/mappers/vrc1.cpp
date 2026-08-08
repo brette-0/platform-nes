@@ -17,10 +17,14 @@
  * stand-in for what VRC1 would otherwise be doing on the PPU's own address
  * bus: it tracks which physical 4 KiB CHR bank is currently switched into
  * each of VRC1's two pattern-table windows, and answers "what's the real
- * offset for this PPU-space tile address" via ::VRC1::GetTileLMA, bound to
- * the PPU through ::ppu::BindTileTranslator.
+ * offset for this PPU-space tile address" via ::VRC1::GetTileLMA. This file
+ * also supplies the strong (non-weak) definition of ::ppu::ResolveTile the
+ * emu PPU calls unconditionally for every tile fetch -- see that function's
+ * own doc comment (video.hpp) for why this always wins over the emu PPU's
+ * own weak default with no runtime dispatch.
  */
 #include <platform-nes/mappers/vrc1.hpp>
+#include <platform-nes/video.hpp>
 
 tech::wo_register<0x8000> VRC1::window1Control;
 tech::wo_register<0xa000> VRC1::window2Control;
@@ -39,10 +43,24 @@ u8 VRC1::chrBanks[2] = {};
  * to account for (unlike MMC3): PPU $0000-$0FFF always sources chr0Control's
  * bank, $1000-$1FFF always sources chr1Control's -- so this is a plain
  * bank * window size + in-window offset, no branching on shape needed.
+ *
+ * The result is wrapped modulo ::ppu::chrRomBytes -- see ::mmc3::GetTileLMA's
+ * own doc comment for why (a bank register can address past what this build
+ * actually embeds; real hardware aliases rather than faulting).
  */
 u32 VRC1::GetTileLMA(const u16 tileVMA) {
     constexpr u32 kWindow = 0x1000;
     const u16 vma = tileVMA & 0x1FFF;
-    if (vma < 0x1000) return static_cast<u32>(chrBanks[0]) * kWindow + vma;
-    return static_cast<u32>(chrBanks[1]) * kWindow + (vma - 0x1000);
+    const u32 lma = vma < 0x1000
+        ? static_cast<u32>(chrBanks[0]) * kWindow + vma
+        : static_cast<u32>(chrBanks[1]) * kWindow + (vma - 0x1000);
+    return lma % ppu::chrRomBytes;
+}
+
+/**
+ * @brief Strong ::ppu::ResolveTile override -- see that function's own doc
+ * comment (video.hpp) for the weak/strong relationship.
+ */
+u32 ppu::ResolveTile(const u16 tileVMA) {
+    return VRC1::GetTileLMA(tileVMA);
 }
