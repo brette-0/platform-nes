@@ -63,16 +63,19 @@ void mmc3::SetMirroring(const bool horizontal) {
  * @brief Off-NES stand-in for the real $C000/$C001/$E001 MMC3 IRQ-arming
  * sequence: there's no scanline-counter hardware to poke, so this just arms
  * the shared single-slot ::irq::irqPending mechanism with the application's
- * fixed ::IRQ entry point (::irq_vector) at pixel column 0 of @p scanline --
- * the same handler the real hardware IRQ vector would reach, only the
- * position varies. Matches ::video::WaitThenReactToSpriteZero's shape, but
- * always targets ::irq_vector rather than a caller-supplied callback, since
- * a real interrupt source has exactly one destination, chosen at compile
- * time -- never a runtime-supplied function pointer.
+ * fixed ::IRQ entry point (::irq_vector) at @p position -- the same handler
+ * the real hardware IRQ vector would reach, only the position varies.
+ * Matches ::video::WaitThenReactToSpriteZero's shape, but always targets
+ * ::irq_vector rather than a caller-supplied callback, since a real
+ * interrupt source has exactly one destination, chosen at compile time --
+ * never a runtime-supplied function pointer.
+ *
+ * @p scanline plays no part in this -- see this function's own doc comment
+ * (mmc3.hpp) for why it's specifically NOT reused to derive @p position.
  */
-void mmc3::ScheduleScanlineIRQ(const u8 scanline) {
+void mmc3::ScheduleScanlineIRQ(const u8, const vec2<u16> position) {
     irq::irqHandler      = irq_vector;
-    irq::irqPosition     = { 0, scanline };
+    irq::irqPosition     = position;
     irq::irqPendingValid = true;
 }
 

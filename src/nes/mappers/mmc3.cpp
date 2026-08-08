@@ -17,7 +17,10 @@ void mmc3::SetMirroring(const bool horizontal) {
     tech::poke(0xa000, horizontal ? 1 : 0);
 }
 
-void mmc3::ScheduleScanlineIRQ(const u8 scanline) {
+// @p position is off-NES only (see this function's own doc comment,
+// mmc3.hpp) -- real hardware's scanline counter has no pixel-column concept
+// for it to mean, so it's simply unused here.
+void mmc3::ScheduleScanlineIRQ(const u8 scanline, vec2<u16>) {
     irqLatch = scanline; // $C000: reload value.
     tech::poke(0xc001, 0);     // $C001: force reload at next clock (value ignored).
     tech::poke(0xe001, 0);     // $E001: enable (value ignored).

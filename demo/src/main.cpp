@@ -236,7 +236,7 @@ interrupt nmiHandler() {
     }
 
     ppu::SetColorPriority(0);
-    mmc3::ScheduleScanlineIRQ(kHudSplitMMC3);   // TODO: MAKE IT GOOD
+    mmc3::ScheduleScanlineIRQ(kHudSplitMMC3, {0, kHudSplitRow});
 
     nmi_done = true;
 }
@@ -247,7 +247,7 @@ interrupt irqHandler() {
     ApplyHudSplit();
 }
 
-static oam::oam_t Clear(const u16 _) {
+static oam::oam_t Clear(const u16) {
     return 0xf0;
 }
 

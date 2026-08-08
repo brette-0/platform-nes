@@ -393,9 +393,31 @@ public:
      * next one.
      *
      * @param scanline Reload value for the countdown; 0 fires on the very next
-     *                 qualifying PPU address change.
+     *                 qualifying PPU address change. Meaningful on NES only --
+     *                 it becomes the real $C000 register value.
+     * @param position Off-NES ONLY: exactly where the software rasterizer's
+     *                  raster split fires (see ::irq::irqPosition, which this
+     *                  sets directly). Defunct on NES -- real MMC3 silicon has
+     *                  no pixel-column concept for its scanline counter, only
+     *                  a scanline-repetition count, so there is nothing for
+     *                  this to mean there.
+     *
+     *                  Deliberately NOT derived from @p scanline off-NES
+     *                  either, even though both nominally describe "which
+     *                  scanline": @p scanline is tuned against REAL
+     *                  hardware's own IRQ-counter timing quirks (a caller
+     *                  reaching for a specific visible split row on NES
+     *                  typically has to pass a slightly different register
+     *                  value to land there, once real A12-edge-counting
+     *                  latency is accounted for) -- reusing that NES-tuned
+     *                  number as the software rasterizer's own fire position
+     *                  mixes two unrelated timing models and lands the split
+     *                  at the wrong row there, off by whatever that fudge
+     *                  factor was. @p position is the row (and column) the
+     *                  caller actually means, independent of any real-
+     *                  hardware counter quirk.
      */
-    static void ScheduleScanlineIRQ(u8 scanline);
+    static void ScheduleScanlineIRQ(u8 scanline, vec2<u16> position);
 
     /**
      * @brief Disables further scanline IRQs and clears any currently pending
