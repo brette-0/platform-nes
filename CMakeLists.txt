@@ -1225,82 +1225,42 @@ else()
     include(FetchContent)
 
     # ------------------------------------------------------------------
-    # On Linux, also build libusb from source from the official
-    # libusb-cmake wrapper repository. libusb-cmake embeds the real
-    # libusb source as a git subtree; its 'main' branch tracks the
-    # latest stable libusb release (currently 1.0.29). Override
-    # LIBUSB_CMAKE_GIT_TAG to pin to a specific tag or SHA for
-    # reproducible builds.
+    # On Linux, link against the system's libusb-1.0 (LGPL-2.1) instead
+    # of vendoring and building our own copy. Policy: LGPL dependencies
+    # must always be linked dynamically, against the distro-provided
+    # library, never bundled/embedded as source or a static archive —
+    # this keeps us out of the business of redistributing (and relicensing
+    # obligations around) libusb ourselves, and lets users satisfy the
+    # LGPL's relink requirement by swapping their system package.
     #
-    # NOTE: libusb's Linux backend requires libudev headers to be
-    # installed on the host system (libudev-dev on Debian/Ubuntu,
-    # systemd-devel on Fedora/RHEL).
+    # NOTE: requires libusb-1.0 + its pkg-config file installed on the
+    # host (libusb-1.0-0-dev on Debian/Ubuntu, libusbx-devel on Fedora/RHEL).
     # ------------------------------------------------------------------
     if(TARGET_PLATFORM STREQUAL "linux")
-        set(LIBUSB_CMAKE_GIT_TAG "main" CACHE STRING
-                "libusb-cmake git ref; 'main' tracks latest stable libusb")
-
-        set(LIBUSB_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-        set(LIBUSB_BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
-        set(LIBUSB_BUILD_TESTING     OFF CACHE BOOL "" FORCE)
-        set(LIBUSB_INSTALL_TARGETS   OFF CACHE BOOL "" FORCE)
-        set(LIBUSB_ENABLE_LOGGING    ON  CACHE BOOL "" FORCE)
-
-        FetchContent_Declare(
-                libusb_cmake
-                GIT_REPOSITORY https://github.com/libusb/libusb-cmake.git
-                GIT_TAG        ${LIBUSB_CMAKE_GIT_TAG}
-                GIT_SHALLOW    TRUE
-        )
-        FetchContent_MakeAvailable(libusb_cmake)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(LibUSB REQUIRED IMPORTED_TARGET libusb-1.0)
 
         # --------------------------------------------------------------
-        # Redirect SDL3's libusb detection at our in-tree build.
+        # Wire the system libusb into SDL3's own detection.
         #
         # SDL3 calls find_package(LibUSB), which invokes its bundled
-        # cmake/FindLibUSB.cmake and scans the filesystem for libusb.
-        # To make it adopt the libusb we just built, we:
-        #
-        #   1. Pre-create the LibUSB::LibUSB imported target the find
-        #      module would otherwise define, as an alias of usb-1.0.
-        #      The module's `if(LibUSB_FOUND AND NOT TARGET
-        #      LibUSB::LibUSB)` guard then skips its own add_library.
-        #
-        #   2. Seed LibUSB_INCLUDE_PATH and LibUSB_LIBRARY in the
-        #      cache, so find_path / find_library are no-ops and
-        #      find_package_handle_standard_args sets LibUSB_FOUND.
-        #
-        #   3. Point LibUSB_INCLUDE_PATH at libusb-cmake's vendored
-        #      libusb sources so the find module's file(READ) of
-        #      libusb.h returns a real LIBUSB_API_VERSION that passes
-        #      its >= 0x01000102 check.
-        #
-        #   4. Force SDL_HIDAPI_LIBUSB_SHARED=OFF. Our libusb is a
-        #      static archive with no SONAME; SDL3's dlopen path can't
-        #      extract USB_1.0_LIB_SONAME from it, and we want the
-        #      direct-link branch in sdlchecks.cmake instead.
+        # cmake/FindLibUSB.cmake. Pre-creating the LibUSB::LibUSB target
+        # it would otherwise define (as an alias of the PkgConfig-derived
+        # target above) satisfies its `if(LibUSB_FOUND AND NOT TARGET
+        # LibUSB::LibUSB)` guard, so it adopts the same system library
+        # instead of running its own find_path/find_library scan.
         # --------------------------------------------------------------
         if(NOT TARGET LibUSB::LibUSB)
-            add_library(LibUSB::LibUSB ALIAS usb-1.0)
+            add_library(LibUSB::LibUSB ALIAS PkgConfig::LibUSB)
         endif()
 
-        set(LibUSB_INCLUDE_PATH "${libusb_cmake_SOURCE_DIR}/libusb/libusb"
-                CACHE PATH "Path to libusb headers (points at libusb-cmake's vendored sources)" FORCE)
-
-        # LibUSB_LIBRARY only needs a non-empty, non-NOTFOUND value to
-        # satisfy find_package_handle_standard_args; the actual link
-        # edge goes through the LibUSB::LibUSB alias above, not this
-        # path. Pointing it at the header file is a harmless placeholder.
-        set(LibUSB_LIBRARY "${LibUSB_INCLUDE_PATH}/libusb.h"
-                CACHE FILEPATH "Placeholder; real linkage flows through the LibUSB::LibUSB alias target" FORCE)
-
-        set(SDL_HIDAPI_LIBUSB_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_HIDAPI_LIBUSB_SHARED ON CACHE BOOL "" FORCE)
 
         # Disable SDL3's libusb-based HIDAPI backend. Its configure-time
         # check_c_source_compiles test requires LibUSB::LibUSB to resolve
         # inside an isolated try_compile scratch project, which ALIAS
         # targets (our hook above) don't survive. The project links
-        # usb-1.0 directly for its own NES-over-USB needs, and SDL3
+        # libusb directly for its own NES-over-USB needs, and SDL3
         # still supports gamepads via the native hidraw backend.
         set(SDL_HIDAPI_LIBUSB OFF CACHE BOOL "" FORCE)
 
@@ -1349,7 +1309,7 @@ else()
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
     if(TARGET_PLATFORM STREQUAL "linux")
-        target_link_libraries(platform-nes PUBLIC usb-1.0)
+        target_link_libraries(platform-nes PUBLIC PkgConfig::LibUSB)
     endif()
 
     # The web build decodes a compressed Vorbis track at runtime (the full WAV
@@ -1520,7 +1480,12 @@ exec ./demo \"\$@\"
             # their notices to travel with any binary redistribution. The
             # AppImage is exactly such a binary, so the license texts are
             # copied into usr/share/doc/platform-nes/ before linuxdeploy
-            # seals the bundle.
+            # seals the bundle. libusb (LGPL-2.1) is deliberately excluded
+            # here: it's linked dynamically against the host's system
+            # package rather than vendored, so we hold no local copy of its
+            # license text to copy — the bundled libusb-1.0.so.0 itself
+            # still carries redistribution obligations, but they fall on
+            # whoever built that system package, not on this build.
             set(_APPDIR_LICENSES "${APPDIR}/usr/share/doc/platform-nes")
 
             add_custom_target(demo-appimage
@@ -1536,8 +1501,6 @@ exec ./demo \"\$@\"
                             "${CMAKE_SOURCE_DIR}/LICENSE"     "${_APPDIR_LICENSES}/LICENSE"
                     COMMAND ${CMAKE_COMMAND} -E copy
                             "${sdl3_SOURCE_DIR}/LICENSE.txt"  "${_APPDIR_LICENSES}/LICENSE.SDL3"
-                    COMMAND ${CMAKE_COMMAND} -E copy
-                            "${libusb_cmake_SOURCE_DIR}/libusb/COPYING" "${_APPDIR_LICENSES}/LICENSE.libusb"
                     COMMAND ${CMAKE_COMMAND} -E copy
                             "${CMAKE_BINARY_DIR}/AppRun"      "${APPDIR}/AppRun"
                     COMMAND chmod +x "${APPDIR}/AppRun"
