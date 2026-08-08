@@ -237,8 +237,9 @@ IWRAM_CODE void build_palettes() {
 // Rebuild the BG tilemap shadow from the linked board's nametables in
 // VideoRAM/cart VRAM (::ppu::ReadNametable). Mirrors the tile/attribute
 // decode the software PPU and GX/DS backends use; NES vertical wrap within
-// one 240px row (30 tile-rows) is reproduced with `tile_row % 30`, the same
-// way ppu.cpp's GenerateFrame does.
+// one 240px row (30 tile-rows) is reproduced with `local_row % 30`, applied
+// independently within each 32-row screenblock-half -- see build_map's own
+// comment for why it can't be one combined period across both halves.
 //
 // activeRows -- not the fixed MAP_ROWS capacity -- bounds the loop: an
 // ordinary single-row board (::ppu::nametableRows == 1) only ever fills the
@@ -257,12 +258,29 @@ IWRAM_CODE void build_palettes() {
 IWRAM_CODE void build_map() {
     const int atlas0     = (ppu::PPUCTRL & ppu::ctrl::BG_ADDR) ? 256 : 0;
     const int activeRows = 32 * static_cast<int>(ppu::nametableRows);
-    const int rowMod     = 30 * static_cast<int>(ppu::nametableRows);
 
     for (int row = 0; row < activeRows; row++) {
-        const int tile_row  = row % rowMod;
-        const int local_row = tile_row % 30;
-        const int nt_row    = tile_row / 30;
+        // Each 32-row screenblock-half is an independent 30-periodic content
+        // stream -- NOT one continuous period spanning both halves. Physical
+        // screenblock placement is fixed at 32-row boundaries (hardware
+        // fact); NES nametable content repeats every 30 rows (hardware fact
+        // too); those two periods don't divide evenly into each other, so
+        // deriving nt_row from a combined modulus across the full 64-row
+        // span (e.g. `row % 60`) desyncs partway through the second half --
+        // confirmed as a real, reproduced bug (screenblock 2/3 content
+        // landing 2 rows short of where it belongs, "mirroring" the tail of
+        // screenblock 0/1's own row-30/31 wraparound into it instead).
+        // row >> 5 alone gives which screenblock-half (and therefore which
+        // nt_row) a physical row belongs to, always exactly at the 32-row
+        // boundary; local_row's own `% 30` wrap then reproduces, within
+        // THAT half alone, the same 2-row scroll-lookahead duplication an
+        // ordinary single-row board already relies on (rows 30/31 restating
+        // rows 0/1) -- this is also, by construction, byte-for-byte the
+        // original single-row formula whenever ::ppu::nametableRows == 1
+        // (activeRows == 32, so nt_row is always 0).
+        const int nt_row    = row >> 5;
+        const int row_in_sb = row & 31;
+        const int local_row = row_in_sb % 30;
         const int row32     = local_row * 32;
         const int at_roff   = (local_row >> 2) * 8;
         const int at_rbits  = ((local_row >> 1) & 1) * 4;
@@ -278,10 +296,9 @@ IWRAM_CODE void build_map() {
 
             const u16 entry = static_cast<u16>((atlas0 + tile_id) | (pal << 12));
             // Four screenblocks in the standard 2x2 text-BG arrangement: 0/1
-            // top row (nt_row 0), 2/3 bottom row (nt_row 1) -- row & 31 is
-            // the row's position within its own 32-tall screenblock.
+            // top row (nt_row 0), 2/3 bottom row (nt_row 1).
             const int sb  = (col >> 5) + nt_row * 2;
-            const int idx = sb * 1024 + (row & 31) * 32 + local_col;
+            const int idx = sb * 1024 + row_in_sb * 32 + local_col;
             g_map_shadow[idx] = entry;
         }
     }
