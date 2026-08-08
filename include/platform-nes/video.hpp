@@ -611,83 +611,6 @@ namespace ppu {
      * regardless of whether any CHR bank actually changed.
      */
     extern u32 chrGeneration;
-
-    /**
-     * @brief Mapper-supplied nametable/attribute VRAM router: for a given
-     *        logical nametable+attribute address (the same flattened offset
-     *        ::CartesianToAddress / the internal xy_to_nt_addr / xy_to_at_addr
-     *        already compute), decides which physical storage answers it and
-     *        how.
-     *
-     * Same reason for existing as ::TileTranslator, one level up: a board's
-     * mapper can route some nametable addresses to memory it owns itself
-     * (e.g. MMC3 four-screen's extra 2 KiB cartridge VRAM) instead of the
-     * console's own VRAM (::VideoRAM). ::routesToCart is asked first; only
-     * the branch actually taken does further work, so a board that never
-     * routes anywhere but system VRAM (every board except MMC3 four-screen
-     * today) pays for one predictable-false branch and nothing else.
-     *
-     * Bound as a runtime struct-of-pointers, not a compile-time alias: like
-     * ::TileTranslator, src/emu/ppu.cpp is one shared translation unit built
-     * once regardless of which mapper a given game links, so which mapper is
-     * active can only be known at a runtime call site (see ::BindNametableRouter),
-     * never baked in by #include at this file's own compile time.
-     */
-    struct NametableRouter {
-        /** True if @p logical is answered by the mapper's own storage rather than ::VideoRAM. */
-        bool (*routesToCart)(u16 logical);
-        /** For a system-routed @p logical: offset to index ::VideoRAM with. */
-        u16  (*getSystemOffset)(u16 logical);
-        /** For a cart-routed @p logical: read one byte from the mapper's own storage. */
-        u8   (*getTile)(u16 logical);
-        /** For a cart-routed @p logical: write one byte to the mapper's own storage. */
-        void (*setTile)(u16 logical, u8 value);
-        /**
-         * @brief A prompt, not an instruction: handed the size of ONE
-         *        nametable bank (::nametable_bank_bytes), decides for itself
-         *        how many banks of its own storage to allocate (0 for a
-         *        board with no cart-routed storage at all).
-         */
-        void (*generateVideoMemory)(u16 nametableBankBytes);
-        /**
-         * @brief How many stacked 240px-tall nametable "rows" this board's
-         *        routing spans -- 1 for every board that only ever occupies
-         *        the first row (every board today except MMC3 four-screen,
-         *        which is 2: system VRAM's row plus ::cartVRAM's row).
-         *
-         * The emu PPU's per-pixel vertical scroll walk (src/emu/ppu.cpp's
-         * ::emu::GenerateFrame) needs this to know how far it's safe to let
-         * the background wrap vertically before folding back to row 0 --
-         * without it, a board with only 1 row of real storage would have no
-         * way to stop the walk from computing an address into memory it
-         * never allocated. A plain compile-time constant, not a function
-         * pointer like the members above: unlike which physical memory
-         * answers a given address (which can be genuinely mapper-specific
-         * per-address logic), how many rows exist at all is one fixed fact
-         * about the board, decided once at ::BindNametableRouter time.
-         */
-        u8 rowCount;
-    };
-
-    /**
-     * @brief Installs the mapper-specific ::NametableRouter the emu PPU
-     *        (src/emu/ppu.cpp) resolves every nametable/attribute VRAM
-     *        access through.
-     *
-     * Off-NES only, matching ::BindTileTranslator: on TARGET_NES, quadrant-
-     * to-physical-VRAM routing is board wiring the CPU never touches, so
-     * there is nothing for this to do there. Defaults to a router that
-     * always answers from ::VideoRAM (identity, never routes to cart) so a
-     * board without extra cartridge VRAM (NROM, VRC1, MMC3 without
-     * ALTERNATIVE_NAMETABLE) never needs to call this at all -- only a
-     * four-screen board (e.g. `ppu::BindNametableRouter({ &mmc3::RoutesToCart,
-     * &mmc3::GetSystemOffset, &mmc3::GetTile, &mmc3::SetTile,
-     * &mmc3::GenerateVideoMemory })`) needs to, once, early -- the same way
-     * it already calls ::BindTileTranslator.
-     *
-     * @param router Router to install; replaces whatever was bound before.
-     */
-    void BindNametableRouter(NametableRouter router);
 #endif
 }
 #if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
@@ -843,15 +766,10 @@ namespace video {
      * (wider in LANDSCAPE, taller in PORTRAIT) scales up proportionally, but
      * is still always exactly double -- never a continuously-growing amount.
      */
-    /** @brief Size of one real NES nametable bank, in bytes -- the unit ::vram_bytes()
-     *  counts in, and what a mapper's ::ppu::NametableRouter::generateVideoMemory
-     *  is handed to size its own cart-routed storage against (see its own doc comment). */
-    constexpr unsigned nametable_bank_bytes() { return 0x400u; }
-
     constexpr unsigned vram_bytes() {
         const unsigned banks_x = (static_cast<unsigned>(viewport_tx()) + 31) / 32;
         const unsigned banks_y = (static_cast<unsigned>(viewport_ty()) + 29) / 30;
-        return 2u * banks_x * banks_y * nametable_bank_bytes();
+        return 2u * banks_x * banks_y * 0x400u;
     }
 }
 

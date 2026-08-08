@@ -1167,16 +1167,6 @@ else()
         message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux, web")
     endif()
 
-    # Alternative nametable wiring (see the TARGET_NES branch's own comment,
-    # above): this is a fact about which board a build is modeling, not
-    # something exclusive to the NES target itself, so the desktop preview
-    # needs the same define to route mmc3::NametableRouter (mmc3.hpp)
-    # correctly off-NES too -- otherwise ALTERNATIVE_NAMETABLE reads as 0 in
-    # every #if here regardless of what local.cmake actually sets.
-    if(DEFINED ALTERNATIVE_NAMETABLE)
-        list(APPEND PLATFORM_DEFINE "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
-    endif()
-
     # ------------------------------------------------------------------
     # Fetch SDL3 source and build it statically alongside the project.
     # ------------------------------------------------------------------
