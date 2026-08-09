@@ -16,8 +16,7 @@
  * emits the imaginary-register save/restore prologue and epilogue ending
  * in RTI.
  */
-#ifndef INTERRUPTS_H
-#define INTERRUPTS_H
+#pragma once
 #include <intsh>
 using namespace br0::intsh;
 #include <cstddef>
@@ -438,5 +437,3 @@ namespace irq {
  */
 void reset();
 } // namespace irq
-
-#endif

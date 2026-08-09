@@ -23,8 +23,7 @@
  * ::RESTORE / ::SHADOW call sites and direct `apu::` calls compiling
  * unchanged on every target.
  */
-#ifndef APU_H
-#define APU_H
+#pragma once
 
 #ifdef TARGET_NES
 
@@ -160,4 +159,3 @@ namespace apu {
 extern u8 APU_REGISTERS_snapshot[15];
 
 #endif // TARGET_NES
-#endif // APU_H

@@ -48,72 +48,6 @@ namespace video {
 extern const u16 PatternTables;
 } // namespace video
 
-#ifdef TARGET_NES
-  /** @brief Assembler `.pushsection` directive for CHR ROM on NES. */
-  #define _CHR_PUSH  ".pushsection .chr_rom,\"a\"\n"
-#elif defined(_WIN32)
-  #define _CHR_PUSH  ".pushsection chr_rom$m,\"dr\"\n"
-#elif defined(__APPLE__)
-  #define _CHR_PUSH  ".pushsection __DATA,chr_rom\n"
-#else
-  #define _CHR_PUSH  ".pushsection chr_rom,\"a\"\n"
-#endif
-
-/** @brief Assembler `.popsection` directive complementing ::_CHR_PUSH. */
-#define _CHR_POP ".popsection\n"
-
-/**
- * @brief Embeds a `.chr`/binary file into the CHR ROM section.
- *
- * Emits `<name>_start` and `<name>_end` labels around the bytes
- * included from @p path, and declares them as extern arrays so C code
- * can access them via ::CHR and ::CHR_SIZE.
- *
- * @param name Identifier used to derive the `<name>_start` /
- *             `<name>_end` symbols.
- * @param path Path to the binary file to `.incbin`.
- */
-#define CHARACTER_ROM(name, path)                \
-__asm__(                                         \
-_CHR_PUSH                                        \
-".global " #name "_start\n"                      \
-".global " #name "_end\n"                        \
-#name "_start:\n"                                \
-".incbin \"" path "\"\n"                         \
-#name "_end:\n"                                  \
-_CHR_POP                                         \
-);                                               \
-ASM_LINKAGE const u8 name##_start[];        \
-ASM_LINKAGE const u8 name##_end[];
-
-/**
- * @brief Forward-declares the `<name>_start` / `<name>_end` symbols of a CHR
- *        ROM blob defined elsewhere.
- *1
- * Use this in a header to reference a blob from a different translation unit:
- * the blob is *defined* once by ::CHARACTER_ROM in a single `.cpp`, and any TU
- * that includes the header may then use ::CHR and ::CHR_SIZE on @p name. Do not
- * place ::CHARACTER_ROM itself in a header -- its `.incbin` would embed the
- * bytes (and redefine the symbols) in every TU that includes it.
- *
- * @param name Identifier matching the one passed to ::CHARACTER_ROM.
- */
-#define EXTERN_CHARACTER_ROM(name)               \
-ASM_LINKAGE const u8 name##_start[];        \
-ASM_LINKAGE const u8 name##_end[];
-
-/**
- * @brief Pads the CHR ROM section with @p count copies of @p val.
- * @param count Number of bytes to emit.
- * @param val   Byte value to fill with.
- */
-#define CHARACTER_ROM_PAD(count, val)          \
-__asm__(                                       \
-_CHR_PUSH                                      \
-".fill " #count ", 1, " #val "\n"              \
-_CHR_POP                                       \
-)
-
 /**
  * @brief Number of sprites in an OAM region.
  *
@@ -124,36 +58,6 @@ _CHR_POP                                       \
  * coexist.
  */
 #define OAM_SPRITES 64
-
-/**
- * @brief Forces alignment of the current insertion point inside the
- *        CHR ROM section.
- *
- * Emits a `.balign` directive inside ::_CHR_PUSH / ::_CHR_POP so the
- * next bytes added to the section (via ::CHARACTER_ROM, etc.) start
- * at an @p addr -byte boundary. Required by the PPU / emulated PPU,
- * which maps CHR pages on fixed 8 KB boundaries.
- *
- * @param addr Alignment in bytes.
- */
-#define CHARACTER_ROM_ALIGN(addr)                \
-__asm__(                                         \
-_CHR_PUSH                                        \
-".balign " #addr "\n"                            \
-_CHR_POP                                         \
-)
-
-/**
- * @brief Typed pointer to the start of a named CHR ROM blob.
- * @param name Identifier previously passed to ::CHARACTER_ROM.
- */
-#define CHR(name)       ((const u8 *)(name##_start))
-
-/**
- * @brief Size in bytes of a named CHR ROM blob.
- * @param name Identifier previously passed to ::CHARACTER_ROM.
- */
-#define CHR_SIZE(name)  ((size_t)(name##_end - name##_start))
 
 /* ------------------------------------------------------------------------ *
  *  Symbolic CHR tiles (#embed)                                             *
@@ -280,9 +184,14 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
  * boundary. So a pad here keeps every downstream `_tile` correct for free.
  *
  * Like every link in the chain it defines `<name>_tile`, `<name>_ntiles`, and
- * `<name>_accum`, so the following blob simply names this pad as its @p prev:
+ * `<name>_accum`, so the following blob simply names this pad as its @p prev.
+ * That means it needs a name of its own even though nothing ever reads it back
+ * -- if the gap sits right after a real blob's close, prefer
+ * ::CHARACTER_ROM_END_PAD_TO instead, which folds the pad into that blob and
+ * avoids the throwaway identifier. Reach for this one when the gap isn't
+ * anchored to a blob you're closing right now (e.g. padding straight off
+ * ::CHR_ORIGIN):
  *
- *      CHARACTER_ROM_END(chrMushletStanding, chrWand);   // last sprite
  *      CHARACTER_ROM_PAD_TO(chrBgGap, chrMushletStanding, CHR_TILES_PER_TABLE);
  *      CHARACTER_ROM_BEGIN(chrBush)                       // first BG tile
  *      #embed "..."
@@ -304,6 +213,47 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
   constexpr u8  name##_ntiles    = (u8)name##_pad_tiles;               \
   constexpr auto name##_accum    =                                     \
       nes_chr::cat(prev##_accum,                                       \
+                   std::array<u8, (size_t)name##_pad_tiles * 16>{});
+
+/**
+ * @brief Like ::CHARACTER_ROM_END, but rounds @p name's own end up to tile
+ *        index @p to_tile with zero-fill instead of stopping where the
+ *        `#embed`ed data ends.
+ *
+ * Use this instead of a plain ::CHARACTER_ROM_END followed by a standalone
+ * ::CHARACTER_ROM_PAD_TO when the gap sits immediately after the blob you're
+ * closing -- the common case (e.g. rounding the last sprite up to the
+ * background pattern table). The pad becomes part of @p name itself, so the
+ * next blob just names @p name as its `prev`, same as any other link -- no
+ * throwaway identifier for the gap:
+ *
+ *      CHARACTER_ROM_END_PAD_TO(chrMushletStanding, chrWand,
+ *                                CHR_TILES_PER_TABLE);   // last sprite
+ *      CHARACTER_ROM_BEGIN(chrBush)                       // first BG tile
+ *      #embed "..."
+ *      CHARACTER_ROM_END(chrBush, chrMushletStanding);
+ *
+ * @param name    This blob's identifier (as with ::CHARACTER_ROM_END).
+ * @param prev    The blob declared immediately before (or ::CHR_ORIGIN).
+ * @param to_tile Tile index @p name should end at (i.e. the next blob's
+ *                start). Must be within one table (<= 256 tiles) of where
+ *                the `#embed`ed data would otherwise end.
+ */
+#define CHARACTER_ROM_END_PAD_TO(name, prev, to_tile)                  \
+  };                                                                    \
+  constexpr u8  name##_tile       = (u8)(prev##_tile + prev##_ntiles); \
+  constexpr u8  name##_raw_ntiles =                                    \
+      (u8)(sizeof(name##_raw) / sizeof(name##_raw[0]) / 16);           \
+  constexpr int name##_pad_tiles  = (int)(to_tile)                     \
+                          - (int)(name##_tile + name##_raw_ntiles);    \
+  static_assert(name##_pad_tiles >= 0,                                 \
+      "CHARACTER_ROM_END_PAD_TO: blob already passes to_tile");        \
+  static_assert(name##_pad_tiles <= (int)CHR_TILES_PER_TABLE,          \
+      "CHARACTER_ROM_END_PAD_TO: gap exceeds one pattern table");      \
+  constexpr u8  name##_ntiles     =                                    \
+      (u8)(name##_raw_ntiles + name##_pad_tiles);                      \
+  constexpr auto name##_accum     =                                    \
+      nes_chr::cat(nes_chr::cat(prev##_accum, nes_chr::make(name##_raw)), \
                    std::array<u8, (size_t)name##_pad_tiles * 16>{});
 
 /* Materialize the padded CHR ROM image from a blob's accumulation (the whole

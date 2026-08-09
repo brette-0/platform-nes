@@ -12,9 +12,7 @@
  * Application code should use the ::TRACKS and ::SFX macros to register
  * assets at file scope, then call the play/update helpers at runtime.
  */
-#ifndef AUDIO_H
-#define AUDIO_H
-
+#pragma once
 #include <intsh>
 using namespace br0::intsh;
 
@@ -177,5 +175,3 @@ void AudioInit();
 void AudioUpdate();
 
 } // namespace audio
-
-#endif

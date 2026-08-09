@@ -1217,83 +1217,64 @@ else()
         list(APPEND PLATFORM_DEFINE "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
     endif()
 
-    # ------------------------------------------------------------------
-    # Fetch SDL3 source and build it statically alongside the project.
-    # ------------------------------------------------------------------
-    set(SDL3_GIT_TAG "release-3.2.16" CACHE STRING "SDL3 git tag to fetch")
-
     include(FetchContent)
 
     # ------------------------------------------------------------------
-    # On Linux, link against the system's libusb-1.0 (LGPL-2.1) instead
-    # of vendoring and building our own copy. Policy: LGPL dependencies
-    # must always be linked dynamically, against the distro-provided
-    # library, never bundled/embedded as source or a static archive —
-    # this keeps us out of the business of redistributing (and relicensing
-    # obligations around) libusb ourselves, and lets users satisfy the
-    # LGPL's relink requirement by swapping their system package.
+    # On Linux, link against the system's SDL3 and libusb-1.0 instead of
+    # vendoring and building our own copies. libusb is LGPL-2.1, which
+    # requires dynamic linking against a distro-swappable library anyway;
+    # SDL3 (zlib license) has no such requirement, but distros commonly
+    # package it now (Arch, Fedora, Debian trixie+, Tumbleweed, Gentoo,
+    # NixOS) and building it from source every time is otherwise pure
+    # waste. Same policy for both: prefer the system package on Linux,
+    # keep vendoring on platforms (Windows/Mac/Web) where one isn't
+    # reliably available.
     #
-    # NOTE: requires libusb-1.0 + its pkg-config file installed on the
-    # host (libusb-1.0-0-dev on Debian/Ubuntu, libusbx-devel on Fedora/RHEL).
+    # NOTE: requires libsdl3-dev + libusb-1.0 and their pkg-config files
+    # installed on the host (libsdl3-dev + libusb-1.0-0-dev on Debian/
+    # Ubuntu trixie+, SDL3-devel + libusbx-devel on Fedora/RHEL). Older
+    # LTS distros (Ubuntu 22.04/24.04, Debian bookworm, RHEL) don't carry
+    # SDL3 yet and need a PPA/backport or a source build override.
     # ------------------------------------------------------------------
     if(TARGET_PLATFORM STREQUAL "linux")
         find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL3   REQUIRED IMPORTED_TARGET sdl3)
         pkg_check_modules(LibUSB REQUIRED IMPORTED_TARGET libusb-1.0)
 
-        # --------------------------------------------------------------
-        # Wire the system libusb into SDL3's own detection.
-        #
-        # SDL3 calls find_package(LibUSB), which invokes its bundled
-        # cmake/FindLibUSB.cmake. Pre-creating the LibUSB::LibUSB target
-        # it would otherwise define (as an alias of the PkgConfig-derived
-        # target above) satisfies its `if(LibUSB_FOUND AND NOT TARGET
-        # LibUSB::LibUSB)` guard, so it adopts the same system library
-        # instead of running its own find_path/find_library scan.
-        # --------------------------------------------------------------
+        if(NOT TARGET SDL3::SDL3-static)
+            add_library(SDL3::SDL3-static ALIAS PkgConfig::SDL3)
+        endif()
         if(NOT TARGET LibUSB::LibUSB)
             add_library(LibUSB::LibUSB ALIAS PkgConfig::LibUSB)
         endif()
+    else()
+        # ------------------------------------------------------------------
+        # Fetch SDL3 source and build it statically alongside the project.
+        # ------------------------------------------------------------------
+        set(SDL3_GIT_TAG "release-3.2.16" CACHE STRING "SDL3 git tag to fetch")
 
-        set(SDL_HIDAPI_LIBUSB_SHARED ON CACHE BOOL "" FORCE)
+        set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+        set(SDL_STATIC ON  CACHE BOOL "" FORCE)
+        set(SDL_TEST   OFF CACHE BOOL "" FORCE)
+        set(SDL_TESTS  OFF CACHE BOOL "" FORCE)
+        set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+        set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+        set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
+        set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
+        set(SDL_POWER OFF CACHE BOOL "" FORCE)
+        set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
+        set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
+        set(SDL_GPU OFF CACHE BOOL "" FORCE)
+        set(SDL_RENDER_GPU OFF CACHE BOOL "" FORCE)
 
-        # Disable SDL3's libusb-based HIDAPI backend. Its configure-time
-        # check_c_source_compiles test requires LibUSB::LibUSB to resolve
-        # inside an isolated try_compile scratch project, which ALIAS
-        # targets (our hook above) don't survive. The project links
-        # libusb directly for its own NES-over-USB needs, and SDL3
-        # still supports gamepads via the native hidraw backend.
-        set(SDL_HIDAPI_LIBUSB OFF CACHE BOOL "" FORCE)
-
-        # Make SDL link the system audio/video libraries via DT_NEEDED
-        # instead of dlopen'ing them at runtime. Required so linuxdeploy's
-        # ldd walk can discover and bundle them into the AppImage.
-        set(SDL_ALSA_SHARED       OFF CACHE BOOL "" FORCE)
-        set(SDL_PULSEAUDIO_SHARED OFF CACHE BOOL "" FORCE)
-        set(SDL_X11_SHARED        OFF CACHE BOOL "" FORCE)
-        set(SDL_WAYLAND_SHARED    OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+                SDL3
+                GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+                GIT_TAG        ${SDL3_GIT_TAG}
+                GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(SDL3)
     endif()
-
-    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC ON  CACHE BOOL "" FORCE)
-    set(SDL_TEST   OFF CACHE BOOL "" FORCE)
-    set(SDL_TESTS  OFF CACHE BOOL "" FORCE)
-    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-    set(SDL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
-    set(SDL_CAMERA OFF CACHE BOOL "" FORCE)
-    set(SDL_SENSOR OFF CACHE BOOL "" FORCE)
-    set(SDL_POWER OFF CACHE BOOL "" FORCE)
-    set(SDL_HAPTIC OFF CACHE BOOL "" FORCE)
-    set(SDL_DIALOG OFF CACHE BOOL "" FORCE)
-    set(SDL_GPU OFF CACHE BOOL "" FORCE)
-    set(SDL_RENDER_GPU OFF CACHE BOOL "" FORCE)
-
-    FetchContent_Declare(
-            SDL3
-            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-            GIT_TAG        ${SDL3_GIT_TAG}
-            GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(SDL3)
 
     # The SDL3 backend presents the shared software PPU (src/emu): the emulator
     # and all the nametable/OAM/palette write functions are platform-agnostic
@@ -1476,16 +1457,13 @@ cd \"\${HERE}/usr/bin\"
 exec ./demo \"\$@\"
 ")
 
-            # LGPL-2.1 (libusb) and the zlib license (SDL3) both require
-            # their notices to travel with any binary redistribution. The
-            # AppImage is exactly such a binary, so the license texts are
-            # copied into usr/share/doc/platform-nes/ before linuxdeploy
-            # seals the bundle. libusb (LGPL-2.1) is deliberately excluded
-            # here: it's linked dynamically against the host's system
-            # package rather than vendored, so we hold no local copy of its
-            # license text to copy — the bundled libusb-1.0.so.0 itself
-            # still carries redistribution obligations, but they fall on
-            # whoever built that system package, not on this build.
+            # The AppImage bundles binary redistributions of libSDL3.so and
+            # libusb-1.0.so alongside the demo, but both are now linked
+            # against the host's system packages rather than vendored, so
+            # we hold no local copy of either's license text to copy in —
+            # those obligations fall on whoever built the system packages,
+            # not on this build. Only our own LICENSE travels with the
+            # bundle.
             set(_APPDIR_LICENSES "${APPDIR}/usr/share/doc/platform-nes")
 
             add_custom_target(demo-appimage
@@ -1499,8 +1477,6 @@ exec ./demo \"\$@\"
                             "${CMAKE_SOURCE_DIR}/demo/sfx"    "${APPDIR}/usr/bin/sfx"
                     COMMAND ${CMAKE_COMMAND} -E copy
                             "${CMAKE_SOURCE_DIR}/LICENSE"     "${_APPDIR_LICENSES}/LICENSE"
-                    COMMAND ${CMAKE_COMMAND} -E copy
-                            "${sdl3_SOURCE_DIR}/LICENSE.txt"  "${_APPDIR_LICENSES}/LICENSE.SDL3"
                     COMMAND ${CMAKE_COMMAND} -E copy
                             "${CMAKE_BINARY_DIR}/AppRun"      "${APPDIR}/AppRun"
                     COMMAND chmod +x "${APPDIR}/AppRun"

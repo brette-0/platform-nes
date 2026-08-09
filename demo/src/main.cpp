@@ -2,6 +2,9 @@
 #include "header.hpp"
 #include "main.hpp"
 
+#include <platform-nes/apu.hpp>
+#include <platform-nes/mappers/mmc3.hpp>
+
 #include "graphics/colours.hpp"
 #include "graphics/strings.hpp"
 #include "graphics/graphics.hpp"
@@ -9,13 +12,13 @@
 #include "graphics/metatiles.hpp"
 
 #include "level/levels.hpp"
-#include "actor.hpp"
 #include "level/collision_map.hpp"
 #include "level/dynamic.hpp"
 #include "level/player.hpp"
 
-#include <platform-nes/apu.hpp>
-#include <platform-nes/mappers/mmc3.hpp>
+#include "actor.hpp"
+
+#include "modes/level.hpp"
 
 using namespace demo;
 
@@ -170,10 +173,9 @@ RESET {
     irq::EnableInterrupts();
     // ReSharper disable once CppDFAEndlessLoop
     while (!quit) {
-        if (port1 & input::START) {
-#ifndef  TARGET_NES
-            quit = 1;
-#endif
+        input::PollControllers(&port1, &port2);
+        if (port1 & input::START && (port1 ^ lastPort1) & input::START) {
+            paused = !paused;
         }
 
         ppu::SetColorPriority(0x40);   // green band:        player1.Update
@@ -204,7 +206,6 @@ constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time
 
 interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
-    input::PollControllers(&port1, &port2);
     oam::RefreshSprites(OAMBuffer);
 
     using enum eLevelStreamCommands;

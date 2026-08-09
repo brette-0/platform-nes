@@ -23,9 +23,8 @@ also required for other targets to specify where the song should loop on complet
 Video
 -----
 
-It's required to specify which mirroring technology is being used during compilation, as ``platform-nes`` only supports
-NROM at this point in time and generates more emulated PPU VRAM to scale with the axis which isn't mirrored for true
-widescreen.
+All features implemented by any mapper is reflected by the emulated PPU, this includes nametable magic, runtime mirror
+changes and Character ROM Switching.
 
 Input
 -----

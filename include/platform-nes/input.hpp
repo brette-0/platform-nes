@@ -8,8 +8,7 @@
  * targets. Each poll returns a byte whose bits correspond to the
  * ::Buttons enumeration.
  */
-#ifndef INPUT_H
-#define INPUT_H
+#pragma once
 
 #include <intsh>
 using namespace br0::intsh;
@@ -56,5 +55,3 @@ enum Buttons {
 void PollControllers(u8* port1, u8* port2);
 
 } // namespace input
-
-#endif //INPUT_H

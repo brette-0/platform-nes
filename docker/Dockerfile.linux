@@ -1,14 +1,16 @@
 # Cross-platform Linux build image for platform-nes.
 #
 # Debian Trixie ships Clang 19 / GCC 14, needed to compile the engine as
-# gnu++23 (Bullseye's Clang 11 predates C++23). The trade-off is a higher
-# runtime floor: Trixie's glibc (~2.41) means the AppImage targets reasonably
-# recent distros rather than everything back to ~Ubuntu 20.04. SDL3 is linked
-# statically, so the resulting binary only needs the system X11/Wayland/ALSA/
-# PulseAudio libraries at runtime, not their -dev packages. libusb-1.0 is the
-# one dependency linked dynamically (LGPL-2.1 requires it): its -dev package
-# is needed here for the build-time pkg-config check, and the resulting
-# binary expects libusb-1.0.so.0 to be present on whatever system runs it.
+# gnu++23 (Bullseye's Clang 11 predates C++23). Trixie is also the first
+# Debian stable to carry libsdl3-dev, which is why it was picked over
+# Bookworm. The trade-off is a higher runtime floor: Trixie's glibc
+# (~2.41) means the AppImage targets reasonably recent distros rather than
+# everything back to ~Ubuntu 20.04. SDL3 and libusb-1.0 are both linked
+# dynamically against this image's system packages (not vendored/built
+# from source) via pkg-config; their -dev packages are needed here for the
+# build-time pkg-config checks, and the resulting binary expects
+# libSDL3.so.0 and libusb-1.0.so.0 to be present on whatever system runs
+# it — linuxdeploy bundles both into the AppImage at package time.
 FROM debian:trixie
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -30,25 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         file \
         pkg-config \
         squashfs-tools \
-        libudev-dev \
+        libsdl3-dev \
         libusb-1.0-0-dev \
         libasound2-dev \
-        libpulse-dev \
-        libx11-dev \
-        libxext-dev \
-        libxrandr-dev \
-        libxcursor-dev \
-        libxi-dev \
-        libxfixes-dev \
-        libxss-dev \
-        libxkbcommon-dev \
-        libwayland-dev \
-        libdrm-dev \
-        libgbm-dev \
-        libgl1-mesa-dev \
-        libegl1-mesa-dev \
-        libdbus-1-dev \
-        libibus-1.0-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Debian Bullseye ships CMake 3.18, but the intsh/tuple dependencies declare

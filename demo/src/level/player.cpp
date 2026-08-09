@@ -6,6 +6,7 @@
 #include "../graphics/metatiles.hpp"
 #include "collision_map.hpp"
 #include "levels.hpp"
+#include "../modes/level.hpp"
 
 using namespace demo;
 using enum eLevelStreamCommands;
@@ -210,6 +211,7 @@ static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u16 tx) {
 // ---------------------------------------------------------------------------
 
 void Player::Update() {
+    if (paused) return;
     Actor* self = &actor;
 
     // P2 doesn't drive scroll; cameraX may have moved this frame (P1 went first).

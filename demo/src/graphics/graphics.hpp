@@ -19,19 +19,17 @@
 
 CHARACTER_ROM_BEGIN(chrSprite0)
 #embed "../../chr/sprites/sprite0.chr"
-CHARACTER_ROM_END(chrSprite0, CHR_ORIGIN);
-
 // chrSprite0 is a single tile, landing chrPlayerStanding on an odd tile id.
 // Hardware 8x16 sprites pack the top/bottom tile of a pair as (tile & 0xFE) /
 // (tile & 0xFE) + 1, so the pair's top tile must sit at an even local index --
-// pad one tile here to align chrPlayerStanding to an even boundary.
-CHARACTER_ROM_PAD_TO(chrSpriteAlignGap, chrSprite0,
-                      (chrSprite0_tile + chrSprite0_ntiles + 1) & ~1);
+// pad chrSprite0's own end here to align chrPlayerStanding to an even boundary.
+CHARACTER_ROM_END_PAD_TO(chrSprite0, CHR_ORIGIN,
+                          (chrSprite0_tile + chrSprite0_raw_ntiles + 1) & ~1);
 
 // player sprite graphics
 CHARACTER_ROM_BEGIN(chrPlayerStanding)
 #embed "../../chr/sprites/player/standing.chr"
-CHARACTER_ROM_END(chrPlayerStanding, chrSpriteAlignGap);
+CHARACTER_ROM_END(chrPlayerStanding, chrSprite0);
 
 // power sprite graphics
 CHARACTER_ROM_BEGIN(chrBerries)
@@ -45,17 +43,12 @@ CHARACTER_ROM_END(chrWand, chrBerries);
 // enemy sprite graphics
 CHARACTER_ROM_BEGIN(chrMushletStanding)
 #embed "../../chr/sprites/enemies/mushlet/standing.chr"
-CHARACTER_ROM_END(chrMushletStanding, chrWand);
-
-// Pattern-table boundary: sprites above live in table 0 ($0000); the background
-// tiles below must live in table 1 ($1000) to match PPUCTRL's BG_ADDR. Padding
-// to tile 256 makes each BG `_tile` wrap to its $1000-relative index for free.
-CHARACTER_ROM_PAD_TO(chrTableGap, chrMushletStanding, CHR_TILES_PER_TABLE);
+CHARACTER_ROM_END_PAD_TO(chrMushletStanding, chrWand, CHR_TILES_PER_TABLE);
 
 // world static tiles
 CHARACTER_ROM_BEGIN(chrBush)
 #embed "../../chr/tiles/static/bush.chr"
-CHARACTER_ROM_END(chrBush, chrTableGap);
+CHARACTER_ROM_END(chrBush, chrMushletStanding);
 
 CHARACTER_ROM_BEGIN(chrLiquid)
 #embed "../../chr/tiles/static/liquid.chr"

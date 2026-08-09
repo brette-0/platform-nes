@@ -14,8 +14,7 @@
  * Include this file — not the individual subsystem headers — from
  * application code.
  */
-#ifndef PLATFORM_NES_LIBRARY_H
-#define PLATFORM_NES_LIBRARY_H
+#pragma once
 #include <intsh>
 using namespace br0::intsh;
 
@@ -68,5 +67,3 @@ extern int quit;
 #include "video.hpp"
 #include "audio.hpp"
 #include "interrupts.hpp"
-
-#endif // PLATFORM_NES_LIBRARY_H
