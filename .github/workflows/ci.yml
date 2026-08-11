@@ -7,6 +7,7 @@
 #   locally byte-for-byte:
 #
 #       docker compose run --rm build-nes      # == the `nes` job
+#       PRESET=nes-pal-release docker compose run --rm build-nes  # == the `nes-pal` job
 #       docker compose run --rm build-gc       # == the `gc` job
 #       docker compose run --rm build-wii      # == the `wii` job
 #       docker compose run --rm build-web      # == the `web` job
@@ -21,6 +22,7 @@
 #   which executes Linux-container jobs against the host Docker daemon:
 #
 #       act -j nes
+#       act -j nes-pal
 #       act -j gc
 #       act -j wii
 #       act -j web
@@ -70,6 +72,30 @@ jobs:
         with:
           name: demo-nes
           path: cmake-build-ci-nes-release/demo.nes
+          if-no-files-found: error
+
+  nes-pal:
+    name: NES PAL (ROM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cache build tree
+        uses: actions/cache@v5
+        with:
+          path: cmake-build-ci-nes-pal-release
+          key: nes-pal-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.nes') }}
+          restore-keys: nes-pal-
+
+      # Same image/service as the `nes` job, just pointed at the nes-pal-release
+      # preset (TARGET_PLATFORM=nes_pal -> REGION=1, PAL FamiStudio note tables).
+      - name: Build demo.nes (PAL)
+        run: docker compose run --rm --build -e PRESET=nes-pal-release build-nes
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-nes-pal
+          path: cmake-build-ci-nes-pal-release/demo.nes
           if-no-files-found: error
 
   gc:
