@@ -1,12 +1,18 @@
 # NES (6502) build image for platform-nes.
 #
-# Ships the two toolchains the NES target needs and nothing the desktop builds
+# Ships the toolchains the NES target needs and nothing the desktop builds
 # pull in:
 #   * llvm-mos-sdk  -- the C++23 -> 6502 cross compiler + cross binutils
 #                      (clang, ld.lld, llvm-readelf) installed under /opt/llvm-mos.
 #   * cc65 (ca65)   -- assembles the FamiStudio sound engine. The Debian package
 #                      puts ca65 on PATH, which is where CMakeLists.txt looks for
 #                      it (find_program(CA65 ca65 ...) falls back to PATH).
+#   * FamiStudio CLI -- regenerates demo/audio/tracks/nes_audio.s from
+#                       demo/nes.fms (find_program(FAMISTUDIO ...) in
+#                       CMakeLists.txt). Runs fine headless off just the .NET
+#                       runtime -- the asm-export command never touches
+#                       audio/display, even though the bundled libglfw.so/
+#                       libopenal32.so exist for the GUI app.
 #
 # The same image backs CI and local runs: `docker compose run --rm build-nes`
 # produces a byte-identical demo.nes on any host, and `act -j nes` reuses it.
@@ -17,6 +23,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # No host clang/gcc is configured as the compiler here: the NES build drives
 # the llvm-mos clang exclusively via the SDK toolchain file. build-essential is
 # kept only for libc-dev/binutils that CMake's compiler probe expects to find.
+# unzip extracts the FamiStudio release below; libicu76 is the ICU package
+# the .NET runtime needs for globalization (FamiStudio's CLI calls
+# String.ToLower() while parsing args, which aborts at startup without it).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         cc65 \
@@ -25,8 +34,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wget \
         ca-certificates \
         xz-utils \
+        unzip \
         file \
+        libicu76 \
     && rm -rf /var/lib/apt/lists/*
+
+# .NET 8.0 runtime. Debian trixie ships no dotnet packages at all (not even
+# in contrib/non-free), so this uses Microsoft's official install script
+# (self-contained, no apt repo registration) rather than apt. Runtime-only
+# ("--runtime dotnet"), not the SDK -- FamiStudio's CLI only needs to run.
+RUN wget -qO /tmp/dotnet-install.sh https://dot.net/v1/dotnet-install.sh \
+    && chmod +x /tmp/dotnet-install.sh \
+    && /tmp/dotnet-install.sh --channel 8.0 --runtime dotnet --install-dir /opt/dotnet \
+    && rm /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/opt/dotnet
+ENV PATH="/opt/dotnet:${PATH}"
+
+# FamiStudio CLI. Pinned version (unlike llvm-mos-sdk's "latest" below) since
+# this drives a committed build artifact (demo/audio/tracks/nes_audio.s) --
+# an unpinned CLI could silently re-encode audio differently between builds.
+# The release zip's top-level "FamiStudio" launcher shells out to
+# `dotnet FamiStudio.dll` itself, so no wrapper script is needed once it's on
+# PATH.
+ARG FAMISTUDIO_VERSION=4.5.3
+RUN FAMISTUDIO_VERSION_NODOTS="$(echo "${FAMISTUDIO_VERSION}" | tr -d '.')" \
+    && wget -qO /tmp/famistudio.zip \
+        "https://github.com/BleuBleu/FamiStudio/releases/download/${FAMISTUDIO_VERSION}/FamiStudio${FAMISTUDIO_VERSION_NODOTS}-LinuxAMD64.zip" \
+    && unzip -q /tmp/famistudio.zip -d /opt/famistudio \
+    && rm /tmp/famistudio.zip \
+    && chmod +x /opt/famistudio/FamiStudio \
+    && ln -s /opt/famistudio/FamiStudio /usr/local/bin/famistudio
 
 # Debian's CMake predates the 4.2 floor the intsh/tuple dependencies declare
 # (and CMakePresets.json needs 3.21+). Install Kitware's official binary, pinned
