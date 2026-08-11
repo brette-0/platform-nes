@@ -270,7 +270,7 @@ static void UpdateSfx() {
     }
 }
 
-void audio::AudioInit() {
+void audio::AudioInit(u8) {
     constexpr SDL_AudioSpec spec = {
         .format = SDL_AUDIO_F32LE,
         .channels = 2,

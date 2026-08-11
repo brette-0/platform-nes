@@ -20,7 +20,7 @@ float *audio::pcm_buffer = nullptr;
 /** @brief Size of ::pcm_buffer, in samples. */
 u32 audio::pcm_buffer_size = 0;
 
-void audio::AudioInit() {}
+void audio::AudioInit(u8) {}
 void audio::AudioUpdate() {}
 
 void audio::TrackPlay(u8 /*index*/) {}

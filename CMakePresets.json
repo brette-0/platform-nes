@@ -25,6 +25,22 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
+      "name": "nes-pal-release",
+      "inherits": "_base",
+      "displayName": "NES PAL (Release)",
+      "description": "Same NES ROM build as nes-release, but TARGET_PLATFORM=nes_pal sets REGION=1 -- FamiStudio assembles with PAL note tables/timing instead of NTSC. See local.cmake.example for LLVM_MOS_SDK setup.",
+      "cacheVariables": {
+        "TARGET_PLATFORM": "nes_pal",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "nes-pal-debug",
+      "inherits": "nes-pal-release",
+      "displayName": "NES PAL (Debug)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
       "name": "linux-release",
       "inherits": "_base",
       "displayName": "Linux (Release)",

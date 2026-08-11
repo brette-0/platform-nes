@@ -30,6 +30,10 @@ u8 port2;
 u8 lastPort1;
 u8 lastPort2;
 
+constexpr u8 kHudSplitRow   = 16;
+constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
+constexpr u8 kHUDSplitDelay = 58;
+
 // Forward-declared so irqHandler can call it directly once the MMC3
 // scanline IRQ fires below the HUD (see kHudSplitLatch / irqHandler).
 static void ApplyHudSplit();
@@ -155,7 +159,7 @@ RESET {
 
     ppu::SetScroll(0, 0);
 
-    audio::AudioInit();
+    audio::AudioInit(REGION);
     audio::TrackPlay(0);
 
     level::ColMapSeed(0, { level::TileData }, { level::DynLengths, level::DynData, 0 });
@@ -201,9 +205,6 @@ RESET {
     }
 }
 
-constexpr u8 kHudSplitRow   = 16;
-constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
-
 interrupt nmiHandler() {
     lastPort1 = port1; lastPort2 = port2;
     oam::RefreshSprites(OAMBuffer);
@@ -244,7 +245,7 @@ interrupt nmiHandler() {
 
 interrupt irqHandler() {
     mmc3::AcknowledgeScanlineIRQ();
-    tech::SpinWait(58);
+    tech::SpinWait(kHUDSplitDelay);
     ApplyHudSplit();
 }
 

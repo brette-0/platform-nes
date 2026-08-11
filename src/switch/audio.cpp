@@ -208,7 +208,7 @@ static void audio_thread(void *) {
     }
 }
 
-void audio::AudioInit() {
+void audio::AudioInit(u8) {
     romfsInit();
     load_track(0);
     load_sfx();

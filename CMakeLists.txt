@@ -5,6 +5,15 @@
 # local.cmake is gitignored.
 include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
 
+# REGION is a separate axis from TARGET_PLATFORM: it distinguishes NTSC (0,
+# the default for every target) from PAL (1) console timing/note tables, not
+# which platform's backend gets built. TARGET_PLATFORM=nes_pal is the only
+# value that sets REGION=1 -- it otherwise builds exactly the "nes" branch
+# below (PLATFORM_DEFINE stays TARGET_NES; there is no separate TARGET_NES_PAL
+# define) since a PAL NES is still an NES as far as every non-audio-timing
+# backend concern goes.
+set(REGION 0)
+
 # The NES target cross-compiles with llvm-mos. Everything it needs -- clang,
 # ld.lld, llvm-readelf -- lives inside the SDK, so the build resolves those from
 # the SDK root, never the shell PATH. Point LLVM_MOS_SDK at your SDK install in
@@ -14,7 +23,7 @@ include("${CMAKE_SOURCE_DIR}/local.cmake" OPTIONAL)
 # (-DCMAKE_TOOLCHAIN_FILE=... or an IDE preset) takes precedence and skips this.
 # Keeping the SDK off PATH lets a bare clang/clang++ resolve to the host system
 # compiler for the desktop builds instead of the 6502 cross-compiler.
-if(TARGET_PLATFORM STREQUAL "nes" AND NOT CMAKE_TOOLCHAIN_FILE)
+if((TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal") AND NOT CMAKE_TOOLCHAIN_FILE)
     if(NOT LLVM_MOS_SDK)
         message(FATAL_ERROR
             "NES build requires the llvm-mos-sdk location, but LLVM_MOS_SDK is "
@@ -107,7 +116,11 @@ FetchContent_Declare(
 # ----------------------------------------------------------------------
 # NES target
 # ----------------------------------------------------------------------
-if(TARGET_PLATFORM STREQUAL "nes")
+if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
+    if(TARGET_PLATFORM STREQUAL "nes_pal")
+        set(REGION 1)
+    endif()
+
     # Mapper 4 (MMC3), not NROM: linked against the generic nes-platform
     # crt0 (LLVM_MOS_PLATFORM=nes, not nes-nrom), since nes-nrom's own
     # crt0.o/link.ld hardcode NROM-specific __prg_rom_size/__chr_rom_size
@@ -160,7 +173,7 @@ if(TARGET_PLATFORM STREQUAL "nes")
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes CXX)
-    set(PLATFORM_DEFINE TARGET_NES)
+    set(PLATFORM_DEFINE TARGET_NES "REGION=${REGION}")
 
     # NROM has no bankswitching, so RESET has nowhere to "escape to" and
     # stays plain int main(). Every other mapper needs its RESET/main pinned
@@ -213,6 +226,10 @@ if(TARGET_PLATFORM STREQUAL "nes")
                 ${FAMISTUDIO_DIR}/NoteTables/famistudio_note_table_lsb.bin)
         file(DOWNLOAD ${FAMISTUDIO_BASE_URL}/NoteTables/famistudio_note_table_msb.bin
                 ${FAMISTUDIO_DIR}/NoteTables/famistudio_note_table_msb.bin)
+        file(DOWNLOAD ${FAMISTUDIO_BASE_URL}/NoteTables/famistudio_note_table_pal_lsb.bin
+                ${FAMISTUDIO_DIR}/NoteTables/famistudio_note_table_pal_lsb.bin)
+        file(DOWNLOAD ${FAMISTUDIO_BASE_URL}/NoteTables/famistudio_note_table_pal_msb.bin
+                ${FAMISTUDIO_DIR}/NoteTables/famistudio_note_table_pal_msb.bin)
     endif()
 
     # Locate the ca65 assembler and llvm-readelf binary used below. ca65 is
@@ -247,12 +264,22 @@ if(TARGET_PLATFORM STREQUAL "nes")
     endmacro()
 
     famistudio_extract(FAMISTUDIO_SEGMENT          "FAMISTUDIO_CA65_CODE_SEGMENT[ \t]+([A-Za-z0-9_]+)")
-    famistudio_extract(FAMISTUDIO_CFG_NTSC_SUPPORT "FAMISTUDIO_CFG_NTSC_SUPPORT[ \t]*=[ \t]*([0-9]+)")
-    famistudio_extract(FAMISTUDIO_CFG_PAL_SUPPORT  "FAMISTUDIO_CFG_PAL_SUPPORT[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_CFG_DPCM_SUPPORT "FAMISTUDIO_CFG_DPCM_SUPPORT[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_CFG_SFX_SUPPORT  "FAMISTUDIO_CFG_SFX_SUPPORT[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_CFG_SFX_STREAMS  "FAMISTUDIO_CFG_SFX_STREAMS[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_USE_VOLUME_TRACK "FAMISTUDIO_USE_VOLUME_TRACK[ \t]*=[ \t]*([0-9]+)")
+
+    # NTSC/PAL support are no longer literal digits in famistudio_config.s --
+    # that file now computes them itself from the same REGION passed into
+    # ca65 below (-D REGION=${REGION}), so they're computed identically here
+    # rather than regex-extracted (there's no literal "= 0"/"= 1" left in the
+    # file to match).
+    set(FAMISTUDIO_CFG_NTSC_SUPPORT 1)
+    set(FAMISTUDIO_CFG_PAL_SUPPORT 0)
+    if(REGION)
+        set(FAMISTUDIO_CFG_NTSC_SUPPORT 0)
+        set(FAMISTUDIO_CFG_PAL_SUPPORT 1)
+    endif()
 
     if(FAMISTUDIO_CFG_NTSC_SUPPORT AND FAMISTUDIO_CFG_PAL_SUPPORT)
         message(FATAL_ERROR
@@ -280,6 +307,7 @@ if(TARGET_PLATFORM STREQUAL "nes")
     add_custom_command(
             OUTPUT ${FAMISTUDIO_OBJ}
             COMMAND ${CA65}
+            -D REGION=${REGION}
             -I ${CMAKE_SOURCE_DIR}/demo
             -I ${FAMISTUDIO_DIR}
             -I ${FAMISTUDIO_DIR}/NoteTables
@@ -288,6 +316,31 @@ if(TARGET_PLATFORM STREQUAL "nes")
             DEPENDS ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s
             COMMENT "Assembling FamiStudio"
     )
+
+    # demo/nes.fms (the real FamiStudio project, edited in the FamiStudio GUI)
+    # is the one source of truth for this demo's music -- demo/audio/tracks/
+    # nes_audio.s is a regenerated build artifact, not hand-edited, so it's
+    # re-exported here from the .fms on every build where the project changed
+    # rather than trusted as a stale committed copy. FamiStudio ships its own
+    # CLI under this same binary name (case as installed -- "famistudio" on
+    # Linux packages, "FamiStudio"/"FamiStudio.exe" on macOS/Windows).
+    find_program(FAMISTUDIO NAMES famistudio FamiStudio REQUIRED)
+
+    set(NES_FMS ${CMAKE_SOURCE_DIR}/demo/nes.fms)
+    set(NES_AUDIO_ASM ${CMAKE_SOURCE_DIR}/demo/audio/tracks/nes_audio.s)
+    add_custom_command(
+            OUTPUT ${NES_AUDIO_ASM}
+            COMMAND ${FAMISTUDIO} ${NES_FMS} famistudio-asm-export ${NES_AUDIO_ASM}
+                    -famistudio-asm-format:ca65
+            DEPENDS ${NES_FMS}
+            COMMENT "Exporting FamiStudio music: nes.fms -> nes_audio.s (ca65)"
+    )
+    # nes_sfx.s is NOT regenerated the same way yet: demo/nes.fms currently has
+    # no dedicated sound-effect bank matching it (famistudio-asm-sfx-export
+    # against the project as it stands today produces each full song
+    # re-encoded as one giant synthesized "effect" instead, nothing like the
+    # small hand-curated SFX this file actually holds) -- wire it in once the
+    # project's SFX bank is sorted out, the same way nes_audio.s is above.
 
     # demo/famistudio_config.s is handled explicitly above (assembled once
     # into FAMISTUDIO_OBJ) -- excluded here so it isn't ALSO picked up and
@@ -705,13 +758,13 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # libnx audout is fixed at 48kHz/2ch/s16, so encode the desktop WAV to
         # exactly that raw PCM at build time and bake it into the .nro RomFS
         # (src/switch/audio.cpp streams it). ffmpeg is provided by
-        # docker/Dockerfile.switch. This leaves demo/tracks (the lossless WAV)
-        # untouched for desktop -- the conversion output lives only in the build
-        # tree, mirroring the web branch's OGG step.
+        # docker/Dockerfile.switch. This leaves demo/audio/tracks (the lossless
+        # WAV) untouched for desktop -- the conversion output lives only in the
+        # build tree, mirroring the web branch's OGG step.
         find_program(FFMPEG ffmpeg REQUIRED)
         set(NX_ROMFS ${CMAKE_BINARY_DIR}/romfs)
         set(NX_RAW   ${NX_ROMFS}/tracks/pc_audio.raw)
-        set(NX_WAV   ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        set(NX_WAV   ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
         # nx_create_nro() validates the RomFS dir exists at configure time, but
         # the audio asset inside it is only produced at build time (below). Create
         # the directory now so configure passes; the build step then fills it.
@@ -809,7 +862,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
 
         set(WIIU_ASSET_DIR ${CMAKE_BINARY_DIR}/wiiu-assets)
         set(WIIU_OGG ${WIIU_ASSET_DIR}/pc_audio.ogg)
-        set(WIIU_WAV ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        set(WIIU_WAV ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
         # #embed reads pc_audio.ogg at compile time of audio.cpp; create the dir
         # now so it is on the include path at configure, and (a) make the lib
         # depend on the encode target so it runs first, (b) mark audio.cpp as
@@ -1357,7 +1410,7 @@ else()
         find_program(FFMPEG ffmpeg REQUIRED)
         set(WEB_ASSET_DIR ${CMAKE_BINARY_DIR}/web-assets)
         set(WEB_OGG ${WEB_ASSET_DIR}/tracks/pc_audio.ogg)
-        set(WEB_WAV ${CMAKE_SOURCE_DIR}/demo/tracks/pc_audio.wav)
+        set(WEB_WAV ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
         add_custom_command(
                 OUTPUT ${WEB_OGG}
                 COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_ASSET_DIR}/tracks
@@ -1404,13 +1457,13 @@ else()
     if(NOT EMSCRIPTEN)
         add_custom_command(TARGET demo POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/demo/tracks
+                ${CMAKE_SOURCE_DIR}/demo/audio/tracks
                 $<TARGET_FILE_DIR:demo>/tracks
         )
 
         add_custom_command(TARGET demo POST_BUILD
                 COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/demo/sfx
+                ${CMAKE_SOURCE_DIR}/demo/audio/sfx
                 $<TARGET_FILE_DIR:demo>/sfx
         )
     endif()
@@ -1472,9 +1525,9 @@ exec ./demo \"\$@\"
                     COMMAND ${CMAKE_COMMAND} -E make_directory "${_APPDIR_LICENSES}"
                     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:demo> "${APPDIR}/usr/bin/demo"
                     COMMAND ${CMAKE_COMMAND} -E copy_directory
-                            "${CMAKE_SOURCE_DIR}/demo/tracks" "${APPDIR}/usr/bin/tracks"
+                            "${CMAKE_SOURCE_DIR}/demo/audio/tracks" "${APPDIR}/usr/bin/tracks"
                     COMMAND ${CMAKE_COMMAND} -E copy_directory
-                            "${CMAKE_SOURCE_DIR}/demo/sfx"    "${APPDIR}/usr/bin/sfx"
+                            "${CMAKE_SOURCE_DIR}/demo/audio/sfx"    "${APPDIR}/usr/bin/sfx"
                     COMMAND ${CMAKE_COMMAND} -E copy
                             "${CMAKE_SOURCE_DIR}/LICENSE"     "${_APPDIR_LICENSES}/LICENSE"
                     COMMAND ${CMAKE_COMMAND} -E copy
@@ -1502,3 +1555,9 @@ exec ./demo \"\$@\"
         endif()
     endif()
 endif()
+
+# One REGION define for every target, regardless of which TARGET_PLATFORM
+# branch above actually ran (exactly one does, and it's the only one that
+# has created the platform-nes target by this point): 0 for NTSC (every
+# target's default) or 1 for the nes_pal target set above.
+target_compile_definitions(platform-nes PUBLIC REGION=${REGION})

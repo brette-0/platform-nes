@@ -2,11 +2,7 @@
 #include <intsh>
 using namespace br0::intsh;
 
-#if FAMISTUDIO_CFG_NTSC_SUPPORT
-    #define FAMISTUDIO_LOAD_REGION "lda #1\n"
-#elif FAMISTUDIO_CFG_PAL_SUPPORT
-    #define FAMISTUDIO_LOAD_REGION "lda #0\n"
-#else
+#if !FAMISTUDIO_CFG_NTSC_SUPPORT && !FAMISTUDIO_CFG_PAL_SUPPORT
     #error "FamiStudio: neither NTSC nor PAL support enabled"
 #endif
 
@@ -36,11 +32,23 @@ extern "C" FASTCALL famistudio_sfx_play(u8 sfx_index, u8 channel);
 #endif
 extern "C" FASTCALL famistudio_update(void);
 
-void audio::AudioInit() {
+// famistudio_init wants its region byte in A: zero for PAL, non-zero for
+// NTSC (famistudio_ca65.s's FAMISTUDIO_INIT doc comment) -- the inverse of
+// this project's own AudioInit(region) convention (1 = PAL, 0 = NTSC). `used`
+// makes it addressable by symbol from the raw asm text below, the same
+// pattern src/nes/input.cpp relies on for its poll scratch bytes (LLVM can't
+// see the reference inside opaque asm, so without `used` LTO strips it).
+extern "C" {
+__attribute__((used)) u8 famistudio_region_scratch;
+}
+
+void audio::AudioInit(const u8 region) {
+    famistudio_region_scratch = region ? 0 : 1;
+
     __asm__ volatile (
         "ldx #<%0\n"
         "ldy #>%0\n"
-        FAMISTUDIO_LOAD_REGION
+        "lda famistudio_region_scratch\n"
         "jsr famistudio_init\n"
         :
         : "i"(tracks)

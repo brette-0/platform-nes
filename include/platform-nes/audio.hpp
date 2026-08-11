@@ -163,8 +163,11 @@ void SfxPlay(u8 index, u8 channel) ;
  */
 void SfxSamplePlay(u8 index);
 
-/** @brief Initializes the audio backend; must be called before any other audio function. */
-void AudioInit();
+/**
+ * @brief Initializes the audio backend; must be called before any other audio function.
+ * @param region Playback region: 0 for NTSC (default), 1 for PAL.
+ */
+void AudioInit(u8 region = 0);
 
 /**
  * @brief Drives the audio engine forward by one frame.

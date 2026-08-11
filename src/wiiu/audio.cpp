@@ -271,7 +271,7 @@ static void audio_callback(void *, u8 *stream, int len) {
     }
 }
 
-void audio::AudioInit() {
+void audio::AudioInit(u8) {
     load_track();
     load_sfx();
 
