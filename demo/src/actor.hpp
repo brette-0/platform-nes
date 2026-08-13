@@ -1,6 +1,6 @@
 #pragma once
 #include <platform-nes>
-#include "level/types.hpp"
+#include "modes/level/types.hpp"
 
 class Actor {
     public:

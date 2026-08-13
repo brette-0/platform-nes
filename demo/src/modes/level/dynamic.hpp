@@ -5,7 +5,7 @@
 
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
 
 // ---------------------------------------------------------------------------
 // Dynamic tile layer (prototype scaffolding)
@@ -100,4 +100,4 @@ void RemoveDynamic(const DynHit& h, const Cursor &under);
 // dynamic layer (pass nullptrs / 0 for a level that has none).
 void LoadDynamicLayer(const u8* dynLengthsROM, const u8* dynDataROM, u16 runCount);
 
-}   // namespace demo::level
+}   // namespace level

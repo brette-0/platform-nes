@@ -1,6 +1,6 @@
 #include "levels.hpp"
 #include "collision_map.hpp"   // ColMapColumn: read the composited column the window already built
-#include "../graphics/metatiles.hpp"
+#include "../../graphics/metatiles.hpp"
 
 #include <intsh>
 #include <platform-nes/technology.hpp>
@@ -8,7 +8,7 @@
 #include "types.hpp"
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
     Cursor edgeR;
     Cursor edgeL;
     u16 nColumns;
@@ -74,15 +74,15 @@ namespace demo::level {
     static constexpr u8 prev_parity_fix() { return (video::viewport_tx() >> 1) & 1u; }
 
     const u8 TileData_1_1[] = {
-        #include "../../tiled/include/1-1_st"
+        #include "../../../tiled/include/1-1_st"
     };
 
     const u8 DynData_1_1[] = {
-        #include "../../tiled/include/1-1_dt"
+        #include "../../../tiled/include/1-1_dt"
     };
 
     const u8 DynLengths_1_1[] = {
-        #include "../../tiled/include/1-1_dl"
+        #include "../../../tiled/include/1-1_dl"
     };
 
     const Level Levels[] = {

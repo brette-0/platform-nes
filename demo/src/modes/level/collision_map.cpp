@@ -1,13 +1,13 @@
 #include "collision_map.hpp"
 
 #include "levels.hpp"                  // levelHeight, kHudRows
-#include "../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
+#include "../../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
 
 #include <array>
 
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
 
 // Composite-metatile window.  ViewMap[slot*levelHeight + row] holds the metatile
 // occupying that cell (dynamic-over-static).  ColMapBaseCol is the leftmost world
@@ -521,4 +521,4 @@ u8 CollectCoins2(const u16 px, const u16 py, const vec2<u8> dimensions,
     return n;
 }
 
-}   // namespace demo::level
+}   // namespace level

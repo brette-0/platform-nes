@@ -1,6 +1,6 @@
 #pragma once
-#include "../actor.hpp"
-#include "../types.hpp"
+#include "../../actor.hpp"
+#include "../../types.hpp"
 
 // Two-player mode requires a second controller port and enough RAM/ROM budget.
 // GBA (TARGET_GBA), DS/DSi (TARGET_NDS), and 3DS (TARGET_CTR) are excluded:
@@ -10,7 +10,7 @@
 #  define PLAYER2_SUPPORTED
 #endif
 
-namespace demo::level {
+namespace level {
 
 // ---------------------------------------------------------------------------
 // Player physics tuning constants (subpixel units; 8 subpx = 1 world pixel)
@@ -53,4 +53,4 @@ struct Player {
     void Reset();
 };
 
-}   // namespace demo::level
+}   // namespace level

@@ -4,7 +4,7 @@
 
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
     // Static-plane cursor.  The static layer is stored as a flat column-major
     // array in ROM; no RLE, no run tracking.  Move/Seek are pure pointer
     // arithmetic and Fetch is a single dereference -- all free on 6502.

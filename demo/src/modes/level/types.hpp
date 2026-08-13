@@ -4,7 +4,7 @@
 
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
     struct Level {
         const u8* TileData;     // static plane: flat column-major ROM array
         u16       nColumns;     // level width in metatile columns

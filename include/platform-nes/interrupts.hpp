@@ -331,8 +331,15 @@ inline static void usr_main ()
  * no `::nmi` namespace to collide with here, but every backend's
  * `extern void nmi_vector();` / call site is kept in lock-step with this
  * name either way).
+ *
+ * @note Takes and discards the same optional attribute-specifier-seq
+ * argument the NES-side ::NMI does (there's no `extern "C"`/`interrupt_norecurse`
+ * splice point to inject it into here -- this is an ordinary function). It's
+ * only there so `NMI()`/`NMI([[noreturn]])` are valid call syntax on every
+ * target, matching the NES side, instead of NES needing `NMI()` while every
+ * other backend needs the parens omitted entirely.
  */
-#define NMI                     \
+#define NMI(...)                \
 void nmi_vector()
 
 /**
@@ -354,8 +361,11 @@ void nmi_vector()
  * `::irq` namespace at global scope -- see the NES-side ::IRQ's @note.
  * There's no hardware vector on this target, so nothing needs the literal
  * name `irq`.
+ *
+ * @note Takes and discards an optional attribute-specifier-seq argument,
+ * same reasoning as this file's own ::NMI just above.
  */
-#define IRQ                     \
+#define IRQ(...)                \
 void irq_vector()
 
 /**

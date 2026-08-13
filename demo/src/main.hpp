@@ -1,45 +1,21 @@
 #pragma once
 #include <platform-nes/platform-nes.hpp>
 
-#include "actor.hpp"
-#include "level/player.hpp"
-
-/** @brief Viewport width in metatiles (tiles / 2). */
-constexpr u16 viewport_mx() { return video::viewport_tx() >> 1; }
-/** @brief Viewport height in metatiles (tiles / 2). */
-constexpr u16 viewport_my() { return video::viewport_ty() >> 1; }
-
-extern u8 port1;
-extern u8 port2;
-
-extern u8 lastPort1;
-extern u8 lastPort2;
-
-extern u16 cameraX;
-
-extern i8 lastDeltaScroll;
-
-extern atomic u16 lastXWorldSpace;
-
-extern oam::sprite_t OAMBuffer[64];
-
-extern u8 TileBuffer[56];
-
-extern demo::level::Player player1;
-#ifdef PLAYER2_SUPPORTED
-extern demo::level::Player player2;
-#endif
-
-enum class eLevelStreamCommands : u8 {
-    STREAM_LEVEL_LEFT  = 0x00,
-    STREAM_LEVEL_RIGHT = 0x01,
-    STREAM_LEVEL_DONE  = 0x02,
-    STREAM_LEVEL_SWAP  = 0x04,
+enum class eGameModes : u8 {
+    Title,  // title screen
+    World,  // world map, level select
+    Level,  // gameplay, platforming in level
 };
 
-interrupt nmiHandler();
-extern atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
+extern eGameModes gameMode;
 
-// Deferred VRAM write queue (coin pickups -> NMI drain).
-// Pushing is done by the player logic; draining is done by the NMI.
-void CoinVramPush(u16 address, u8 value);
+// Mode-dispatched NMI/IRQ entry points: main.cpp's nmiTrampoline/irqTrampoline
+// (the only functions actually pinned to the hardware vectors) call through
+// these once per interrupt. The active mode's setup path points them at its
+// own handlers before enabling interrupts. Plain function pointers, called
+// with ordinary C++ call syntax from the trampolines -- never reached by raw
+// asm symbol text -- so, unlike the trampolines themselves, neither these nor
+// the handlers they point at need C linkage or any special attribute. Left
+// uninitialized (zero) so both land in BSS rather than .data.
+extern void (*pNMI)();
+extern void (*pIRQ)();

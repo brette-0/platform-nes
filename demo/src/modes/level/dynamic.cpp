@@ -1,14 +1,14 @@
 #include "dynamic.hpp"
 
 #include "levels.hpp"
-#include "../graphics/metatiles.hpp"
+#include "../../graphics/metatiles.hpp"
 
 #include <array>
 #include <intsh>
 
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
     // ---------------------------------------------------------------------------
     // Dynamic-plane definitions.  See dynamic.hpp for the model.  This TU is fully
     // additive: it touches no existing engine state, only its own RAM/ROM handles.
@@ -179,4 +179,4 @@ namespace demo::level {
             DynData[i] = dynDataROM ? dynDataROM[i] : 0;
     }
 
-}   // namespace demo::level
+}   // namespace level

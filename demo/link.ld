@@ -91,15 +91,15 @@ SECTIONS {
 
 /* Regression guard for FSCODE actually capturing FamiStudio's real content
  * -- SIZEOF() being nonzero is the only way to tell from in here. Zero IS
- * tolerated via DEFINED(nmiHandler): CMake's own internal compiler-
+ * tolerated via DEFINED(nmi_handler): CMake's own internal compiler-
  * identification/ABI probes link a bare `int main(){}` with no
  * audio.cpp/famistudio_pass1.o in sight (confirmed with a real build, same
  * class of bare-probe case the VRC1 demo's own Phase 6 ASSERT existed for)
- * -- nmiHandler has C linkage (interrupts.hpp's ::interrupt macro) and
- * exists only in this demo's real main.cpp, so it's a stable, unmangled
- * stand-in for "is this actually the demo, not a probe." */
+ * -- nmi_handler has C linkage (interrupts.hpp's ::interrupt macro) and
+ * exists only in this demo's real modes/level.cpp, so it's a stable,
+ * unmangled stand-in for "is this actually the demo, not a probe." */
 PROVIDE(__famistudio_domain_size = SIZEOF(FSCODE));
-ASSERT(__famistudio_domain_size > 0 || !DEFINED(nmiHandler),
+ASSERT(__famistudio_domain_size > 0 || !DEFINED(nmi_handler),
        "FSCODE captured no content -- CMakeLists.txt's FAMISTUDIO_SEGMENT cache variable no longer matches this file's own hardcoded FSCODE segment name (SECTIONS block above), so FamiStudio's real compiled code isn't landing in the ROM at all.")
 
 /* prg_rom_switchable is already FULL()'d by mmc3-helper.ld's own

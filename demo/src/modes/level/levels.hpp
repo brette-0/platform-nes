@@ -9,7 +9,7 @@
 #include <platform-nes/types.hpp>      // vec2
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
     constexpr auto levelHeight = 14;
     constexpr i16 kHudRows = 1;
     extern u16 nColumns;

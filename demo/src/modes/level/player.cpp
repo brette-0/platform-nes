@@ -1,17 +1,16 @@
 #include "player.hpp"
 
-#include "../main.hpp"
-#include "../technology.hpp"
-#include "../graphics/metasprites.hpp"
-#include "../graphics/metatiles.hpp"
+#include "../../technology.hpp"
+#include "../../graphics/metasprites.hpp"
+#include "../../graphics/metatiles.hpp"
 #include "collision_map.hpp"
 #include "levels.hpp"
-#include "../modes/level.hpp"
+#include "../level.hpp"
 
 using namespace demo;
-using enum eLevelStreamCommands;
+using enum level::eLevelStreamCommands;
 
-namespace demo::level {
+namespace level {
 
 // ---------------------------------------------------------------------------
 // Per-player accessors -- resolved from `this` rather than a free ActorToPlayer.
@@ -314,4 +313,4 @@ void Player::Reset() {
     runTimer = 0;
 }
 
-}   // namespace demo::level
+}   // namespace level

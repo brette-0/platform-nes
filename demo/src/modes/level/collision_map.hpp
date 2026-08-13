@@ -2,13 +2,13 @@
 
 #include "cursor.hpp"
 #include "dynamic.hpp"                 // DynamicCursor (dynamic-plane producer edge)
-#include "../graphics/metatiles.hpp"   // MetatileCollision (query decodes per cell)
+#include "../../graphics/metatiles.hpp"   // MetatileCollision (query decodes per cell)
 #include <platform-nes/video.hpp>      // video::viewport_tx (window width tracks the viewport)
 #include <platform-nes/types.hpp>      // vec2
 #include <intsh>
 using namespace br0::intsh;
 
-namespace demo::level {
+namespace level {
 
 // ---------------------------------------------------------------------------
 // Shared composite-metatile window (1 byte per cell)
@@ -123,4 +123,4 @@ struct CoinPick { u16 col; u8 row; u8 reveal; };
 u8 CollectCoins(u16 px, u16 py, vec2<u8> dimensions, CoinPick* out, u8 maxOut);
 u8 CollectCoins2(u16 px, u16 py, vec2<u8> dimensions, CoinPick* out, u8 maxOut);
 
-}   // namespace demo::level
+}   // namespace level
