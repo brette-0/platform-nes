@@ -44,3 +44,10 @@ set(CC65_DIR "C:/cc65" CACHE PATH "" FORCE)
 # than pointing straight at it, once you have real domains of your own to
 # declare.
 set(TOPLEVEL_LD "${CMAKE_SOURCE_DIR}/demo/link.ld" CACHE FILEPATH "" FORCE)
+
+# Header defining which PRG-ROM banks the audio engine and its music data live
+# in (audio_code_bank_tag / audio_data_bank_tag -- see include/platform-nes/
+# audio.hpp). Force-included into src/nes/audio.cpp so its farcalls resolve.
+# Optional: leave unset and the engine is treated as always-resident, with
+# every audio farcall collapsing to a plain call.
+set(AUDIO_BANKS_HPP "${CMAKE_SOURCE_DIR}/demo/src/banks.hpp" CACHE FILEPATH "" FORCE)

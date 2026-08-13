@@ -161,6 +161,31 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
  * overrides the emitted symbol name back to the literal `nmi` nes.ld's
  * vector table expects, so the linker sees no difference.
  */
+/*
+ * WHERE VECTOR HANDLERS SHOULD LIVE (a recommendation, not something these
+ * macros impose).
+ *
+ * An interrupt arrives at a moment nothing controls: whatever bank a farcall
+ * -- or a hand-rolled bank switch -- happens to have mapped is what the
+ * vector lands in. A handler placed in a SWITCHABLE window is therefore only
+ * correct while nobody banks that window. This project hit exactly that:
+ * `nmi` sat at $A38C, inside MMC3's R7 window, so banking anything through
+ * R7 would have vectored interrupts into that bank's contents.
+ *
+ * The fix is to place the handler somewhere always mapped -- on MMC3/VRC1
+ * that is `.prg_rom_fixed` ($E000-$FFFF), the same region ::RESET uses. But
+ * WHICH section that is, and whether a given board even has one, is a
+ * project's own layout decision (an NROM build has no banking to hide from
+ * in the first place), so it belongs at the definition, not here. Both
+ * macros forward their arguments onto the function, so a project states it
+ * where it defines the handler:
+ *
+ *     NMI(FIXED) { ... }      // FIXED from mmc3.hpp / vrc1.hpp
+ *     IRQ(FIXED) { ... }
+ *
+ * composing exactly the way NMI([[noreturn]]) already does. A project that
+ * banks nothing can leave them untagged and pay nothing.
+ */
 #define NMI(...)                                                          \
 ASM_LINKAGE __VA_ARGS__ void nmi_vector() asm("nmi");                     \
 ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))        \

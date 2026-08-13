@@ -29,7 +29,7 @@ namespace level {
 
     constexpr u8 kHudSplitRow   = 16;
     constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
-    constexpr u8 kHUDSplitDelay = 58;
+    constexpr u8 kHUDSplitDelay = 62;
 
     // Forward-declared so irq_handler can call it directly once the MMC3
     // scanline IRQ fires below the HUD (see kHudSplitLatch / irq_handler).
@@ -93,9 +93,7 @@ namespace level {
     // bank switches below, and code doing that must not be able to switch its
     // own bank out from under the CPU mid-execution (see interrupts.hpp's
     // RESET macro comment for the same hazard/reasoning).
-    fixed void main() {
-        mmc3::SwitchBank(mmc3::window1Control, 0);
-        mmc3::SwitchBank(mmc3::window2Control, 1);
+    FIXED void main() {
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
         mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
@@ -153,7 +151,7 @@ namespace level {
 
         ppu::SetScroll(0, 0);
 
-        audio::AudioInit(REGION);
+        audio::Init(REGION);
         audio::TrackPlay(0);
 
         ColMapSeed(0, { TileData }, { DynLengths, DynData, 0 });
@@ -186,8 +184,8 @@ namespace level {
 
             ColMapTrack(cameraX >> 4);
 
-            ppu::SetColorPriority(0x20);   // red band:          AudioUpdate
-            audio::AudioUpdate();
+            ppu::SetColorPriority(0x20);   // red band:          Update
+            audio::Update();
             ppu::SetColorPriority(0);
 
             video::WaitForPresent();

@@ -26,30 +26,58 @@
  * R6, $A000 via R7). $C000-$DFFF is hardware-fixed to the second-to-last
  * bank regardless of any register write -- not a third switchable window.
  *
- * CAUGHT DURING THE FIRST REAL CONSUMER (this project's own demo, converting
- * from VRC1): prg_rom_switchable used to span all of $8000-$DFFF as ONE
- * region for ordinary/untagged code, copying VRC1's own three-equal-windows
- * shape directly. That's only actually safe at EXACTLY 4 total PRG-ROM
- * banks: "second-to-last" only equals "the third 8 KiB chunk in file order"
- * when there are exactly 4 banks to begin with. The moment a project needs
- * a 5th+ bank for anything (an explicit MMC3_BANKED() domain, e.g.), ordinary
- * code the linker placed in that third chunk stops being what $C000 actually
- * shows at boot -- second-to-last has shifted to a later physical bank, and
- * that "third chunk" content becomes silently unreachable (no register can
- * select it; it isn't $8000's or $A000's bank, and $C000 no longer shows it
- * either). prg_rom_switchable below is therefore only $8000-$BFFF (16 KiB,
- * R6/R7's own two windows) -- the one span whose contents are ALWAYS exactly
- * what boots up, regardless of total bank count. $C000-$DFFF is deliberately
- * left out of c_readonly's target entirely: its content is real and
- * addressable (via R6/R7's explicit-bank path, same as any other bank -- see
- * mmc3.hpp's detail::CallInSection), but nothing should rely on it being
- * "whatever ordinary code overflowed into," since that's only true for a
- * 4-bank ROM. A consuming project that DOES know its own exact bank count
- * and wants to deliberately use the second-to-last slot may still declare
- * its own MEMORY region for it (ORIGIN 0xc000, no bank-encoding needed since
- * it's never reached via register anyway) -- this file just doesn't do that
- * on a project's behalf, the same reasoning vrc1-helper.ld's own file
- * comment gives for not making project-specific domain decisions here.
+ * PRG-ROM SIZE: anything from 32 KiB up to 512 KiB, MMC3's own hardware
+ * maximum -- R6/R7 are 6-bit bank numbers on real TxROM silicon (bits 0-5;
+ * bits 6-7 are ignored), so 64 x 8 KiB is all the chip can address, and the
+ * ASSERT below rejects more rather than letting a project link a ROM whose
+ * top banks no register can ever select. The consuming project still owns
+ * __prg_rom_size itself (see this file's own split rationale above); it just
+ * has to be PROVIDE()d BEFORE `INCLUDE mmc3-helper.ld`, since the layout
+ * below is computed from it.
+ *
+ * HOW SIZE-INDEPENDENCE IS ACHIEVED (this is the part that used to be a
+ * hardcoded 4-bank assumption, in this file AND in the first consumer's own
+ * script): the always-resident image is placed at the TOP of the ROM file,
+ * not the bottom. File order is
+ *
+ *   [ consumer's own MMC3_BANKED() domains, banks 0..R-1 ]
+ *   [ prg_rom_spare -- zero padding, whatever is left over ]
+ *   [ prg_rom_switchable -- __mmc3_resident_windows banks  ]
+ *   [ prg_rom_fixed      -- exactly 1 bank, the last one   ]
+ *
+ * so the resident windows always occupy the LAST (1 + __mmc3_resident_
+ * windows) physical banks no matter how big the ROM is. Because a real
+ * bank's number is file_offset/0x2000 (see vrc1-helper.ld's MULTI-BANK
+ * ENCODING note), that makes the two facts MMC3 hardwires -- "$C000 shows
+ * the second-to-last bank" and "$E000 shows the last bank" -- line up with
+ * linked content by construction:
+ *
+ *   - prg_rom_fixed IS the last bank            -> $E000-$FFFF, always.
+ *   - at __mmc3_resident_windows == 3, prg_rom_switchable's third 8 KiB
+ *     chunk IS the second-to-last bank          -> $C000-$DFFF, always.
+ *   - its first two chunks are banks (N-1-windows) and (N-windows), which
+ *     is exactly what ::_reset pokes into R6/R7 -- it reads those bank
+ *     numbers from __mmc3_boot_bank_window1/2, defined below, rather than
+ *     the literal 0/1 it used to assume.
+ *
+ * The earlier revision of this file did the opposite (resident image at the
+ * bottom, banks 0..3) and therefore had to forbid __mmc3_resident_windows
+ * == 3 for any ROM that wasn't EXACTLY 4 banks: "second-to-last" only means
+ * "the third 8 KiB chunk in file order" when there are exactly 4 chunks, so
+ * the moment a 5th bank appeared, whatever ordinary code the linker had put
+ * in that third chunk stopped being what $C000 actually showed and became
+ * silently unreachable. Anchoring to the top of the file instead makes 3
+ * windows correct at EVERY size, which is why it is now the default here
+ * and why no consumer needs to commit to an exact bank count any more.
+ *
+ * A project that would rather keep $C000-$DFFF for something of its own
+ * (its own fixed-address carve-out placed in the second-to-last bank, e.g.)
+ * sets __mmc3_resident_windows = 2, declares its own MEMORY region at
+ * ORIGIN 0xc000 (no bank-encoding needed -- it is never reached via a
+ * register), and FULL()s it immediately BEFORE prg_rom_switchable in its own
+ * OUTPUT_FORMAT so it lands in the second-to-last bank. This file does not
+ * do that on a project's behalf, the same reasoning vrc1-helper.ld's own
+ * file comment gives for not making project-specific domain decisions here.
  *
  * $6000-$7FFF (PRG-RAM, "cartridge memory") is genuinely optional on real
  * MMC3 boards, but this file always reserves it (size driven by
@@ -99,6 +127,67 @@ PROVIDE(__program_nvram_size = 0);
 ASSERT(__program_ram_size + __program_nvram_size <= 8,
        "MMC3 only supports up to 8 KiB of PRG-(NV)RAM.")
 
+/* How many 8 KiB windows starting at $8000 count as "ordinary resident
+ * space" (prg_rom_switchable's own LENGTH, below) -- 3 by default, i.e. the
+ * full flat $8000-$DFFF span: R6's window, R7's window, and the hardware-
+ * fixed second-to-last-bank window at $C000. All three are correct at every
+ * PRG-ROM size now that the resident image is anchored to the TOP of the ROM
+ * file (see this file's header comment) -- this used to default to 2, back
+ * when the third window was only safe on an exactly-4-bank ROM and every
+ * consumer wanting it had to commit to that bank count itself.
+ *
+ * A project that wants $C000-$DFFF for a carve-out of its own instead sets
+ * this to 2 by PROVIDE()-ing it BEFORE `INCLUDE mmc3-helper.ld` -- PROVIDE()
+ * only takes its first-encountered value, so before-the-INCLUDE is the only
+ * ordering that wins. Never 1 or 0: R6's own window ($8000-$9FFF) is where
+ * ordinary untagged code lands, so it is always resident space here
+ * regardless.
+ *
+ * MUST stay above the ASSERTs and layout arithmetic below, which read it. */
+PROVIDE(__mmc3_resident_windows = 3);
+
+ASSERT(__mmc3_resident_windows == 2 || __mmc3_resident_windows == 3,
+       "__mmc3_resident_windows must be 2 ($8000-$BFFF) or 3 ($8000-$DFFF) -- MMC3 exposes no other resident PRG span.")
+
+/* Banks at the BOTTOM of the ROM file a consuming project is claiming for
+ * its own MMC3_BANKED()-tagged domains (0 by default -- this library has no
+ * opinion on whether a project needs any, it just leaves the hook open, the
+ * same way vrc1-helper.ld's own __prg_rom_switchable_reserved does). Those
+ * domains' own MEMORY regions/SECTIONS rules belong in the consuming
+ * project's script; all this number does is shorten prg_rom_spare below by
+ * the same amount, so the total ROM image still comes out at exactly
+ * __prg_rom_size. Set it BEFORE `INCLUDE mmc3-helper.ld`, and FULL() those
+ * domains FIRST in the project's own OUTPUT_FORMAT (before prg_rom_spare) --
+ * that is what makes their physical bank numbers 0..N-1, stable regardless
+ * of total ROM size. */
+PROVIDE(__mmc3_reserved_banks = 0);
+
+/* MMC3's own PRG ceiling: R6/R7 are 6-bit bank numbers (bits 0-5 of the
+ * value written to $8001; bits 6-7 are ignored by the chip), so 64 banks x
+ * 8 KiB = 512 KiB is the most any register can reach. nes.ld's own
+ * power-of-2 ASSERT (INCLUDEd above, deliberately unforked here -- see this
+ * file's header comment) already constrains the shape; these two add the
+ * mapper-specific floor and ceiling. The floor is not a fixed 32 KiB: it is
+ * whatever the resident image itself needs (the windows below, plus the
+ * fixed bank), so a project that drops to 2 resident windows can legally
+ * build a 24 KiB... which power-of-2 then rounds up to 32 anyway. */
+ASSERT(__prg_rom_size <= 512,
+       "MMC3 addresses at most 512 KiB of PRG-ROM (R6/R7 are 6-bit bank numbers) -- __prg_rom_size is larger, so the top banks would be unreachable by any register write.")
+ASSERT(__prg_rom_size >= (__mmc3_resident_windows + __mmc3_reserved_banks + 1) * 8,
+       "__prg_rom_size is smaller than what is already spoken for: __mmc3_resident_windows * 8 KiB + __mmc3_reserved_banks * 8 KiB + the 8 KiB fixed bank.")
+
+/* Total 8 KiB PRG banks, and the physical bank numbers ::_reset must poke
+ * into R6/R7 at boot to reconstruct the flat resident image. The resident
+ * windows sit at the TOP of the ROM file (see this file's header comment
+ * for the full layout and why), so window 1's bank is NOT 0 for any ROM
+ * bigger than the resident image itself -- mmc3.cpp reads both of these as
+ * linker-defined symbols rather than assuming 0/1 the way it did while this
+ * script only supported 32 KiB. Not PROVIDE(): these are computed facts
+ * about the layout this file itself imposes, never a consumer's to override. */
+__mmc3_prg_rom_banks     = __prg_rom_size / 8;
+__mmc3_boot_bank_window1 = __mmc3_prg_rom_banks - __mmc3_resident_windows - 1;
+__mmc3_boot_bank_window2 = __mmc3_boot_bank_window1 + 1;
+
 /* c_writeable/__stack are DELIBERATELY NOT set here, unlike an earlier
  * revision of this file -- same reasoning as the project's own established
  * "you don't need c-in-ram.ld, implement it yourself" conclusion (this
@@ -120,31 +209,28 @@ ASSERT(__program_ram_size + __program_nvram_size <= 8,
  * worked example targeting prg_ram instead of ram.
  */
 
-/* How many 8 KiB windows starting at $8000 count as "ordinary resident
- * space" (prg_rom_switchable's own LENGTH, below) -- 2 by default (R6/R7's
- * own two windows only, $8000-$BFFF), the one value that's safe regardless
- * of total PRG-ROM size (see prg_rom_switchable's own comment for why 3
- * isn't, in general). A consuming project that commits to an EXACT total
- * bank count of 4 (so that "second-to-last" really is the third chunk in
- * file order) may safely reclaim that third window as ordinary space too,
- * by PROVIDE()-ing 3 here BEFORE `INCLUDE mmc3-helper.ld` -- same
- * before-the-INCLUDE ordering PROVIDE() always needs to win (confirmed
- * empirically: a REGION_ALIAS cannot simply be re-aliased afterward the way
- * a plain symbol assignment like __stack can; ld.lld rejects a second
- * REGION_ALIAS for the same name outright, "redefinition of memory
- * region"). See demo/link.ld for a worked example of a project doing
- * exactly this. Never 1 or 0: R6's own window ($8000-$9FFF) is always
- * ordinary/resident space here regardless. */
-PROVIDE(__mmc3_resident_windows = 2);
-
 MEMORY {
-  /* $8000-$BFFF by default (16 KiB, windows 1+2 only -- registers R6/R7,
-   * mmc3.hpp's window1Control/window2Control); a consuming project that
-   * commits to an exact 4-bank total may widen this to $8000-$DFFF (24 KiB)
-   * via __mmc3_resident_windows (see its own comment just above). Ordinary
-   * untagged code/data lives here -- see this file's own header comment for
-   * why $C000-$DFFF is NOT part of this region by default. */
+  /* $8000-$DFFF by default (24 KiB, the full flat resident span); $8000-$BFFF
+   * if a project sets __mmc3_resident_windows to 2 (see its own comment
+   * above). Ordinary untagged code/data lives here. Always the top banks of
+   * the ROM file, immediately below prg_rom_fixed -- that placement is what
+   * makes the third window really be the second-to-last physical bank at any
+   * ROM size, see this file's own header comment. */
   prg_rom_switchable : ORIGIN = 0x8000, LENGTH = __mmc3_resident_windows * 0x2000
+  /* Whatever is left of __prg_rom_size once the resident image, the fixed
+   * bank, and any banks the project reserved for its own domains are
+   * accounted for: pure zero padding, so the emitted file is exactly the
+   * size the NES2.0 header claims. Never CPU-addressed (nothing is placed
+   * here), so like nes2_header/chr_rom its ORIGIN is a fake address that
+   * exists only for FULL()'s bookkeeping -- 0x03000000, the next one free
+   * after nes.ld's chr_rom (0x01000000) and nes2_header (0x02000000).
+   * LENGTH is legitimately 0 for a ROM with no slack (e.g. 32 KiB with 3
+   * resident windows -- the exact shape this script supported before it
+   * grew size independence); FULL() of an empty region emits nothing, the
+   * same way nes.ld's own chr_rom region behaves on a CHR-RAM-only cart. */
+  prg_rom_spare      : ORIGIN = 0x03000000,
+                       LENGTH = (__mmc3_prg_rom_banks - __mmc3_resident_windows
+                                 - __mmc3_reserved_banks - 1) * 0x2000
   /* Hardwired to the LAST physical bank, unconditionally, regardless of any
    * register -- the one truly permanent, always-resident home, matching
    * VRC1's own $E000-$FFFF exactly. .prg_rom_fixed-tagged content only. */
@@ -156,6 +242,29 @@ MEMORY {
    * never CPU/PPU-addressed. Filled by header.hpp's NES2_HEADER() macro. */
   nes2_header         : ORIGIN = 0x02000000, LENGTH = 16
 }
+
+/* Region geometry, republished as ordinary linker symbols so a build-time
+ * space report (tools/report_space.cmake, wired up in CMakeLists.txt) can
+ * describe every region WITHOUT restating this file's layout in a second
+ * place. A region that holds nothing emits no output section at all, so the
+ * linked ELF alone cannot even tell you an empty 8 KiB bank exists -- these
+ * symbols are what make "bank 2: 0 / 8192 used" reportable. Paired by name:
+ * __space_origin_X / __space_length_X. A consuming project should publish the
+ * same two symbols for any region of its own (see demo/link.ld's domains). */
+__space_origin_prg_rom_switchable = ORIGIN(prg_rom_switchable);
+__space_length_prg_rom_switchable = LENGTH(prg_rom_switchable);
+__space_origin_prg_rom_fixed      = ORIGIN(prg_rom_fixed);
+__space_length_prg_rom_fixed      = LENGTH(prg_rom_fixed);
+__space_origin_prg_rom_spare      = ORIGIN(prg_rom_spare);
+__space_length_prg_rom_spare      = LENGTH(prg_rom_spare);
+__space_origin_prg_ram            = ORIGIN(prg_ram);
+__space_length_prg_ram            = LENGTH(prg_ram);
+__space_origin_ram                = ORIGIN(ram);
+__space_length_ram                = LENGTH(ram);
+__space_origin_zp                 = ORIGIN(zp);
+__space_length_zp                 = LENGTH(zp);
+__space_origin_chr_rom            = ORIGIN(chr_rom);
+__space_length_chr_rom            = LENGTH(chr_rom);
 
 REGION_ALIAS("c_readonly", prg_rom_switchable)
 
@@ -186,17 +295,29 @@ SECTIONS {
   .vector 0xfffa : { SHORT(nmi) SHORT(_reset) SHORT(irq) } >prg_rom_fixed
 }
 
-/* Only the two regions this file itself owns -- prg_rom_fixed and chr_rom
- * are deliberately NOT FULL()'d here, matching vrc1-helper.ld's own split
- * exactly: prg_rom_fixed must stay the physically LAST content in the ROM
- * file (real MMC3 hardware always shows the true last bank there), so a
- * consuming project's own top-level script has to list any of its own
- * MMC3_BANKED()-tagged domains' FULL() calls FIRST, then re-list
- * FULL(prg_rom_fixed)/FULL(chr_rom) itself, last -- see demo/link.ld's own
- * OUTPUT_FORMAT for the worked VRC1 example of this same ordering
- * requirement. Baking those two in here instead would force them before
- * anything a consumer adds afterward, silently breaking that guarantee. */
+/* ONLY the header goes here -- every PRG region's FULL() belongs in the
+ * consuming project's own top-level script, in this exact order:
+ *
+ *   OUTPUT_FORMAT {
+ *     <the project's own MMC3_BANKED() domains, if any>  <- banks 0..N-1
+ *     FULL(prg_rom_spare)
+ *     FULL(prg_rom_switchable)
+ *     FULL(prg_rom_fixed)
+ *     FULL(chr_rom)
+ *   }
+ *
+ * OUTPUT_FORMAT is additive across INCLUDEd files and processed in order
+ * (confirmed empirically -- see vrc1-helper.ld's own OUTPUT_FORMAT comment),
+ * and everything this file emits necessarily comes BEFORE anything the
+ * including project emits. That is exactly why prg_rom_switchable is no
+ * longer FULL()'d here as it was while this script was 32 KiB-only:
+ * emitting it from this file would force it ahead of the consumer's own
+ * banked domains, putting those domains between the resident image and the
+ * fixed bank -- i.e. stealing the second-to-last bank out from under
+ * $C000-$DFFF and shifting the boot banks __mmc3_boot_bank_window1/2
+ * predict. The resident image has to be the LAST thing before
+ * prg_rom_fixed, and only the consumer's own block can guarantee that.
+ * See demo/link.ld for a worked example. */
 OUTPUT_FORMAT {
   FULL(nes2_header)
-  FULL(prg_rom_switchable)
 }

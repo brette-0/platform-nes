@@ -6,7 +6,7 @@ tech::wo_register<0xc000> VRC1::window3Control;
 
 extern "C" void _start();
 
-extern "C" fixed void _reset() {
+extern "C" FIXED void _reset() {
     tech::poke(0x8000, 0);
     tech::poke(0xa000, 1);
     tech::poke(0xc000, 2);
@@ -18,7 +18,7 @@ extern "C" fixed void _reset() {
  * the always-mapped fixed-bank path (bank_layout<fixed_bank_tag>::always_mapped
  * == true, so this collapses to a bare call at runtime -- Call<Fn>'s
  * non-fixed branch isn't reachable until a real bank_layout<Tag>
- * specialization exists, Phase 2+). No existing ::fixed-tagged function had
+ * specialization exists, Phase 2+). No existing ::FIXED-tagged function had
  * a real C++ call site to convert instead: ::VRC1::Long and
  * VRC1::Detail::CallInWindow are templates, out of VRC1_BANKED()'s scope (see
  * BANKED_CALL_THEORY.txt); ::_reset is a raw reset-vector target with no

@@ -1,16 +1,16 @@
 /**
  * @file vrc1.hpp
- * @brief VRC1 mapper: PRG/CHR bank switching and the ::fixed segment keyword.
+ * @brief VRC1 mapper: PRG/CHR bank switching and the ::FIXED segment keyword.
  *
  * VRC1 exposes three switchable 8 KiB PRG-ROM windows (::VRC1::window1Control,
  * ::VRC1::window2Control, ::VRC1::window3Control) and two independent 4 KiB
  * CHR-ROM windows (::VRC1::chr0Control, ::VRC1::chr1Control, with the shared
  * high bit in ::VRC1::chrHighBits). ::VRC1::Long and ::VRC1::SwitchCHRBank
- * are the safe entry points for switching either; ::fixed pins code that
+ * are the safe entry points for switching either; ::FIXED pins code that
  * must survive a bankswitch into the mapper's always-mapped $E000-$FFFF
  * window.
  *
- * This module is a class (::VRC1), not a namespace, matching ::MMC3's own
+ * This module is a class (::VRC1), not a namespace, matching ::mmc3's own
  * shape: every member is static, and the class itself is non-instantiable
  * (all constructors deleted) -- the NES target has exactly one physical VRC1
  * chip on the cartridge, so there is never a real object to construct there.
@@ -42,7 +42,7 @@ using namespace br0::intsh;
  * real, always-mapped region -- see the file comment at the top of vrc1.ld.
  * Expands to nothing off-NES.
  */
-#define fixed CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")
+#define FIXED CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")
 
 /**
  * @brief VRC1 mapper scoping class: PRG/CHR bank registers and the
@@ -106,7 +106,7 @@ public:
      * @p window selects *which* window gets switched -- 0 for window1Control
      * ($8000-$9FFF), 1 for window2Control ($A000-$BFFF), 2 for window3Control
      * ($C000-$DFFF) -- defaulting to window 0 when omitted. Lives in the fixed
-     * bank (::fixed) so it's always reachable regardless of what's currently
+     * bank (::FIXED) so it's always reachable regardless of what's currently
      * banked in elsewhere.
      *
      * @p fn may be any callable -- a captureless function pointer or a lambda
@@ -133,7 +133,7 @@ public:
      *       entirely rather than binding a reference to an undefined extern.
      */
     template <typename TReturn, typename TFunc>
-    static fixed TReturn Long(TFunc fn, u8 window = 0);
+    static FIXED TReturn Long(TFunc fn, u8 window = 0);
 
     /*
      * CHR bankswitching. VRC1 has two independent 4 KiB CHR windows -- PPU
@@ -285,7 +285,7 @@ public:
      */
     template <typename Tag> struct bank_layout;
 
-    /// Key for vrc1.hpp's own always-mapped fixed bank ($E000-$FFFF, see ::fixed).
+    /// Key for vrc1.hpp's own always-mapped fixed bank ($E000-$FFFF, see ::FIXED).
     /// Named fixed_bank_tag, not fixed_tag: VRC1_BANKED()'s tag argument gets
     /// macro-expanded before tag##_tag pastes it (so a #define'd tag can be
     /// forwarded through config headers, see VRC1_BANKED_IMPL below) -- but that
@@ -313,7 +313,7 @@ public:
      *            function -- supplied explicitly, e.g. `Call<LoadLevelChunk>(chunkId)`.
      */
     template <auto Fn, typename... Args>
-    static fixed auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type;
+    static FIXED auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type;
 
     /**
      * @brief Runs an arbitrary block under Fn's resolved window, instead of
@@ -323,7 +323,7 @@ public:
      *        entry to resolve; the block may capture freely.
      */
     template <auto Fn, typename Block>
-    static fixed auto CallBlock(Block &&block) -> decltype(block());
+    static FIXED auto CallBlock(Block &&block) -> decltype(block());
 
 private:
     /**
@@ -371,7 +371,7 @@ private:
          * anywhere else, including the caller's own.
          */
         template <typename TReturn, u16 addr, typename TFunc>
-        [[gnu::noinline]] static fixed TReturn CallInWindow(tech::wo_register<addr> &reg, u8 bank, TFunc fn) {
+        [[gnu::noinline]] static FIXED TReturn CallInWindow(tech::wo_register<addr> &reg, u8 bank, TFunc fn) {
             SHADOW(reg) {
                 SwitchBank(reg, bank);
                 return fn();
@@ -401,7 +401,7 @@ private:
         // real, separate, permanently-fixed-bank-resident unit regardless of
         // which switchable bank any CALLER of this function happens to live in.
         template <typename TReturn, typename TFunc>
-        [[gnu::noinline]] static fixed TReturn CallInWindows2(u8 windowIndexBase, u8 bankBase, TFunc fn) {
+        [[gnu::noinline]] static FIXED TReturn CallInWindows2(u8 windowIndexBase, u8 bankBase, TFunc fn) {
             switch (windowIndexBase) {
                 case 0:
                     return CallInWindow<TReturn>(window1Control, bankBase, [&]() -> TReturn {
@@ -455,7 +455,7 @@ private:
          * after the inner call returns -- not a theoretical concern).
          */
         template <typename TReturn, typename TFunc>
-        [[gnu::noinline]] static fixed TReturn CallInSection(const section_t &section, TFunc fn) {
+        [[gnu::noinline]] static FIXED TReturn CallInSection(const section_t &section, TFunc fn) {
             const u16 vma = static_cast<u16>(section.rom_address);
             const u8 windowIndex = static_cast<u8>((vma - kWindowBase) / kWindowSize);
             const u8 explicitBank = static_cast<u8>(section.rom_address >> 16);
@@ -483,7 +483,7 @@ struct VRC1::function_traits<R (*)(A...)> {
 };
 
 template <typename TReturn, typename TFunc>
-fixed TReturn VRC1::Long(TFunc fn, const u8 window) {
+FIXED TReturn VRC1::Long(TFunc fn, const u8 window) {
 #ifdef TARGET_NES
     switch (window) {
         case 1:  return Detail::CallInWindow<TReturn>(window2Control, 1, fn);
@@ -496,7 +496,7 @@ fixed TReturn VRC1::Long(TFunc fn, const u8 window) {
 }
 
 template <auto Fn, typename... Args>
-fixed auto VRC1::Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type {
+FIXED auto VRC1::Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type {
     using TReturn = typename function_traits<decltype(Fn)>::return_type;
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
@@ -513,7 +513,7 @@ fixed auto VRC1::Call(Args &&...args) -> typename function_traits<decltype(Fn)>:
 }
 
 template <auto Fn, typename Block>
-fixed auto VRC1::CallBlock(Block &&block) -> decltype(block()) {
+FIXED auto VRC1::CallBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
     if constexpr (L::always_mapped) {

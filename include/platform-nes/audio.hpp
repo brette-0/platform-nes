@@ -17,6 +17,36 @@
 using namespace br0::intsh;
 
 
+#ifdef TARGET_NES
+#include <platform-nes/mappers/mmc3.hpp>
+
+/**
+ * @brief Bank tags for a PRG-ROM-banked audio backend -- DECLARED here,
+ *        DEFINED by the consuming project.
+ *
+ * The audio backend's code and its music data may each live in their own
+ * PRG-ROM bank. Which banks those are is a layout decision, so this library
+ * only names the two roles; a consuming project supplies the facts by
+ * specialising mmc3::bank_layout for each (see demo/src/banks.hpp for a
+ * worked example, and mmc3::CallPairedBlock for what is done with them).
+ *
+ * A project that does NOT bank its audio still has to specialise both -- with
+ * `always_mapped = true`, one line each. That makes every call below compile
+ * to a plain call with no bank switching at all, so nothing is paid for a
+ * feature that isn't used. Leaving them unspecialised is a compile error
+ * ("implicit instantiation of undefined template mmc3::bank_layout<...>")
+ * rather than a silent wrong-bank call at runtime.
+ *
+ * DELIBERATELY NOT NAMED AFTER FAMISTUDIO. FamiStudio is this project's
+ * current backend, not a permanent one: a replacement engine written in C,
+ * C++, Rust or hand-written assembly binds to these same two roles by
+ * placing itself in the same sections, with no change here or in any
+ * consuming project's linker script.
+ */
+struct audio_code_bank_tag {}; ///< The audio engine's own code.
+struct audio_data_bank_tag {}; ///< Music/SFX data the engine reads while running.
+#endif
+
 namespace audio {
 
 /**
@@ -167,7 +197,7 @@ void SfxSamplePlay(u8 index);
  * @brief Initializes the audio backend; must be called before any other audio function.
  * @param region Playback region: 0 for NTSC (default), 1 for PAL.
  */
-void AudioInit(u8 region = 0);
+void Init(u8 region = 0);
 
 /**
  * @brief Drives the audio engine forward by one frame.
@@ -175,6 +205,6 @@ void AudioInit(u8 region = 0);
  * Must be called once per video frame to advance the FamiStudio player
  * (NES) or to refill the PCM mix buffer (desktop).
  */
-void AudioUpdate();
+void Update();
 
 } // namespace audio

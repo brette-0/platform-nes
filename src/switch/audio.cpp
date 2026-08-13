@@ -3,7 +3,7 @@
  * @brief Music playback for the Nintendo Switch backend (libnx audout).
  *
  * Mirrors the desktop audio contract (audio.hpp): the demo registers tracks in
- * its track table and calls AudioInit / TrackPlay / AudioUpdate. libnx's audout
+ * its track table and calls Init / TrackPlay / Update. libnx's audout
  * device is fixed at 48 kHz / 2ch / signed-16 PCM, so the build pipeline encodes
  * the source WAV to exactly that format (see the ffmpeg step in the Switch
  * branch of CMakeLists.txt) and ships it in the .nro's RomFS. This backend reads
@@ -13,7 +13,7 @@
  * released-buffer signal, refills the freed chunk from the track (looping at the
  * track's loop point), and re-appends it. Keeping playback off the render thread
  * means audio is never coupled to (and never stalls) the 60Hz frame loop --
- * AudioUpdate() is therefore a no-op here.
+ * Update() is therefore a no-op here.
  *
  * SFX (declared via ::SFX in audio.hpp, same RomFS raw-PCM pipeline as
  * tracks) are loaded once into their own buffer and played on one of
@@ -208,7 +208,7 @@ static void audio_thread(void *) {
     }
 }
 
-void audio::AudioInit(u8) {
+void audio::Init(u8) {
     romfsInit();
     load_track(0);
     load_sfx();
@@ -234,7 +234,7 @@ void audio::AudioInit(u8) {
         threadStart(&athread);
 }
 
-void audio::AudioUpdate() {
+void audio::Update() {
     // Streaming is driven by the audout thread; nothing to do per frame.
 }
 

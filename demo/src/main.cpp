@@ -4,18 +4,19 @@
 
 #include "modes/level.hpp"
 #include "modes/title.hpp"
+#include "modes/world.hpp"
+#include "banks.hpp"
 
 auto gameMode = eGameModes::Level;
 
 void (*pNMI)();
 void (*pIRQ)();
 
-
-NMI() {
+NMI(FIXED) {
     pNMI();
 }
 
-IRQ() {
+IRQ(FIXED) {
     pIRQ();
 }
 
@@ -30,10 +31,11 @@ RESET {
                 continue;
 
             case eGameModes::World:
+                mmc3::Call<world::main>();
                 continue;
 
             case eGameModes::Title:
-                title::main();
+                mmc3::Call<title::main>();
         }
     }
 }

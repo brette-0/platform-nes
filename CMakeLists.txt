@@ -170,6 +170,23 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # at all.
     set(CMAKE_CXX_FLAGS "-T ${TOPLEVEL_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
 
+    # ------------------------------------------------------------------
+    # Audio bank roles. src/nes/audio.cpp reaches the audio engine through
+    # farcalls keyed on audio_code_bank_tag / audio_data_bank_tag (audio.hpp),
+    # which this library declares but deliberately does not define: which bank
+    # holds the engine and its music data is a project's layout decision, the
+    # same class of decision as TOPLEVEL_LD above. A specialisation has to be
+    # visible where it is instantiated, and that is library code which cannot
+    # include a project's own header -- so the project injects one here.
+    # Unset means "audio isn't banked": the fallback below marks both roles
+    # always-mapped and every farcall collapses to a plain call.
+    # ------------------------------------------------------------------
+    if(NOT AUDIO_BANKS_HPP)
+        set(AUDIO_BANKS_HPP ${CMAKE_SOURCE_DIR}/include/platform-nes/audio_banks_unbanked.hpp)
+    endif()
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/src/nes/audio.cpp
+            PROPERTIES COMPILE_OPTIONS "-include;${AUDIO_BANKS_HPP}")
+
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes CXX)
@@ -240,6 +257,11 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     find_program(CA65 ca65 HINTS "${CC65_DIR}/bin" "C:/cc65/bin" REQUIRED)
     get_filename_component(LLVM_MOS_BIN ${CMAKE_C_COMPILER} DIRECTORY)
     find_program(LLVM_READELF llvm-readelf
+        HINTS "${LLVM_MOS_BIN}" NO_DEFAULT_PATH REQUIRED)
+    # Same SDK-pinned lookup as llvm-readelf above; used by the post-link
+    # space report (tools/report_space.cmake), which reads region geometry
+    # back out of the linker's own __space_* symbols.
+    find_program(LLVM_NM llvm-nm
         HINTS "${LLVM_MOS_BIN}" NO_DEFAULT_PATH REQUIRED)
 
     # demo/famistudio_config.s is the REAL, project-owned FamiStudio config
@@ -348,6 +370,17 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # loop, which would produce a second object defining the same symbols.
     file(GLOB_RECURSE DEMO_ASM_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/*.s)
     list(REMOVE_ITEM DEMO_ASM_SOURCES ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s)
+    # nes_audio.s (the generated song export) is assembled ONLY through its
+    # wrapper, demo/audio/tracks/nes_audio_bank.s, which opens the target
+    # PRG-ROM bank's segment and .includes it -- see that file's own comment.
+    # Assembling it directly here as well would define every music symbol
+    # twice, exactly the clash famistudio_config.s is excluded for above.
+    list(REMOVE_ITEM DEMO_ASM_SOURCES ${NES_AUDIO_ASM})
+    # nes_sfx.s: same treatment, same reason -- assembled only through
+    # demo/audio/sfx/nes_sfx_bank.s, which puts it in the audio DATA bank
+    # alongside the music. Engine-read data cannot stay in the resident image:
+    # a paired farcall banks that region out for the duration of the call.
+    list(REMOVE_ITEM DEMO_ASM_SOURCES ${CMAKE_SOURCE_DIR}/demo/audio/sfx/nes_sfx.s)
     set(DEMO_ASM_OBJECTS "")
     foreach(ASM_SRC ${DEMO_ASM_SOURCES})
         get_filename_component(ASM_NAME ${ASM_SRC} NAME_WE)
@@ -357,9 +390,16 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
                 COMMAND ${CA65}
                 -I ${FAMISTUDIO_DIR}
                 -I ${FAMISTUDIO_DIR}/NoteTables
+                # nes_audio_bank.s .includes the generated nes_audio.s from
+                # this directory; ca65 resolves .include against its -I paths.
+                -I ${CMAKE_SOURCE_DIR}/demo/audio/tracks
+                -I ${CMAKE_SOURCE_DIR}/demo/audio/sfx
                 -o ${ASM_OBJ}
                 ${ASM_SRC}
-                DEPENDS ${ASM_SRC}
+                # NES_AUDIO_ASM: the wrapper's .include makes every music
+                # object depend on the generated export, which no scan of
+                # ${ASM_SRC} alone would reveal.
+                DEPENDS ${ASM_SRC} ${NES_AUDIO_ASM}
                 COMMENT "Assembling ${ASM_NAME}"
         )
         list(APPEND DEMO_ASM_OBJECTS ${ASM_OBJ})
@@ -492,6 +532,22 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # part of a normal build; nothing downstream reads its output.
     add_custom_target(demo_famistudio_asm
             DEPENDS ${FAMISTUDIO_OBJ} ${DEMO_ASM_OBJECTS} ${CA65_PADDING}
+    )
+
+    # ------------------------------------------------------------------
+    # Post-link diagnostic: how full each memory region ended up. Purely
+    # informational (see tools/report_space.cmake's own header) -- a region
+    # that actually overflows is a hard linker error well before this runs,
+    # so this exists to show how much room is LEFT, especially in banks that
+    # hold nothing yet and therefore emit no section at all.
+    # ------------------------------------------------------------------
+    add_custom_command(TARGET demo POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+            -DREADELF=${LLVM_READELF}
+            -DNM=${LLVM_NM}
+            -DELF_FILE=$<TARGET_FILE:demo>.elf
+            -P ${CMAKE_SOURCE_DIR}/tools/report_space.cmake
+            VERBATIM
     )
 
     # FamiStudio and the hand-written assembly objects are required by

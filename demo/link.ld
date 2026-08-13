@@ -22,33 +22,102 @@
  */
 
 /* This demo's own ROM size -- NOT an MMC3 fact, purely this project's own
- * choice, which is exactly why it doesn't live in mmc3-helper.ld. 32 KiB,
- * 4 banks -- unchanged from this demo's original pre-BANKED_CALL VRC1 size.
- * Every ASSERT below depends on this being EXACTLY 4: see
- * __mmc3_resident_windows just below for why. */
-PROVIDE(__prg_rom_size = 32);
+ * choice, which is exactly why it doesn't live in mmc3-helper.ld. 32 KiB
+ * (4 banks), unchanged from this demo's original pre-BANKED_CALL VRC1 size.
+ *
+ * This is now a free knob: any power of 2 from 32 up to 512 KiB (MMC3's own
+ * hardware maximum -- 6-bit bank registers) links correctly with no other
+ * edit to this file, because mmc3-helper.ld anchors the always-resident
+ * image to the TOP of the ROM file and pads the rest (see that file's own
+ * header comment, and prg_rom_spare in the OUTPUT_FORMAT block below). It
+ * previously could not move at all: the old layout put the resident image
+ * at the BOTTOM of the file, which made "$C000 shows the second-to-last
+ * bank" true only at exactly 4 banks, so this file carried an
+ * ASSERT(__prg_rom_size == 32) to enforce that.
+ *
+ * TWO THINGS STILL TRACK THIS NUMBER BY HAND when it changes:
+ * - demo/src/header.hpp's HEADER() prg_rom_bytes argument (32768) -- the
+ *   NES2.0 header is built by the C++ side, which cannot see linker
+ *   symbols, so a mismatch would ship a ROM whose header lies about its own
+ *   size. See that file's own comment.
+ * - Growing this does NOT grow the flat resident image ($8000-$DFFF, still
+ *   24 KiB): the extra banks are reachable only through MMC3_BANKED()
+ *   domains (plus __mmc3_reserved_banks, see mmc3-helper.ld). A c_readonly
+ *   overflow is not fixed by bumping this number alone. */
+PROVIDE(__prg_rom_size = 64);
 PROVIDE(__chr_rom_size = 8);
 
-/* mmc3-helper.ld's own prg_rom_switchable is deliberately only 16 KiB
- * ($8000-$BFFF, R6/R7's own two windows) by default -- see that file's own
- * comment on __mmc3_resident_windows for why: $C000-$DFFF's "second-to-last
- * bank" identity SHIFTS as PRG-ROM grows, so it isn't safe to treat as
- * ordinary resident space IN GENERAL. This demo can safely widen it anyway,
- * because it commits (via the ASSERT below) to EXACTLY 4 total banks -- at
- * exactly 4, "second-to-last" IS the third 8 KiB chunk in file order, no
- * different from banks 0 and 1 landing at R6/R7's own defaults. 3 windows
- * -> $8000-$DFFF, 24 KiB total -- exactly the flat, three-window-equivalent
- * image this demo used under VRC1. MUST come BEFORE `INCLUDE mmc3-helper.ld`
- * below: PROVIDE() only takes its FIRST-encountered value, and
- * mmc3-helper.ld provides its own default (2) for this same symbol -- same
- * ordering rule __prg_rom_switchable_reserved's own history (VRC1's
- * demo/link.ld) already established. If this demo ever needs a 5th+ bank
- * (an explicit MMC3_BANKED()-tagged domain), this has to be revisited
- * FIRST -- it would silently place content that becomes unreachable the
- * moment total bank count moves off exactly 4. */
-PROVIDE(__mmc3_resident_windows = 3);
+/* Four banked domains, claiming EVERY bank the resident image doesn't use:
+ * 64 KiB = 8 banks, of which 4 are resident (3 windows + the fixed bank), so
+ * banks 0-3 are ours to name. Declaring all four leaves prg_rom_spare at
+ * exactly 0 bytes -- no padding anywhere in this ROM. An unused domain costs
+ * the same zeros the padding did, but is ready to fill without touching the
+ * layout. MUST be set before `INCLUDE mmc3-helper.ld`: it is what shortens
+ * prg_rom_spare, and PROVIDE() only takes its first-encountered value. */
+PROVIDE(__mmc3_reserved_banks = 4);
 
 INCLUDE mmc3-helper.ld
+
+/* ------------------------------------------------------------------------
+ * BANKED DOMAINS -- banks 0-3, 8 KiB each, all reached through window 1
+ * ($8000-$9FFF, register R6).
+ *
+ * ORIGIN is ((bank + 1) * 0x10000) + 0x8000, and the +1 is load-bearing
+ * TWICE over -- see mmc3.hpp's section_t ENCODING comment for the full
+ * account, but in short: (a) the C++ side treats a zero high half as "no
+ * bank encoded", so an unbiased bank 0 would be indistinguishable from
+ * unset, and (b) an unbiased bank 0 region would sit at ORIGIN 0x8000,
+ * overlapping this project's own .text, which ld.lld rejects outright
+ * ("section .text virtual address range overlaps with .prg_rom_001" --
+ * confirmed against a real link, not assumed). The high bits never reach the
+ * emitted 6502 code: a JSR operand has 16 bits, so every one of these
+ * truncates back to a plain $8000 call.
+ *
+ * A domain's REAL bank number is its file offset / 0x2000, which is decided
+ * entirely by the FULL() order in the OUTPUT_FORMAT block at the bottom of
+ * this file -- NOT by these ORIGINs, and NOT by the numbers in their names.
+ * The two are kept in agreement by hand here (001 is FULL()'d first, so it
+ * is bank 0, so its ORIGIN encodes 0+1), exactly the arithmetic that shipped
+ * a real crash in the VRC1 rollout when it was got wrong -- see
+ * BANKED_CALL_THEORY.txt's "CRITICAL POST-PHASE-4 FIX". Change one, change
+ * all three: the FULL() order, the ORIGIN here, and the section() in
+ * demo/src/banks.hpp.
+ *
+ * All four use window 1 rather than spreading across R6/R7 because nothing
+ * in this demo yet needs two different domains banked in simultaneously; a
+ * domain that does would encode 0xA000 instead and be reached through R7.
+ * ------------------------------------------------------------------------ */
+MEMORY {
+  prg_rom_001 : ORIGIN = 0x00018000, LENGTH = 0x2000  /* bank 0 */
+  prg_rom_002 : ORIGIN = 0x00028000, LENGTH = 0x2000  /* bank 1 */
+  /* bank 2, but encoded for WINDOW 2 ($A000, R7) rather than window 1 --
+   * note the A000 in the ORIGIN. This is the audio engine's DATA bank, and it
+   * has to be mappable at the same time as the engine's CODE bank (002, R6):
+   * the engine dereferences song pointers while it runs, and MMC3 has exactly
+   * two switchable windows, so a same-window pair would have the data
+   * immediately displace the code. mmc3::CallPairedBlock static_asserts that
+   * the two tags differ here. */
+  prg_rom_003 : ORIGIN = 0x0003a000, LENGTH = 0x2000  /* bank 2, window 2 */
+  prg_rom_004 : ORIGIN = 0x00048000, LENGTH = 0x2000  /* bank 3 */
+}
+
+/* Published for the build-time space report -- see mmc3-helper.ld's own
+ * __space_* block for why an empty bank needs these to be visible at all. */
+__space_origin_prg_rom_001 = ORIGIN(prg_rom_001);
+__space_length_prg_rom_001 = LENGTH(prg_rom_001);
+__space_origin_prg_rom_002 = ORIGIN(prg_rom_002);
+__space_length_prg_rom_002 = LENGTH(prg_rom_002);
+__space_origin_prg_rom_003 = ORIGIN(prg_rom_003);
+__space_length_prg_rom_003 = LENGTH(prg_rom_003);
+__space_origin_prg_rom_004 = ORIGIN(prg_rom_004);
+__space_length_prg_rom_004 = LENGTH(prg_rom_004);
+
+SECTIONS {
+  .prg_rom_001 : { *(.prg_rom_001 .prg_rom_001.*) } >prg_rom_001
+  .prg_rom_002 : { *(.prg_rom_002 .prg_rom_002.*) } >prg_rom_002
+  .prg_rom_003 : { *(.prg_rom_003 .prg_rom_003.*) } >prg_rom_003
+  .prg_rom_004 : { *(.prg_rom_004 .prg_rom_004.*) } >prg_rom_004
+}
 
 /* Moves the C writable arena (.data/.bss/heap, and the dynamic soft stack
  * that shares it) into PRG-RAM ("cartridge memory") instead of mmc3-helper.ld's
@@ -74,45 +143,52 @@ INCLUDE mmc3-helper.ld
 REGION_ALIAS("c_writeable", prg_ram)
 __stack = ORIGIN(prg_ram) + LENGTH(prg_ram) - 1;
 
-ASSERT(__prg_rom_size == 32,
-       "This demo currently only supports its existing 32 KiB PRG-ROM (4 banks) -- growing past that needs revisiting __mmc3_resident_windows' own 4-bank-only assumption above before just bumping this number.")
+/* Regression guard: the audio engine's own code really did land in its bank.
+ * demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT names the section
+ * through ld.lld's XO65 escape encoding (_pprg__rom__002_fx -> .prg_rom_002),
+ * and a typo there is otherwise silent -- the segment simply lands somewhere
+ * else and the farcalls in src/nes/audio.cpp bank in an empty 8 KiB. There is
+ * no FSCODE rule any more: naming the section after the BANK means the
+ * .prg_rom_002 wildcard above already collects it, with no engine-specific
+ * routing at all, which is what lets a non-FamiStudio engine drop in.
+ *
+ * Zero IS tolerated via DEFINED(nmi_handler), same as the FSCODE guard this
+ * replaces: CMake's own compiler-identification/ABI probes link a bare
+ * `int main(){}` with no audio in sight. */
+PROVIDE(__audio_engine_size = SIZEOF(.prg_rom_002));
+ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
+       "The audio engine's code segment landed nowhere -- demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT no longer decodes to .prg_rom_002 (ld.lld XO65 escapes: _p is '.', __ is '_'), so audio.cpp's farcalls will bank in an empty region.")
 
-SECTIONS {
-  /* FamiStudio's compiled code (FSCODE, no leading dot -- see
-   * vrc1-helper.ld's own file comment on ld.lld's XO65 underscore-escape
-   * reader, confirmed empirically there and unchanged by this conversion)
-   * is ordinary, always-resident content now -- routed into the SAME flat
-   * image as everything else (prg_rom_switchable, widened to 24 KiB above),
-   * not a dedicated bank. FSCODE MUST match CMakeLists.txt's
-   * FAMISTUDIO_SEGMENT cache variable's value literally; the ASSERT below
-   * is the safety net for the two drifting apart. */
-  FSCODE : { *(FSCODE) } >prg_rom_switchable
-}
-
-/* Regression guard for FSCODE actually capturing FamiStudio's real content
- * -- SIZEOF() being nonzero is the only way to tell from in here. Zero IS
- * tolerated via DEFINED(nmi_handler): CMake's own internal compiler-
- * identification/ABI probes link a bare `int main(){}` with no
- * audio.cpp/famistudio_pass1.o in sight (confirmed with a real build, same
- * class of bare-probe case the VRC1 demo's own Phase 6 ASSERT existed for)
- * -- nmi_handler has C linkage (interrupts.hpp's ::interrupt macro) and
- * exists only in this demo's real modes/level.cpp, so it's a stable,
- * unmangled stand-in for "is this actually the demo, not a probe." */
-PROVIDE(__famistudio_domain_size = SIZEOF(FSCODE));
-ASSERT(__famistudio_domain_size > 0 || !DEFINED(nmi_handler),
-       "FSCODE captured no content -- CMakeLists.txt's FAMISTUDIO_SEGMENT cache variable no longer matches this file's own hardcoded FSCODE segment name (SECTIONS block above), so FamiStudio's real compiled code isn't landing in the ROM at all.")
-
-/* prg_rom_switchable is already FULL()'d by mmc3-helper.ld's own
- * OUTPUT_FORMAT -- only prg_rom_fixed and chr_rom (deliberately NOT FULL()'d
- * there, see that file's own OUTPUT_FORMAT comment) are this project's job.
- * OUTPUT_FORMAT is additive across INCLUDEd files (confirmed empirically --
- * see vrc1-helper.ld's own OUTPUT_FORMAT comment) and every region name is
- * in one shared namespace by the time the whole script is assembled, so
- * this block's position, AFTER mmc3-helper.ld's own, is what actually
- * controls final file order (prg_rom_fixed must stay last among PRG-ROM
- * content, matching real MMC3 hardware always showing the true last bank
- * there). */
+/* mmc3-helper.ld FULL()s only nes2_header; every PRG region is this
+ * project's job, in this exact order (see that file's own OUTPUT_FORMAT
+ * comment for why it cannot emit them itself). OUTPUT_FORMAT is additive
+ * across INCLUDEd files (confirmed empirically -- see vrc1-helper.ld's own
+ * OUTPUT_FORMAT comment) and every region name is in one shared namespace
+ * by the time the whole script is assembled, so this block's position,
+ * AFTER mmc3-helper.ld's own, is what actually controls final file order.
+ *
+ * Order is the whole layout contract:
+ * - The banked domains come FIRST, and THIS ORDER IS WHAT ASSIGNS THEIR BANK
+ *   NUMBERS: 001 -> bank 0, 002 -> bank 1, 003 -> bank 2, 004 -> bank 3,
+ *   since a bank is just file offset / 0x2000. Their MEMORY ORIGINs above
+ *   and their section()s in demo/src/banks.hpp both hard-code those same
+ *   numbers; reordering these four lines silently re-banks every domain and
+ *   nothing will warn you.
+ * - prg_rom_spare is the zero padding that makes the file exactly
+ *   __prg_rom_size. It is EMPTY in this build -- __mmc3_reserved_banks = 4
+ *   hands all four leftover banks to the domains above -- and it is the only
+ *   thing that grows if __prg_rom_size does without new domains to match.
+ * - prg_rom_switchable then prg_rom_fixed occupy the top banks, in that
+ *   order: real MMC3 hardware always shows the true last bank at $E000, and
+ *   the second-to-last at $C000 -- which is prg_rom_switchable's own third
+ *   window, by construction, at any ROM size. */
 OUTPUT_FORMAT {
+  FULL(prg_rom_001)
+  FULL(prg_rom_002)
+  FULL(prg_rom_003)
+  FULL(prg_rom_004)
+  FULL(prg_rom_spare)
+  FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)
   FULL(chr_rom)
 }

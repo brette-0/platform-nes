@@ -17,8 +17,8 @@ float *audio::pcm_buffer = nullptr;
 /** @brief Size of ::pcm_buffer, in samples. */
 u32 audio::pcm_buffer_size = 0;
 
-void audio::AudioInit(u8) {}
-void audio::AudioUpdate() {}
+void audio::Init(u8) {}
+void audio::Update() {}
 
 void audio::TrackPlay(u8 /*index*/) {}
 void audio::TrackPause(u8 /*pause*/) {}

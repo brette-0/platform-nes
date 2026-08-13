@@ -10,9 +10,16 @@
 #define REGION 0
 #endif
 
+// PRG-ROM size (32768) MUST match demo/link.ld's own __prg_rom_size (32, in
+// KiB) -- that script now accepts anything up to MMC3's 512 KiB maximum, and
+// nothing can check the two against each other automatically: the NES2.0
+// header is built here, at compile time, where linker symbols don't exist
+// yet. Change one and change the other, or the ROM ships a header that lies
+// about its own size. CHR-ROM (8192) has the same relationship with
+// __chr_rom_size.
 HEADER(
     Mirroring::Horizontal, false,
-    32768, 8192,
+    65536, 8192,
     8192, 0,
     0, 0,
     REGION ? Timing::PAL : Timing::NTSC

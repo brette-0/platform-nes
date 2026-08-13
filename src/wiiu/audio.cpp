@@ -3,7 +3,7 @@
  * @brief Music playback for the native Wii U backend (SDL2 audio).
  *
  * Mirrors the desktop audio contract (audio.hpp): the demo registers tracks in
- * its track table and calls AudioInit / TrackPlay / AudioUpdate.
+ * its track table and calls Init / TrackPlay / Update.
  *
  * The music is NOT loaded from the filesystem. A native Wii U title only has a
  * /vol/content mount when it is launched with its packaged content (a .wuhb or
@@ -20,7 +20,7 @@
  * change and the little-endian -> Espresso big-endian byte swap) and streamed
  * from an SDL audio callback, looping at the track's loop point. The callback
  * runs on SDL's own audio thread, independent of the 60Hz render loop, so
- * AudioUpdate() is a no-op.
+ * Update() is a no-op.
  *
  * SFX (declared via ::SFX in audio.hpp) are decoded once at init and mixed
  * additively into the same callback, on one of ::N_SFX_VOICES fixed voice
@@ -271,7 +271,7 @@ static void audio_callback(void *, u8 *stream, int len) {
     }
 }
 
-void audio::AudioInit(u8) {
+void audio::Init(u8) {
     load_track();
     load_sfx();
 
@@ -294,7 +294,7 @@ void audio::AudioInit(u8) {
     SDL_PauseAudioDevice(dev, 0);  // start the callback running
 }
 
-void audio::AudioUpdate() {
+void audio::Update() {
     // Streaming is driven by the SDL audio callback; nothing to do per frame.
 }
 

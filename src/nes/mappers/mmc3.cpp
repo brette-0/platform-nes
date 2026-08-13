@@ -33,13 +33,47 @@ void mmc3::AcknowledgeScanlineIRQ() {
 extern "C" void _start();
 
 /**
+ * @brief The two physical PRG banks that make $8000-$BFFF continuous with
+ *        the rest of the always-resident image, defined by mmc3-helper.ld.
+ *
+ * NOT 0 and 1 in general: mmc3-helper.ld anchors the resident image to the
+ * TOP of the ROM file (banks N-1-windows .. N-1) so that MMC3's two
+ * hardwired windows -- last bank at $E000, second-to-last at $C000 -- always
+ * show linked content no matter how big PRG-ROM is. Anything below that is
+ * spare/banked space. 0/1 is simply what those two work out to at the 4-bank
+ * minimum, which is the only size this project built while these were
+ * hardcoded literals here.
+ *
+ * Declared as arrays and used via their ADDRESS: a linker-script symbol has
+ * no storage to load a value out of -- `__mmc3_boot_bank_window1 = 60;` in
+ * the script means the symbol's ADDRESS is 60 -- so taking the address and
+ * truncating to u8 is what actually reads the number. Same trick llvm-mos's
+ * own platform code uses for __prg_rom_size-style layout symbols; a plain
+ * `extern u8` here would instead fetch whatever byte lives at address 60.
+ */
+extern "C" const char __mmc3_boot_bank_window1[];
+extern "C" const char __mmc3_boot_bank_window2[];
+
+/// @see __mmc3_boot_bank_window1 -- address-as-value, narrowed to the 8 bits
+/// MMC3's bank registers take (only the low 6 are decoded by the chip; the
+/// linker script's own ASSERT on __prg_rom_size <= 512 is what keeps the
+/// number inside them). always_inline, not merely `static`: ::_reset calls
+/// this before R6/R7 are established, so it must not become a real call into
+/// a switchable bank -- and it is not marked ::FIXED, since inlining leaves
+/// nothing to place. __UINTPTR_TYPE__ rather than <cstdint>'s uintptr_t: this
+/// file includes no standard headers, and the builtin is always available.
+[[gnu::always_inline]] static inline u8 BootBank(const char *symbol) {
+    return static_cast<u8>(reinterpret_cast<__UINTPTR_TYPE__>(symbol));
+}
+
+/**
  * @brief Cold-boot init: silence the scanline IRQ unit, point R6/R7 at the
  *        flat image's first two banks, enable PRG-RAM, then fall through
  *        to crt0's _start.
  *
  * Runs BEFORE .bss is zeroed (same constraint as VRC1's ::_reset, see its
  * own comment in vrc1.cpp): raw tech::poke() calls only, no MMC3::Register
- * shadow objects, and no calls to ordinary (non-::fixed) functions like
+ * shadow objects, and no calls to ordinary (non-::FIXED) functions like
  * ::AcknowledgeScanlineIRQ -- window1Control/window2Control aren't
  * established yet at this point, so anything not pinned to this fixed bank
  * could resolve into whatever switchable bank happens to be powered-up
@@ -92,19 +126,25 @@ extern "C" void _start();
  * function's call to make since it doesn't know what layout any given game
  * wants.
  *
- * At this module's assumed 32 KiB PRG-ROM (4 banks) with no explicit
- * .prg_rom_bankN tagging in use, this reconstructs one flat, contiguous
- * $8000-$FFFF image: bank 0 -> R6 ($8000-$9FFF), bank 1 -> R7
- * ($A000-$BFFF), and banks 2/3 show up at $C000-$DFFF/$E000-$FFFF
- * automatically (second-to-last/last, PRG mode 0 hardware fact) with no
- * register write needed for either -- see mmc3-helper.ld's own MEMORY
- * comment.
+ * With no explicit MMC3_BANKED() domain in use, this reconstructs one flat,
+ * contiguous $8000-$FFFF image out of the ROM's top four banks, at ANY
+ * PRG-ROM size from 32 KiB to MMC3's own 512 KiB maximum: R6/R7 get the
+ * resident image's first two banks (__mmc3_boot_bank_window1/2, from
+ * mmc3-helper.ld -- N-4 and N-3, not 0 and 1, once the ROM is bigger than
+ * the resident image), and the remaining two show up at $C000-$DFFF/
+ * $E000-$FFFF automatically (second-to-last/last, PRG mode 0 hardware fact)
+ * with no register write needed for either. That works size-independently
+ * only because the linker script anchors the resident image to the top of
+ * the ROM file -- see mmc3-helper.ld's own header comment.
  */
-extern "C" fixed void _reset() {
+extern "C" FIXED void _reset() {
     tech::poke(0xe000, 0);    // IRQ: disable generation + acknowledge any pending/residual IRQ.
     tech::poke(0xa001, 0x80); // PRG-RAM: enable, write-permitted.
-    tech::poke(0x8000, 6); tech::poke(0x8001, 0); // R6 -> bank 0 ($8000-$9FFF).
-    tech::poke(0x8000, 7); tech::poke(0x8001, 1); // R7 -> bank 1 ($A000-$BFFF).
+    // R6/R7 -> the resident image's own first two banks ($8000-$9FFF,
+    // $A000-$BFFF). See ::__mmc3_boot_bank_window1: these are the ROM's top
+    // banks, not 0/1, on anything larger than the 32 KiB minimum.
+    tech::poke(0x8000, 6); tech::poke(0x8001, BootBank(__mmc3_boot_bank_window1));
+    tech::poke(0x8000, 7); tech::poke(0x8001, BootBank(__mmc3_boot_bank_window2));
     _start();
 }
 
@@ -118,6 +158,6 @@ extern "C" fixed void _reset() {
  */
 __attribute__((constructor(101)))
 static void SyncBankShadows() {
-    mmc3::SwitchBank(mmc3::window1Control, 0);
-    mmc3::SwitchBank(mmc3::window2Control, 1);
+    mmc3::SwitchBank(mmc3::window1Control, BootBank(__mmc3_boot_bank_window1));
+    mmc3::SwitchBank(mmc3::window2Control, BootBank(__mmc3_boot_bank_window2));
 }

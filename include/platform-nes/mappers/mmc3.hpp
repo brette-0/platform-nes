@@ -1,7 +1,7 @@
 /**
  * @file mmc3.hpp
  * @brief MMC3 mapper (mapper 4): PRG/CHR bank switching, scanline IRQ, and
- *        the ::fixed / ::cartmem / ::sysmem segment keywords.
+ *        the ::FIXED / ::CARTMEM / ::SYSMEM segment keywords.
  *
  * MMC3 hardware, as this module uses it (PRG mode 0, CHR mode 0 -- the only
  * combination this module supports; see mmc3.cpp's ::_reset):
@@ -10,7 +10,7 @@
  *   $A000-$BFFF  8 KiB PRG-ROM, switchable (register R7, via $8000/$8001)
  *   $C000-$DFFF  8 KiB PRG-ROM, FIXED to the second-to-last physical bank
  *   $E000-$FFFF  8 KiB PRG-ROM, FIXED to the last physical bank
- *   $6000-$7FFF  up to 8 KiB PRG-RAM ("cartridge memory", see ::cartmem)
+ *   $6000-$7FFF  up to 8 KiB PRG-RAM ("cartridge memory", see ::CARTMEM)
  *   $0000-$07FF  CHR-ROM, six windows: two 2 KiB (R0/R1), four 1 KiB (R2-R5)
  *
  * UNLIKE VRC1's three independently-selectable PRG windows, MMC3 in PRG
@@ -20,18 +20,18 @@
  * switchable window, and this file never declares a "window3Control": no
  * register backs one. Its content also isn't stable across ROM growth (it
  * always shows whatever is CURRENTLY second-to-last, which shifts as more
- * banks are added), so unlike ::fixed, nothing should target it through the
- * farcall machinery below -- see ::MMC3::Detail::CallInSection's own comment.
+ * banks are added), so unlike ::FIXED, nothing should target it through the
+ * farcall machinery below -- see ::mmc3::Detail::CallInSection's own comment.
  *
  * Every register on this chip except $A000 (mirroring) and $A001 (PRG-RAM
  * protect) is reached through the SAME two physical addresses ($8000
- * select, $8001 data) -- see ::MMC3::Register, the indexed analogue of
+ * select, $8001 data) -- see ::mmc3::Register, the indexed analogue of
  * VRC1's ::wo_register.
  *
- * This module is a class (::MMC3), not a namespace: every member is static,
+ * This module is a class (::mmc3), not a namespace: every member is static,
  * and the class itself is non-instantiable (all constructors are deleted).
  * The NES target has exactly one physical MMC3 chip on the cartridge, so
- * there is never a real object to construct there -- ::MMC3 is used purely
+ * there is never a real object to construct there -- ::mmc3 is used purely
  * as a scoping/organisational device, the same as the namespace it replaces.
  * A class (rather than a namespace) leaves room for a future emulated MMC3
  * -- e.g. a desktop/console-backend cartridge model -- to hold genuine
@@ -71,37 +71,37 @@ static_assert(ALTERNATIVE_NAMETABLE == 0 || ALTERNATIVE_NAMETABLE == 1,
  * @brief Pins a function or variable into MMC3's fixed PRG-ROM bank
  *        ($E000-$FFFF).
  *
- * Same name and section as VRC1's ::fixed (mmc3-helper.ld routes
+ * Same name and section as VRC1's ::FIXED (mmc3-helper.ld routes
  * `.prg_rom_fixed` to the identical $E000-$FFFF address range VRC1 does),
  * since both chips hardwire that window the same way. Expands to nothing
  * off-NES.
  */
-#define fixed CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")
+#define FIXED CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")
 
 /**
  * @brief Pins a variable into MMC3's PRG-RAM ("cartridge memory",
  *        $6000-$7FFF).
  *
- * Explicit placement, the same way ::fixed pins code into $E000-$FFFF: use
+ * Explicit placement, the same way ::FIXED pins code into $E000-$FFFF: use
  * for state that should live in cartridge RAM specifically (e.g. a battery-
  * backed save struct) rather than wherever ordinary .bss/.data happens to
  * land. Backed by `.cartmem`, NOLOAD (mmc3-helper.ld) -- runtime storage
  * only, nothing is loaded into it from the ROM file. Expands to nothing
  * off-NES.
  */
-#define cartmem CREATE_SEGMENT_KEYWORD(".cartmem")
+#define CARTMEM CREATE_SEGMENT_KEYWORD(".cartmem")
 
 /**
  * @brief Pins a variable into the NES's own onboard system RAM, explicitly.
  *
  * Ordinary globals already land in system RAM via .bss/.data's default
- * placement; ::sysmem exists for state that specifically must NOT drift
- * into ::cartmem or any other region by accident -- an explicit statement
+ * placement; ::SYSMEM exists for state that specifically must NOT drift
+ * into ::CARTMEM or any other region by accident -- an explicit statement
  * of intent, not a different physical destination than the untagged
  * default. Backed by `.sysmem`, NOLOAD (mmc3-helper.ld). Expands to nothing
  * off-NES.
  */
-#define sysmem CREATE_SEGMENT_KEYWORD(".sysmem")
+#define SYSMEM CREATE_SEGMENT_KEYWORD(".sysmem")
 
 /**
  * @brief MMC3 mapper (mapper 4) scoping class: PRG/CHR bank registers,
@@ -434,16 +434,57 @@ public:
     /*
      * BANKED CALL scaffolding, mirroring vrc1.hpp's own (see
      * BANKED_CALL_THEORY.txt) as closely as MMC3's two-window hardware allows.
-     * Nested under MMC3:: (unlike VRC1's global versions) per this file's own
+     * Nested under mmc3:: (unlike VRC1's global versions) per this file's own
      * convention -- use ::MMC3_BANKED / ::MMC3_BANKED_EXTERN (below, outside
-     * the class) to register a tagged function; they qualify MMC3::bank_of /
-     * MMC3::bank_layout for you.
+     * the class) to register a tagged function; they qualify mmc3::bank_of /
+     * mmc3::bank_layout for you.
      */
 
-    /// One physical bank/segment's location in the linked ROM image. Same
-    /// shape and same reasoning as VRC1's section_t: rom_address is
-    /// LOADADDR()-derived, not the CPU-visible VMA, since every bank that ever
-    /// aliases onto a switchable window shares one VMA.
+    /**
+     * @brief One physical bank/segment's location in the linked ROM image.
+     *
+     * Same shape as VRC1's section_t, and the same reason for existing:
+     * rom_address is the LOADADDR-side encoded address, not the CPU-visible
+     * VMA, since every bank that ever aliases onto a switchable window shares
+     * one VMA.
+     *
+     * ENCODING (this differs from VRC1's by one, deliberately -- read this
+     * before hand-writing a bank_layout):
+     *
+     *     rom_address = ((bank + 1) << 16) | vma
+     *
+     * where `vma` is $8000 (window 1 / R6) or $A000 (window 2 / R7), and
+     * `bank` is the domain's real physical bank -- its file offset / 0x2000,
+     * in the order regions are FULL()'d in the consuming project's own
+     * OUTPUT_FORMAT. The linker script must encode the SAME bias in its
+     * MEMORY region ORIGIN; see demo/link.ld's own prg_rom_001 block.
+     *
+     * VRC1 uses an unbiased `bank << 16`, inherited from llvm-mos's own
+     * banked NES platforms. Two things forced the +1 here, both discovered
+     * against a real link rather than reasoned about:
+     *
+     * 1. BANK 0 WOULD BE UNREPRESENTABLE. CallInSection treats a zero high
+     *    half as "no explicit bank encoded" and falls back to the window
+     *    index -- fine for VRC1, whose bank 0 is by convention the
+     *    already-resident bank nobody needs to switch to, but wrong here: an
+     *    MMC3 project's domains start at physical bank 0 (the bottom of the
+     *    ROM file), and a domain reached through window 2 would silently bank
+     *    in bank 1 instead of bank 0.
+     * 2. LD.LLD REJECTS THE UNBIASED REGION OUTRIGHT. This project's ordinary
+     *    .text lives at $8000-$DFFF (see mmc3-helper.ld's resident image), so
+     *    an unbiased bank 0 region -- ORIGIN 0x8000 -- overlaps it, and the
+     *    linker errors with "section .text virtual address range overlaps
+     *    with .prg_rom_001" the moment that section holds real content. The
+     *    SDK's own nes-mmc3 scripts don't hit this only because they put
+     *    ordinary code in the FIXED region at $C000 instead. Biasing lifts
+     *    every domain region clear of the resident image's address range.
+     *
+     * The bias costs nothing at runtime: every high bit above 16 is discarded
+     * by ordinary 6502 relocation truncation (a JSR operand has 16 bits and
+     * no more), so the linked code still calls $8000/$A000 exactly as it
+     * would have. Only the linker's own bookkeeping -- and this decode --
+     * ever sees it.
+     */
     struct section_t {
         u32 rom_address;
         u32 size;
@@ -458,7 +499,7 @@ public:
     template <typename Tag> struct bank_layout;
 
     /// Key for this file's own always-mapped fixed bank ($E000-$FFFF, see
-    /// ::fixed). Named fixed_bank_tag, not fixed_tag, for the same reason
+    /// ::FIXED). Named fixed_bank_tag, not fixed_tag, for the same reason
     /// vrc1.hpp's own fixed_bank_tag is: `fixed` is itself a macro in this
     /// file, so it can never be used as a bare tag## token.
     struct fixed_bank_tag {};
@@ -466,10 +507,10 @@ public:
     /// Which bank_layout<Tag> a specific tagged function was registered under.
     /// One specialization per MMC3_BANKED()/MMC3_BANKED_EXTERN() call site.
     /// Primary template deliberately undefined, same reasoning as
-    /// MMC3::bank_layout<Tag>.
+    /// mmc3::bank_layout<Tag>.
     template <auto Fn> struct bank_of;
 
-    /// Return-type extraction for a plain function pointer, used by MMC3::Call.
+    /// Return-type extraction for a plain function pointer, used by mmc3::Call.
     template <typename T> struct function_traits;
 
     /**
@@ -489,11 +530,11 @@ public:
      *               is ignored.
      */
     template <typename TReturn, typename TFunc>
-    static fixed TReturn Long(TFunc fn, u8 window = 0);
+    static FIXED TReturn Long(TFunc fn, u8 window = 0);
 
     /**
      * @brief Calls a specific, compile-time-known MMC3_BANKED() function,
-     *        resolving its bank from MMC3::bank_of<Fn> automatically.
+     *        resolving its bank from mmc3::bank_of<Fn> automatically.
      *
      * Identical shape and behaviour to VRC1's ::Call.
      *
@@ -501,7 +542,7 @@ public:
      *            function -- supplied explicitly, e.g. `Call<LoadChunk>(id)`.
      */
     template <auto Fn, typename... Args>
-    static fixed auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type;
+    static FIXED auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type;
 
     /**
      * @brief Runs an arbitrary block under Fn's resolved window, instead of
@@ -509,7 +550,53 @@ public:
      *        ::CallBlock.
      */
     template <auto Fn, typename Block>
-    static fixed auto CallBlock(Block &&block) -> decltype(block());
+    static FIXED auto CallBlock(Block &&block) -> decltype(block());
+
+    /**
+     * @brief Runs @p block with one bank mapped, selected by TAG rather than
+     *        by a registered function.
+     *
+     * The registry-free counterpart to ::CallBlock. ::Call and ::CallBlock
+     * key off a function that ::MMC3_BANKED / ::MMC3_BIND has bound to a
+     * tag; this keys off the tag directly, so nothing has to be bound at all.
+     * That matters for code this project does not own -- a third-party audio
+     * engine, hand-written assembly, a Rust or C module -- where there may be
+     * many entry symbols and binding each one buys nothing:
+     *
+     *     mmc3::CallInBlock<bank002_tag>([]{ engine_update(); });
+     *
+     * @tparam Tag A bank tag with a ::bank_layout specialization.
+     */
+    template <typename Tag, typename Block>
+    static FIXED auto CallInBlock(Block &&block) -> decltype(block());
+
+    /**
+     * @brief Runs @p block with TWO banks mapped at once -- one per window.
+     *
+     * For a module whose code and data live in different banks and must be
+     * reachable simultaneously: an audio engine walking song data, a
+     * decompressor reading a banked stream. MMC3 has exactly two switchable
+     * windows, so two is the hard maximum, and the two tags must target
+     * DIFFERENT windows -- a same-window pair would have the second switch
+     * immediately displace the first. Enforced below wherever both layouts
+     * expose a constexpr section().
+     *
+     *     mmc3::CallPairedBlock<code_tag, data_tag>([]{ engine_update(); });
+     *
+     * Implemented as two nested ::CallInBlock calls, so both banks are
+     * restored in reverse order on the way out, and both trampolines sit in
+     * the fixed bank. Roughly twice a single farcall's overhead -- negligible
+     * against anything worth banking in the first place.
+     *
+     * WHAT THE BLOCK MAY TOUCH: while both windows are switched, NOTHING of
+     * the ordinary program at $8000-$BFFF is mapped. The block may call into
+     * the two banks and into ::FIXED code, and may touch RAM freely, but must
+     * not call ordinary resident functions. Interrupts remain live throughout
+     * -- which is safe only because the vector handlers are themselves pinned
+     * to the fixed bank (see interrupts.hpp's ::NMI).
+     */
+    template <typename CodeTag, typename DataTag, typename Block>
+    static FIXED auto CallPairedBlock(Block &&block) -> decltype(block());
 
 private:
     /**
@@ -543,7 +630,7 @@ private:
         static constexpr u16 kWindowSize = 0x2000;
 
         /**
-         * @brief Implementation of ::MMC3::Long / ::CallInSection once the
+         * @brief Implementation of ::mmc3::Long / ::CallInSection once the
          *        target register is resolved. Not for direct use.
          *
          * Same shape, and the same LOAD-BEARING [[gnu::noinline]] reasoning, as
@@ -555,7 +642,7 @@ private:
          * code that keeps running in that bank," not anything VRC1-specific.
          */
         template <typename TReturn, u8 Index, typename TFunc>
-        [[gnu::noinline]] static fixed TReturn CallInWindow(Register<Index> &reg, u8 bank, TFunc fn) {
+        [[gnu::noinline]] static FIXED TReturn CallInWindow(Register<Index> &reg, u8 bank, TFunc fn) {
             SHADOW(reg) {
                 SwitchBank(reg, bank);
                 return fn();
@@ -591,11 +678,16 @@ private:
          * the same way vrc1.hpp's CallInWindows2 does if a real need arises.
          */
         template <typename TReturn, typename TFunc>
-        [[gnu::noinline]] static fixed TReturn CallInSection(const section_t &section, TFunc fn) {
+        [[gnu::noinline]] static FIXED TReturn CallInSection(const section_t &section, TFunc fn) {
             const u16 vma = static_cast<u16>(section.rom_address);
             const u8 windowIndex = static_cast<u8>((vma - kWindowBase) / kWindowSize);
-            const u8 explicitBank = static_cast<u8>(section.rom_address >> 16);
-            const u8 bank = explicitBank != 0 ? explicitBank : windowIndex;
+            // High half is bank + 1, not bank -- see ::section_t's ENCODING
+            // note for why this file biases where VRC1 doesn't. Zero still
+            // means "nothing encoded", and still falls back to the window
+            // index, so a VRC1-style unbiased layout for a nonzero bank keeps
+            // working; only bank 0 actually needs the bias to be expressible.
+            const u8 encodedBank = static_cast<u8>(section.rom_address >> 16);
+            const u8 bank = encodedBank != 0 ? static_cast<u8>(encodedBank - 1) : windowIndex;
             switch (windowIndex) {
                 case 1:  return CallInWindow<TReturn>(window2Control, bank, fn);
                 default: return CallInWindow<TReturn>(window1Control, bank, fn);
@@ -614,7 +706,7 @@ struct mmc3::function_traits<R (*)(A...)> {
 };
 
 template <typename TReturn, typename TFunc>
-fixed TReturn mmc3::Long(TFunc fn, const u8 window) {
+FIXED TReturn mmc3::Long(TFunc fn, const u8 window) {
 #ifdef TARGET_NES
     switch (window) {
         case 1:  return Detail::CallInWindow<TReturn>(window2Control, 1, fn);
@@ -626,7 +718,7 @@ fixed TReturn mmc3::Long(TFunc fn, const u8 window) {
 }
 
 template <auto Fn, typename... Args>
-fixed auto mmc3::Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type {
+FIXED auto mmc3::Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type {
     using TReturn = typename function_traits<decltype(Fn)>::return_type;
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
@@ -643,7 +735,7 @@ fixed auto mmc3::Call(Args &&...args) -> typename function_traits<decltype(Fn)>:
 }
 
 template <auto Fn, typename Block>
-fixed auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
+FIXED auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
     if constexpr (L::always_mapped) {
@@ -657,9 +749,49 @@ fixed auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
 #endif
 }
 
+template <typename Tag, typename Block>
+FIXED auto mmc3::CallInBlock(Block &&block) -> decltype(block()) {
+#ifdef TARGET_NES
+    using L = bank_layout<Tag>;
+    if constexpr (L::always_mapped) {
+        return block();
+    } else {
+        return Detail::CallInSection<decltype(block())>(L::section(), block);
+    }
+#else
+    return block();
+#endif
+}
+
+template <typename CodeTag, typename DataTag, typename Block>
+FIXED auto mmc3::CallPairedBlock(Block &&block) -> decltype(block()) {
+#ifdef TARGET_NES
+    // Both layouts' window index must differ -- see the declaration's comment.
+    // Only checkable when both section()s are usable in a constant expression
+    // (the constexpr shape this project's own domains use); a runtime section()
+    // is exempt rather than rejected, since its address genuinely isn't known
+    // until link time.
+    if constexpr (requires {
+            std::integral_constant<u32, bank_layout<CodeTag>::section().rom_address>{};
+            std::integral_constant<u32, bank_layout<DataTag>::section().rom_address>{}; }) {
+        static_assert(
+            (static_cast<u16>(bank_layout<CodeTag>::section().rom_address) & 0xE000) !=
+            (static_cast<u16>(bank_layout<DataTag>::section().rom_address) & 0xE000),
+            "mmc3::CallPairedBlock: both tags map through the SAME window, so the "
+            "second bank would immediately displace the first. Encode one at $8000 "
+            "(R6) and the other at $A000 (R7).");
+    }
+    return CallInBlock<CodeTag>([&]() -> decltype(block()) {
+        return CallInBlock<DataTag>(block);
+    });
+#else
+    return block();
+#endif
+}
+
 /**
  * @brief Declares a tagged, out-of-line C++ function and registers it with
- *        MMC3::bank_of<>, so MMC3::Call/MMC3::CallBlock can resolve its
+ *        mmc3::bank_of<>, so mmc3::Call/mmc3::CallBlock can resolve its
  *        bank later.
  *
  * Same VRC1_BANKED -> VRC1_BANKED_IMPL macro-expansion-order reasoning as
@@ -670,26 +802,65 @@ fixed auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
  * `BANKED` name would collide the moment both this header and vrc1.hpp are
  * included together, so each mapper gets its own prefixed macro
  * (MMC3_BANKED / VRC1_BANKED) expanding to its own qualified class
- * (MMC3:: / VRC1::) instead.
+ * (mmc3:: / VRC1::) instead.
  */
 #define MMC3_BANKED(section_name, tag, ret, name, ...) \
     MMC3_BANKED_IMPL(section_name, tag, ret, name, __VA_ARGS__)
 #define MMC3_BANKED_IMPL(section_name, tag, ret, name, ...)                      \
     CREATE_SEGMENT_KEYWORD(section_name) ret name(__VA_ARGS__);                 \
-    template <> struct MMC3::bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
-        using layout = MMC3::bank_layout<tag##_tag>;                            \
+    template <> struct mmc3::bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
+        using layout = mmc3::bank_layout<tag##_tag>;                            \
     }
 
 /**
- * @brief Registers a function with MMC3::bank_of<> without declaring/
+ * @brief Registers an ALREADY-DECLARED function with mmc3::bank_of<>, so
+ *        mmc3::Call/mmc3::CallBlock can resolve its bank.
+ *
+ * The namespace-friendly counterpart to ::MMC3_BANKED. That macro declares
+ * the function itself, which means it can only ever produce a bare,
+ * unqualified name -- it cannot express `title::main`, since the declaration
+ * it emits would have to be written inside the namespace while the
+ * bank_of<> specialization it also emits must be at global scope. This macro
+ * splits those apart: place the function with a segment keyword where it is
+ * defined (inside its namespace, in the ordinary way), then bind it here, at
+ * global scope, by qualified name:
+ *
+ *     namespace title {
+ *         TITLE void main() { ... }     // placement: demo/src/banks.hpp
+ *     }
+ *     MMC3_BIND(title::main, bank001);  // binding: global scope
+ *
+ *     mmc3::Call<title::main>();        // call site
+ *
+ * @p fn is a qualified function name (NOT an address -- the & is added
+ * here), @p tag the bank tag, minus its `_tag` suffix, exactly as
+ * ::MMC3_BANKED takes it. The function must not be overloaded: `&fn` has to
+ * resolve to one address without a cast to disambiguate it. Use
+ * ::MMC3_BANKED instead if it is.
+ *
+ * PLACEMENT AND BINDING ARE INDEPENDENT, and nothing checks that they agree
+ * -- binding a function to a tag whose bank_layout names a different bank
+ * than the section keyword actually placed it in produces a call that banks
+ * in the wrong 8 KiB and executes garbage. Keep the keyword and the tag
+ * defined next to each other (see demo/src/banks.hpp, where each keyword
+ * sits directly above the tag naming the same section) so the two can only
+ * drift on purpose.
+ */
+#define MMC3_BIND(fn, tag)                     \
+    template <> struct mmc3::bank_of<&fn> {    \
+        using layout = mmc3::bank_layout<tag##_tag>; \
+    }
+
+/**
+ * @brief Registers a function with mmc3::bank_of<> without declaring/
  *        placing it -- for hand-written assembly or a separately-assembled
  *        third-party engine. See VRC1's ::BANKED_EXTERN for the full
- *        reasoning; identical here except for the MMC3:: qualification.
+ *        reasoning; identical here except for the mmc3:: qualification.
  */
 #define MMC3_BANKED_EXTERN(section_name, tag, ret, name, ...) \
     MMC3_BANKED_EXTERN_IMPL(section_name, tag, ret, name, __VA_ARGS__)
 #define MMC3_BANKED_EXTERN_IMPL(section_name, tag, ret, name, ...)               \
     extern "C" ret name(__VA_ARGS__);                                           \
-    template <> struct MMC3::bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
-        using layout = MMC3::bank_layout<tag##_tag>;                            \
+    template <> struct mmc3::bank_of<static_cast<ret (*)(__VA_ARGS__)>(&name)> { \
+        using layout = mmc3::bank_layout<tag##_tag>;                            \
     }

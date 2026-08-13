@@ -270,7 +270,7 @@ static void UpdateSfx() {
     }
 }
 
-void audio::AudioInit(u8) {
+void audio::Init(u8) {
     constexpr SDL_AudioSpec spec = {
         .format = SDL_AUDIO_F32LE,
         .channels = 2,
@@ -296,7 +296,7 @@ void audio::AudioInit(u8) {
     BuildSfxPCMBuffer();
 }
 
-void audio::AudioUpdate() {
+void audio::Update() {
     if (music_playing && !music_paused && current_track >= 0) {
         const auto queued = SDL_GetAudioStreamQueued(music_stream);
         if (queued <= 32768) {
