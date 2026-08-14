@@ -1,5 +1,41 @@
 #include <platform-nes/audio.hpp>
-#include <platform-nes/mappers/mmc3.hpp>
+#include <platform-nes/technology.hpp>   // CREATE_SEGMENT_KEYWORD
+
+/**
+ * @brief Placement keyword for this module's own code -- the section is the
+ *        CONSUMING PROJECT'S choice, supplied as PLATFORM_NES_AUDIO_SECTION.
+ *
+ * THE WHOLE POINT: the audio backend must land in the SAME PRG-ROM bank as
+ * the engine it drives. A project already controls where the engine goes
+ * (demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT, and the ca65
+ * wrappers around any exported data); this is the matching knob for the
+ * module, so the two can be put side by side.
+ *
+ * Once they are neighbours, THIS MODULE CONTAINS NO BANK-SWITCHING AT ALL.
+ * A caller long-calls audio::Update(); inside it, famistudio_update() is an
+ * ordinary call, because the engine is already mapped -- the caller's own
+ * switch brought both in together. That is why nothing here includes a
+ * mapper header, names a bank, or knows which mapper the board even has.
+ *
+ * DELIBERATELY NOT NAMED AFTER FAMISTUDIO. A replacement engine written in
+ * C, C++, Rust or hand-written assembly binds to the same arrangement by
+ * placing itself in the same section, with no change here.
+ *
+ * COMPULSORY, not defaulted. There is no "unbanked" fallback value: a
+ * default would silently place this module wherever the library guessed,
+ * which is exactly the wrong-bank-with-no-diagnostic failure the rest of
+ * this design works to make impossible. A project that banks nothing still
+ * names the section its ordinary code lands in.
+ */
+#ifndef PLATFORM_NES_AUDIO_SECTION
+#error "PLATFORM_NES_AUDIO_SECTION is not set. It names the ELF section this \
+module's code is placed in, and MUST be the same bank the audio engine is \
+assembled into (see demo/famistudio_config.s). Set it from CMake -- \
+local.cmake.example has a worked example."
+#endif
+#define AUDIO_BANK CREATE_SEGMENT_KEYWORD(PLATFORM_NES_AUDIO_SECTION) \
+                   __attribute__((noinline, used, retain))
+
 #include <intsh>
 using namespace br0::intsh;
 
@@ -15,28 +51,21 @@ using namespace br0::intsh;
 
 /*
  * FamiStudio is assembled by a genuine standalone ca65 binary
- * (CMakeLists.txt), and lives in PRG-ROM banks rather than in the
- * always-resident image: its CODE segment lands in the section
- * ::audio_code_bank_tag names, its exported song data in the one
- * ::audio_data_bank_tag names (see audio.hpp for why those roles are
- * declared by the library but defined by the consuming project).
+ * (CMakeLists.txt), and is placed by demo/famistudio_config.s into whichever
+ * PRG-ROM bank the project chose. EVERY FUNCTION IN THIS FILE IS TAGGED
+ * ::AUDIO_BANK so it lands in that same bank -- which is the only reason the
+ * calls below can be plain calls.
  *
- * EVERY ENTRY POINT BELOW IS THEREFORE REACHED THROUGH A FARCALL, never a
- * plain call: the engine's own address is only valid while its bank is
- * mapped. mmc3::CallPairedBlock maps BOTH banks at once -- necessary, not
- * belt-and-braces, because the engine walks song data while it executes, so
- * code and data have to be visible simultaneously. That is also why they
- * must sit in different windows; CallPairedBlock static_asserts it.
+ * THIS FILE CONTAINS NO BANK SWITCHING, deliberately, and includes no mapper
+ * header. The caller long-calls audio::Update(); by the time control arrives
+ * here the engine is already mapped, because it came in with this module. If
+ * the engine reads data from a further bank (an exported song, say), mapping
+ * that is likewise the caller's business, decided where the layout is decided
+ * -- not hardcoded in the backend adapter.
  *
- * The wrapping lives HERE, in the backend adapter, so callers keep calling
- * audio::Update() and friends with no idea any of it happens -- and so
- * a different engine (C, C++, Rust, hand-written asm) replaces this one
- * file without touching the API, the linker script, or any call site.
- *
- * COST: two bank switches and two restores per call, ~60-70 cycles. Audio
- * update runs once a frame from the main loop, not from the NMI -- if it
- * ever moves into an interrupt, revisit this: the shadow/hardware pair in
- * mmc3::SwitchBank is not currently an atomic critical section.
+ * That keeps this file portable in the way that matters: swapping FamiStudio
+ * for a different engine, or this board for one with no banking at all, is a
+ * change to placement and to the caller, never to the code here.
  */
 extern "C" FASTCALL famistudio_music_play(u8 song_index);
 extern "C" FASTCALL famistudio_music_pause(u8 pause);
@@ -56,19 +85,8 @@ extern "C" {
 __attribute__((used)) u8 famistudio_region_scratch;
 }
 
-// Every engine entry point goes through this: both banks mapped, call, both
-// restored. One name so the pairing can never be spelled inconsistently
-// across the file.
-template <typename Block>
-static decltype(auto) InEngineBanks(Block &&block) {
-    return mmc3::CallPairedBlock<audio_code_bank_tag, audio_data_bank_tag>(
-        static_cast<Block &&>(block));
-}
-
-void audio::Init(const u8 region) {
+AUDIO_BANK void audio::Init(const u8 region) {
     famistudio_region_scratch = region ? 0 : 1;
-
-    InEngineBanks([&] {
 
     __asm__ volatile (
         "ldx #<%0\n"
@@ -90,44 +108,35 @@ void audio::Init(const u8 region) {
         : "memory", "a", "x", "y", "c", "v"
     );
 #endif
-    });
 }
 
-void audio::TrackPlay(const u8 index) {
-    InEngineBanks([&] {
-        famistudio_music_play(index);
-    });
+AUDIO_BANK void audio::TrackPlay(const u8 index) {
+    famistudio_music_play(index);
 }
 
-void audio::TrackPause(const u8 pause) {
-    InEngineBanks([&] {
-        famistudio_music_pause(pause);
-    });
+AUDIO_BANK void audio::TrackPause(const u8 pause) {
+    famistudio_music_pause(pause);
 }
 
-void audio::TrackStop() {
-    InEngineBanks([&] {
-        famistudio_music_stop();
-    });
+AUDIO_BANK void audio::TrackStop() {
+    famistudio_music_stop();
 }
 
-void audio::Update() {
-    InEngineBanks([&] {
-        famistudio_update();
-    });
+AUDIO_BANK void audio::Update() {
+    famistudio_update();
 }
 
-void audio::SfxPlay(const u8 index, const u8 channel) {
+AUDIO_BANK void audio::SfxPlay(const u8 index, const u8 channel) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
-    InEngineBanks([&] { famistudio_sfx_play(index, channel); });
+    famistudio_sfx_play(index, channel);
 #else
     (void)index; (void)channel;
 #endif
 }
 
-void audio::SfxSamplePlay(const u8 index) {
+AUDIO_BANK void audio::SfxSamplePlay(const u8 index) {
 #if FAMISTUDIO_CFG_SFX_SUPPORT
-    InEngineBanks([&] { famistudio_sfx_play(index, 1); });
+    famistudio_sfx_play(index, 1);
 #else
     (void)index;
 #endif

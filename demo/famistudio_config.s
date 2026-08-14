@@ -18,7 +18,7 @@
 
 .define FAMISTUDIO_CA65_ZP_SEGMENT   ZEROPAGE
 .define FAMISTUDIO_CA65_RAM_SEGMENT  BSS
-; _pprg__rom__002_fx decodes to the ELF section ".prg_rom_002", marked
+; _pprg__rom__audio_fx decodes to the ELF section ".prg_rom_audio", marked
 ; executable. ld.lld's XO65 reader treats '_' in a ca65 segment name as an
 ; ESCAPE character, not a literal -- which is why a plain "FAMISTUDIO_CODE"
 ; is rejected outright ("unknown underscore escape"). The escapes, confirmed
@@ -26,16 +26,16 @@
 ; _h -> '-', _xNN -> byte NN, _tp/_tn -> section type PROGBITS/NOBITS,
 ; _fw/_fx -> flags writable/executable. Note the DOUBLED underscores: every
 ; literal '_' in ".prg_rom_002" has to be escaped as well, which is why this
-; reads _pprg__rom__002_fx and not _pprg_rom_002_fx (that spelling is
+; reads _pprg__rom__audio_fx and not _pprg_rom_audio_fx (that spelling is
 ; rejected -- '_r' is not an escape).
 ;
 ; Naming the section after the BANK rather than after FamiStudio is
 ; deliberate: demo/link.ld's own .prg_rom_002 wildcard picks this up with no
 ; engine-specific rule, and a replacement audio engine written in C, C++ or
 ; Rust targets the identical section with its own toolchain's mechanism
-; (__attribute__((section(".prg_rom_002"))) / #[link_section]). Nothing about
+; (__attribute__((section(".prg_rom_audio"))) / #[link_section]). Nothing about
 ; the layout knows which engine is in the bank.
-.define FAMISTUDIO_CA65_CODE_SEGMENT _pprg__rom__002_fx
+.define FAMISTUDIO_CA65_CODE_SEGMENT _pprg__rom__audio_fx
 
 ; REGION comes in from CMake (-D REGION=<0|1>, CMakeLists.txt's own REGION
 ; variable -- 0 for NTSC, 1 for PAL, set per TARGET_PLATFORM). The .ifndef

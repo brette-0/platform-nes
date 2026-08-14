@@ -17,35 +17,14 @@
 using namespace br0::intsh;
 
 
-#ifdef TARGET_NES
-#include <platform-nes/mappers/mmc3.hpp>
-
-/**
- * @brief Bank tags for a PRG-ROM-banked audio backend -- DECLARED here,
- *        DEFINED by the consuming project.
- *
- * The audio backend's code and its music data may each live in their own
- * PRG-ROM bank. Which banks those are is a layout decision, so this library
- * only names the two roles; a consuming project supplies the facts by
- * specialising mmc3::bank_layout for each (see demo/src/banks.hpp for a
- * worked example, and mmc3::CallPairedBlock for what is done with them).
- *
- * A project that does NOT bank its audio still has to specialise both -- with
- * `always_mapped = true`, one line each. That makes every call below compile
- * to a plain call with no bank switching at all, so nothing is paid for a
- * feature that isn't used. Leaving them unspecialised is a compile error
- * ("implicit instantiation of undefined template mmc3::bank_layout<...>")
- * rather than a silent wrong-bank call at runtime.
- *
- * DELIBERATELY NOT NAMED AFTER FAMISTUDIO. FamiStudio is this project's
- * current backend, not a permanent one: a replacement engine written in C,
- * C++, Rust or hand-written assembly binds to these same two roles by
- * placing itself in the same sections, with no change here or in any
- * consuming project's linker script.
+/*
+ * The NES backend's own code is PLACED BY THE CONSUMING PROJECT, into the same
+ * PRG-ROM bank as the audio engine it drives -- that adjacency is what lets
+ * src/nes/audio.cpp reach the engine with plain calls and contain no bank
+ * switching at all. The knob is PLATFORM_NES_AUDIO_SECTION and the keyword is
+ * ::AUDIO_BANK; both live in src/nes/audio.cpp, since nothing that merely
+ * CALLS this API needs either. See that file's header comment.
  */
-struct audio_code_bank_tag {}; ///< The audio engine's own code.
-struct audio_data_bank_tag {}; ///< Music/SFX data the engine reads while running.
-#endif
 
 namespace audio {
 

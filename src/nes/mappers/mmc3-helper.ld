@@ -146,8 +146,21 @@ ASSERT(__program_ram_size + __program_nvram_size <= 8,
  * MUST stay above the ASSERTs and layout arithmetic below, which read it. */
 PROVIDE(__mmc3_resident_windows = 3);
 
-ASSERT(__mmc3_resident_windows == 2 || __mmc3_resident_windows == 3,
-       "__mmc3_resident_windows must be 2 ($8000-$BFFF) or 3 ($8000-$DFFF) -- MMC3 exposes no other resident PRG span.")
+/* 1 IS NOW LEGAL, and means something the "never 1 or 0" note above did not
+ * anticipate: the resident image is ONLY $C000-$DFFF, leaving BOTH switchable
+ * windows free for a single 16 KiB project domain at $8000-$BFFF. That is the
+ * only way to express a banked domain larger than one window -- a farcall
+ * cannot enter one (CallInSection switches a single register), so such a
+ * domain is switched once on mode entry instead, and everything outside it
+ * must live in the hardwired $C000 window or the fixed bank.
+ *
+ * The resident image therefore ANCHORS AT $DFFF AND GROWS DOWNWARD, which is
+ * what makes the freed windows contiguous with $8000. 3 still yields the
+ * historic $8000-$DFFF exactly; 2 yields $A000-$DFFF (NOT the $8000-$BFFF the
+ * old comment describes -- a resident span that left a hole at $C000 could
+ * never have been reconstructed by R6/R7 anyway, since $C000 is hardwired). */
+ASSERT(__mmc3_resident_windows >= 1 && __mmc3_resident_windows <= 3,
+       "__mmc3_resident_windows must be 1 ($C000-$DFFF), 2 ($A000-$DFFF) or 3 ($8000-$DFFF) -- MMC3 exposes no other resident PRG span.")
 
 /* Banks at the BOTTOM of the ROM file a consuming project is claiming for
  * its own MMC3_BANKED()-tagged domains (0 by default -- this library has no
@@ -187,6 +200,13 @@ ASSERT(__prg_rom_size >= (__mmc3_resident_windows + __mmc3_reserved_banks + 1) *
 __mmc3_prg_rom_banks     = __prg_rom_size / 8;
 __mmc3_boot_bank_window1 = __mmc3_prg_rom_banks - __mmc3_resident_windows - 1;
 __mmc3_boot_bank_window2 = __mmc3_boot_bank_window1 + 1;
+/* AT __mmc3_resident_windows == 1 these two land on the two HARDWIRED banks
+ * (N-2 and N-1), so boot mirrors $C000-$FFFF into $8000-$BFFF rather than
+ * extending the resident image. Deliberate, not a degenerate case: nothing is
+ * linked to run at $8000-$BFFF in that configuration, so the safest possible
+ * power-on state is every window showing linked, valid content instead of
+ * whatever the cartridge powers up with. The project's own mode-entry switch
+ * replaces both the moment it wants its domain. */
 
 /* c_writeable/__stack are DELIBERATELY NOT set here, unlike an earlier
  * revision of this file -- same reasoning as the project's own established
@@ -216,7 +236,8 @@ MEMORY {
    * the ROM file, immediately below prg_rom_fixed -- that placement is what
    * makes the third window really be the second-to-last physical bank at any
    * ROM size, see this file's own header comment. */
-  prg_rom_switchable : ORIGIN = 0x8000, LENGTH = __mmc3_resident_windows * 0x2000
+  prg_rom_switchable : ORIGIN = 0xe000 - __mmc3_resident_windows * 0x2000,
+                       LENGTH = __mmc3_resident_windows * 0x2000
   /* Whatever is left of __prg_rom_size once the resident image, the fixed
    * bank, and any banks the project reserved for its own domains are
    * accounted for: pure zero padding, so the emitted file is exactly the

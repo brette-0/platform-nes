@@ -490,19 +490,20 @@ public:
         u32 size;
     };
 
-    /// Hardware facts for one tag/domain -- same contract as VRC1's
-    /// bank_layout<Tag>: primary template undefined (an un-tagged Tag is a
-    /// compile error), a non-fixed specialization provides
+    /// Hardware facts for one tag/domain: primary template undefined (an
+    /// un-tagged Tag is a compile error), every specialization provides
     /// `static section_t section()`. See vrc1.hpp's own bank_layout<Tag> doc
     /// comment for the constexpr-vs-runtime-section() cost tradeoff, which
     /// applies identically here.
+    ///
+    /// THERE IS NO `always_mapped` ESCAPE HATCH, deliberately. A tag names a
+    /// real bank, and having a tag means the call switches to it. Code that is
+    /// already in reach -- ::FIXED, or whatever the caller knows is currently
+    /// mapped -- is reached by an ordinary call and needs no tag, no layout
+    /// and no farcall at all. A layout that claimed to name a bank while
+    /// compiling to no bank switch was a contradiction that only existed to
+    /// let unbanked code go through the banked spelling.
     template <typename Tag> struct bank_layout;
-
-    /// Key for this file's own always-mapped fixed bank ($E000-$FFFF, see
-    /// ::FIXED). Named fixed_bank_tag, not fixed_tag, for the same reason
-    /// vrc1.hpp's own fixed_bank_tag is: `fixed` is itself a macro in this
-    /// file, so it can never be used as a bare tag## token.
-    struct fixed_bank_tag {};
 
     /// Which bank_layout<Tag> a specific tagged function was registered under.
     /// One specialization per MMC3_BANKED()/MMC3_BANKED_EXTERN() call site.
@@ -696,10 +697,6 @@ private:
     };
 };
 
-template <> struct mmc3::bank_layout<mmc3::fixed_bank_tag> {
-    static constexpr bool always_mapped = true;
-};
-
 template <typename R, typename... A>
 struct mmc3::function_traits<R (*)(A...)> {
     using return_type = R;
@@ -722,13 +719,9 @@ FIXED auto mmc3::Call(Args &&...args) -> typename function_traits<decltype(Fn)>:
     using TReturn = typename function_traits<decltype(Fn)>::return_type;
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
-    if constexpr (L::always_mapped) {
-        return Fn(std::forward<Args>(args)...);
-    } else {
-        return Detail::CallInSection<TReturn>(
-            L::section(),
-            [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
-    }
+    return Detail::CallInSection<TReturn>(
+        L::section(),
+        [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
 #else
     return Fn(std::forward<Args>(args)...);
 #endif
@@ -738,12 +731,8 @@ template <auto Fn, typename Block>
 FIXED auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
-    if constexpr (L::always_mapped) {
-        return block();
-    } else {
-        return Detail::CallInSection<decltype(block())>(
-            L::section(), std::forward<Block>(block));
-    }
+    return Detail::CallInSection<decltype(block())>(
+        L::section(), std::forward<Block>(block));
 #else
     return block();
 #endif
@@ -753,11 +742,7 @@ template <typename Tag, typename Block>
 FIXED auto mmc3::CallInBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
     using L = bank_layout<Tag>;
-    if constexpr (L::always_mapped) {
-        return block();
-    } else {
-        return Detail::CallInSection<decltype(block())>(L::section(), block);
-    }
+    return Detail::CallInSection<decltype(block())>(L::section(), block);
 #else
     return block();
 #endif

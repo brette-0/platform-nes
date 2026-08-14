@@ -56,6 +56,53 @@ PROVIDE(__chr_rom_size = 8);
  * prg_rom_spare, and PROVIDE() only takes its first-encountered value. */
 PROVIDE(__mmc3_reserved_banks = 4);
 
+/* ONE resident window ($C000-$DFFF, the hardwired second-to-last bank), not
+ * the default three. Both switchable windows are handed to the level domain
+ * below, which needs 16 KiB contiguous -- level's code alone measures 13,371
+ * bytes, and no farcall can enter a domain wider than one window anyway.
+ *
+ * The consequence is the whole point and the whole risk: while level's banks
+ * are mapped, NOTHING at $8000-$BFFF exists except level. Every other symbol
+ * in this ROM must therefore fit in the 8 KiB at $C000-$DFFF or in the fixed
+ * bank. It does, comfortably (~2.9 KiB measured), but nothing enforces it --
+ * a symbol that lands in the level domain's address range without being
+ * level's is simply gone whenever level is running. */
+PROVIDE(__mmc3_resident_windows = 1);
+
+/* THE LEVEL DOMAIN: 16 KiB spanning banks 0 AND 1, mapped at $8000-$BFFF
+ * through BOTH switchable windows at once. ORIGIN encodes bank 0 / $8000 as
+ * usual; the second 8 KiB is bank 1 at $A000 by simple adjacency, exactly the
+ * way the resident image's own windows relate. Entered by switching R6=0 and
+ * R7=1 once on mode entry (main.cpp), NOT by farcall -- mmc3::CallInSection
+ * switches one register and cannot express this. See banks.hpp's level_tag.
+ *
+ * DECLARED AND CLAIMED BEFORE `INCLUDE mmc3-helper.ld`, and that ordering is
+ * load-bearing: the INCLUDE drags in nes.ld's own `*(.text .text.*)` and
+ * `*(.rodata .rodata.*)` catch-alls, and ld applies placement rules in the
+ * order they appear across the whole script. A level rule written after the
+ * INCLUDE matches nothing at all -- every level section has already been
+ * claimed by the resident region -- and the only symptom is that region
+ * overflowing, which reads like "the game got bigger", not like a rule that
+ * silently did nothing. */
+MEMORY {
+  prg_rom_level : ORIGIN = 0x00018000, LENGTH = 0x4000  /* banks 0+1 */
+}
+SECTIONS {
+  /* CODE ONLY -- level's .rodata is deliberately left resident. Both together
+   * come to 16,882 bytes and overflow this 16 KiB domain by 498; code alone is
+   * 15,059 and fits with ~1.3 KiB to spare. Leaving the tables in the $C000
+   * window costs nothing at runtime (that window is hardwired, so banked level
+   * code reads them directly, no farcall) and spends resident space this
+   * configuration has going spare. If level's code grows past the domain, the
+   * next move is a data bank for these tables, not a bigger domain. */
+  .prg_rom_level : {
+    *(.text._ZN5level*)
+    *(.prg_rom_level .prg_rom_level.*)
+  } >prg_rom_level
+}
+__space_origin_prg_rom_level = ORIGIN(prg_rom_level);
+__space_length_prg_rom_level = LENGTH(prg_rom_level);
+
 INCLUDE mmc3-helper.ld
 
 /* ------------------------------------------------------------------------
@@ -88,8 +135,24 @@ INCLUDE mmc3-helper.ld
  * domain that does would encode 0xA000 instead and be reached through R7.
  * ------------------------------------------------------------------------ */
 MEMORY {
-  prg_rom_001 : ORIGIN = 0x00018000, LENGTH = 0x2000  /* bank 0 */
-  prg_rom_002 : ORIGIN = 0x00028000, LENGTH = 0x2000  /* bank 1 */
+  /* THE AUDIO CODE BANK: FamiStudio's engine and platform-nes's audio module,
+   * and nothing else. Their adjacency is a hard contract -- src/nes/audio.cpp
+   * does no bank switching, it just calls the engine, which is only valid
+   * because they share a bank. PLATFORM_NES_AUDIO_SECTION (local.cmake) and
+   * FAMISTUDIO_CA65_CODE_SEGMENT (demo/famistudio_config.s) are the two knobs
+   * that put them here together. */
+  prg_rom_audio : ORIGIN = 0x00038000, LENGTH = 0x2000  /* bank 2, window 1 */
+  /* AUDIO DATA -- songs and SFX. A SEPARATE BANK on purpose: the data has no
+   * reason to sit beside the engine, and forcing it there would cap every song
+   * this cart can hold at whatever is left of bank 2. Music and SFX arrive in
+   * their own sections (.prg_rom_music/.prg_rom_sfx) and are merged here only
+   * because THIS project chose to; splitting them across banks later is a
+   * change to this block alone.
+   *
+   * WINDOW 2 ($A000) is the one placement rule that is not free choice: the
+   * engine walks this data while it executes, so both must be mapped at once,
+   * which means they cannot share a window. mmc3::CallPairedBlock asserts it. */
+  prg_rom_audio_data : ORIGIN = 0x0004a000, LENGTH = 0x2000  /* bank 3, window 2 */
   /* bank 2, but encoded for WINDOW 2 ($A000, R7) rather than window 1 --
    * note the A000 in the ORIGIN. This is the audio engine's DATA bank, and it
    * has to be mappable at the same time as the engine's CODE bank (002, R6):
@@ -97,26 +160,30 @@ MEMORY {
    * two switchable windows, so a same-window pair would have the data
    * immediately displace the code. mmc3::CallPairedBlock static_asserts that
    * the two tags differ here. */
-  prg_rom_003 : ORIGIN = 0x0003a000, LENGTH = 0x2000  /* bank 2, window 2 */
-  prg_rom_004 : ORIGIN = 0x00048000, LENGTH = 0x2000  /* bank 3 */
 }
 
 /* Published for the build-time space report -- see mmc3-helper.ld's own
  * __space_* block for why an empty bank needs these to be visible at all. */
-__space_origin_prg_rom_001 = ORIGIN(prg_rom_001);
-__space_length_prg_rom_001 = LENGTH(prg_rom_001);
-__space_origin_prg_rom_002 = ORIGIN(prg_rom_002);
-__space_length_prg_rom_002 = LENGTH(prg_rom_002);
-__space_origin_prg_rom_003 = ORIGIN(prg_rom_003);
-__space_length_prg_rom_003 = LENGTH(prg_rom_003);
-__space_origin_prg_rom_004 = ORIGIN(prg_rom_004);
-__space_length_prg_rom_004 = LENGTH(prg_rom_004);
+__space_origin_prg_rom_audio = ORIGIN(prg_rom_audio);
+__space_length_prg_rom_audio = LENGTH(prg_rom_audio);
+__space_origin_prg_rom_audio_data = ORIGIN(prg_rom_audio_data);
+__space_length_prg_rom_audio_data = LENGTH(prg_rom_audio_data);
 
 SECTIONS {
-  .prg_rom_001 : { *(.prg_rom_001 .prg_rom_001.*) } >prg_rom_001
-  .prg_rom_002 : { *(.prg_rom_002 .prg_rom_002.*) } >prg_rom_002
-  .prg_rom_003 : { *(.prg_rom_003 .prg_rom_003.*) } >prg_rom_003
-  .prg_rom_004 : { *(.prg_rom_004 .prg_rom_004.*) } >prg_rom_004
+  /* Level's own placement rule is NOT here -- it is above `INCLUDE
+   * mmc3-helper.ld`, which is the only position where it works. See its own
+   * comment there.
+   *
+   * Level's interrupt path needs no rule at all: nmi_handler, irq_handler and
+   * ApplyHudSplit are tagged ::FIXED in level.cpp, so they land in
+   * .prg_rom_fixed and mmc3-helper.ld's existing rule takes them. That is also
+   * what keeps them clear of the level wildcard, which would otherwise have
+   * claimed them by name before anything down here could run. */
+  .prg_rom_audio : { *(.prg_rom_audio .prg_rom_audio.*) } >prg_rom_audio
+  .prg_rom_audio_data : {
+    *(.prg_rom_music .prg_rom_music.*)
+    *(.prg_rom_sfx .prg_rom_sfx.*)
+  } >prg_rom_audio_data
 }
 
 /* Moves the C writable arena (.data/.bss/heap, and the dynamic soft stack
@@ -155,9 +222,9 @@ __stack = ORIGIN(prg_ram) + LENGTH(prg_ram) - 1;
  * Zero IS tolerated via DEFINED(nmi_handler), same as the FSCODE guard this
  * replaces: CMake's own compiler-identification/ABI probes link a bare
  * `int main(){}` with no audio in sight. */
-PROVIDE(__audio_engine_size = SIZEOF(.prg_rom_002));
+PROVIDE(__audio_engine_size = SIZEOF(.prg_rom_audio));
 ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
-       "The audio engine's code segment landed nowhere -- demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT no longer decodes to .prg_rom_002 (ld.lld XO65 escapes: _p is '.', __ is '_'), so audio.cpp's farcalls will bank in an empty region.")
+       "The audio bank is empty -- demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT no longer decodes to .prg_rom_audio (ld.lld XO65 escapes: _p is '.', __ is '_'), so audio::Update() would call an engine that is not in the ROM.")
 
 /* mmc3-helper.ld FULL()s only nes2_header; every PRG region is this
  * project's job, in this exact order (see that file's own OUTPUT_FORMAT
@@ -183,10 +250,9 @@ ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
  *   the second-to-last at $C000 -- which is prg_rom_switchable's own third
  *   window, by construction, at any ROM size. */
 OUTPUT_FORMAT {
-  FULL(prg_rom_001)
-  FULL(prg_rom_002)
-  FULL(prg_rom_003)
-  FULL(prg_rom_004)
+  FULL(prg_rom_level)
+  FULL(prg_rom_audio)
+  FULL(prg_rom_audio_data)
   FULL(prg_rom_spare)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)

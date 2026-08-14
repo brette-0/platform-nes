@@ -15,8 +15,11 @@
 ; way: `sounds` had landed at $A9B6, inside the window the music data
 ; displaces.
 ;
-; _pprg__rom__003 decodes to section ".prg_rom_003" (ld.lld XO65 escapes:
-; _p -> '.', __ -> '_'); no _fx, this is data.
+; _pprg__rom__sfx decodes to section ".prg_rom_sfx" (ld.lld XO65 escapes:
+; _p -> '.', __ -> '_'); no _fx, this is data. Its own section rather than the
+; engine's or the music's, so the linker script can place all three
+; independently -- see nes_audio_bank.s's comment for why data is never forced
+; to sit beside the engine.
 
-.segment "_pprg__rom__003"
+.segment "_pprg__rom__sfx"
 .include "nes_sfx.s"

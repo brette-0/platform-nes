@@ -45,9 +45,11 @@ set(CC65_DIR "C:/cc65" CACHE PATH "" FORCE)
 # declare.
 set(TOPLEVEL_LD "${CMAKE_SOURCE_DIR}/demo/link.ld" CACHE FILEPATH "" FORCE)
 
-# Header defining which PRG-ROM banks the audio engine and its music data live
-# in (audio_code_bank_tag / audio_data_bank_tag -- see include/platform-nes/
-# audio.hpp). Force-included into src/nes/audio.cpp so its farcalls resolve.
-# Optional: leave unset and the engine is treated as always-resident, with
-# every audio farcall collapsing to a plain call.
-set(AUDIO_BANKS_HPP "${CMAKE_SOURCE_DIR}/demo/src/banks.hpp" CACHE FILEPATH "" FORCE)
+# ELF section the platform-nes audio module (src/nes/audio.cpp) is placed
+# into. MUST name the same PRG-ROM bank the audio engine is assembled into --
+# demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT is the ca65 side of
+# the same decision. Side by side, audio.cpp calls the engine directly and
+# does no bank switching; the caller long-calls audio::Update() and both come
+# in together. Compulsory: there is no default, because a guessed bank is a
+# crash with no diagnostic.
+set(PLATFORM_NES_AUDIO_SECTION ".prg_rom_audio" CACHE STRING "" FORCE)

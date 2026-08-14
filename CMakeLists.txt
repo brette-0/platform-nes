@@ -171,21 +171,29 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     set(CMAKE_CXX_FLAGS "-T ${TOPLEVEL_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
 
     # ------------------------------------------------------------------
-    # Audio bank roles. src/nes/audio.cpp reaches the audio engine through
-    # farcalls keyed on audio_code_bank_tag / audio_data_bank_tag (audio.hpp),
-    # which this library declares but deliberately does not define: which bank
-    # holds the engine and its music data is a project's layout decision, the
-    # same class of decision as TOPLEVEL_LD above. A specialisation has to be
-    # visible where it is instantiated, and that is library code which cannot
-    # include a project's own header -- so the project injects one here.
-    # Unset means "audio isn't banked": the fallback below marks both roles
-    # always-mapped and every farcall collapses to a plain call.
+    # Where the audio module is placed. src/nes/audio.cpp tags every one of
+    # its functions ::AUDIO_BANK (audio.hpp), which expands to a section
+    # attribute naming PLATFORM_NES_AUDIO_SECTION. That section MUST be the
+    # same PRG-ROM bank the audio engine itself is assembled into -- see
+    # demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT, which is the
+    # matching knob on the ca65 side. Placed together, audio.cpp reaches the
+    # engine with plain calls and contains no bank switching at all; a caller
+    # long-calls audio::Update() and both arrive mapped.
+    #
+    # NO DEFAULT, deliberately: a guessed section would place this module in
+    # whichever bank the library assumed and produce a wrong-bank call with no
+    # diagnostic. Unset is an #error in audio.hpp, the same "no silent
+    # fallback" stance TOPLEVEL_LD above takes.
     # ------------------------------------------------------------------
-    if(NOT AUDIO_BANKS_HPP)
-        set(AUDIO_BANKS_HPP ${CMAKE_SOURCE_DIR}/include/platform-nes/audio_banks_unbanked.hpp)
+    if(NOT PLATFORM_NES_AUDIO_SECTION)
+        message(FATAL_ERROR
+                "PLATFORM_NES_AUDIO_SECTION is not set. It names the ELF section "
+                "src/nes/audio.cpp is placed into, and must be the bank the audio "
+                "engine is assembled into. See local.cmake.example.")
     endif()
     set_source_files_properties(${CMAKE_SOURCE_DIR}/src/nes/audio.cpp
-            PROPERTIES COMPILE_OPTIONS "-include;${AUDIO_BANKS_HPP}")
+            PROPERTIES COMPILE_DEFINITIONS
+            "PLATFORM_NES_AUDIO_SECTION=\"${PLATFORM_NES_AUDIO_SECTION}\"")
 
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)

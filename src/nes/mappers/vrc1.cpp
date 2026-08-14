@@ -14,30 +14,13 @@ extern "C" FIXED void _reset() {
 }
 
 /*
- * BANKED CALL, Phase 1 smoke test: exercises VRC1_BANKED()+Call<Fn> through
- * the always-mapped fixed-bank path (bank_layout<fixed_bank_tag>::always_mapped
- * == true, so this collapses to a bare call at runtime -- Call<Fn>'s
- * non-fixed branch isn't reachable until a real bank_layout<Tag>
- * specialization exists, Phase 2+). No existing ::FIXED-tagged function had
- * a real C++ call site to convert instead: ::VRC1::Long and
- * VRC1::Detail::CallInWindow are templates, out of VRC1_BANKED()'s scope (see
- * BANKED_CALL_THEORY.txt); ::_reset is a raw reset-vector target with no
- * C++ caller to route through Call<Fn>. Remove once a real VRC1_BANKED()-tagged
- * fixed-bank function exists to stand in for it.
- *
- * noinline alone isn't enough: it blocks inlining, but a body with no
- * observable effect is still legally removable by DCE, taking the call
- * with it -- confirmed empirically, an empty noinline body vanished
- * entirely at link time, silently testing nothing. The volatile write
- * below is what actually forces this call to survive to the final link.
+ * The Phase 1 fixed-bank smoke test that used to sit here is gone with the
+ * always_mapped path it existed to exercise: it tagged a function into
+ * .prg_rom_fixed and then asserted the call compiled to no bank switch at
+ * all. A bank_layout now always names a real bank, so that shape is no
+ * longer expressible -- and the Phase 2+ tests below exercise the real
+ * switching path its own comment said would supersede it.
  */
-VRC1_BANKED(".prg_rom_fixed", fixed_bank, void, BankedCallSmokeTest);
-
-volatile u8 bankedCallSmokeTestMarker = 0;
-
-[[gnu::noinline]] void BankedCallSmokeTest() {
-    bankedCallSmokeTestMarker = 1;
-}
 
 /*
  * BANKED CALL, Phase 2 smoke test: exercises Call<Fn> through a REAL
@@ -56,7 +39,6 @@ volatile u8 bankedCallSmokeTestMarker = 0;
 struct window_test_tag {};
 
 template <> struct VRC1::bank_layout<window_test_tag> {
-    static constexpr bool always_mapped = false;
     static constexpr section_t section() {
         return { 0xdfc0, 6 };
     }
@@ -101,7 +83,6 @@ volatile u8 bankedCallWindowTestMarker = 0;
 struct bank3_test_tag {};
 
 template <> struct VRC1::bank_layout<bank3_test_tag> {
-    static constexpr bool always_mapped = false;
     static constexpr section_t section() {
         // (3u << 16) is WRONG here: unsigned int is only 16 bits wide on
         // this target, so that shift is undefined behavior (caught by
@@ -149,7 +130,6 @@ struct oversized_tag {};
 extern "C" const u8 __oversized_domain_size[];
 
 template <> struct VRC1::bank_layout<oversized_tag> {
-    static constexpr bool always_mapped = false;
     static section_t section() {
         // Base bank (4) IS hand-entered and constexpr-safe -- it's the
         // domain's own fixed starting point, same as bank3_test_tag's.
@@ -233,7 +213,6 @@ static void SyncBankShadows() {
     VRC1::SwitchBank(VRC1::window1Control, 0);
     VRC1::SwitchBank(VRC1::window2Control, 1);
     VRC1::SwitchBank(VRC1::window3Control, 2);
-    VRC1::Call<BankedCallSmokeTest>();
     // Safe here specifically because it comes AFTER the three SwitchBank
     // calls above: CallInSection's SHADOW-based save/restore (inside
     // CallInWindow) needs window1/2/3Control's RAM shadows to already

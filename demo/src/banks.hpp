@@ -4,137 +4,136 @@
 
 /**
  * @file banks.hpp
- * @brief This demo's own banked PRG-ROM domains: one placement keyword per
- *        logical area of the game, and the bank facts each one maps to.
+ * @brief This demo's own PRG-ROM domains: where each one physically lives, in
+ *        the form the farcall machinery needs.
  *
- * CONSUMER-OWNED, deliberately. mmc3-helper.ld supplies the hardware
- * mechanics (window geometry, the resident image, the fixed bank) and
- * mmc3.hpp supplies the farcall machinery, but which parts of THIS game live
- * in which bank is a project decision -- see BANKED_CALL_THEORY.txt's
- * "REMOVING THE ENFORCED SECTION-NAMING CONVENTION" for why the library
- * never makes it on a project's behalf.
+ * CONSUMER-OWNED, deliberately. mmc3-helper.ld supplies the hardware mechanics
+ * (window geometry, the fixed bank) and mmc3.hpp supplies the farcall
+ * machinery, but which parts of THIS game live in which bank is a project
+ * decision -- see BANKED_CALL_THEORY.txt's "REMOVING THE ENFORCED
+ * SECTION-NAMING CONVENTION" for why the library never makes it on a
+ * project's behalf.
  *
- * FOUR THINGS MUST AGREE for a domain, and only the last two live in this
- * file. Getting them out of step produces a call that banks in the wrong
- * 8 KiB and executes whatever happens to be there -- a crash with no
- * diagnostic, the exact failure BANKED_CALL_THEORY.txt's "CRITICAL
- * POST-PHASE-4 FIX" records from the VRC1 rollout:
+ * A TAG NAMES A REAL BANK. If you have a tag, the call switches to it. Code
+ * already in reach -- ::FIXED, or whatever the caller knows is mapped -- is
+ * reached by an ordinary call and needs nothing from this file. There is no
+ * "always mapped" layout, because a layout that named no bank was a
+ * contradiction that only existed to let unbanked code go through the banked
+ * spelling.
  *
- *   1. demo/link.ld's MEMORY region     -- ORIGIN encodes (bank + 1)
- *   2. demo/link.ld's OUTPUT_FORMAT     -- FULL() order IS the bank number
- *   3. the keyword below                -- names the section, hence the region
- *   4. the bank_layout below            -- repeats the encoded address for C++
+ * THREE THINGS MUST AGREE per domain, and only the last lives here. Getting
+ * them out of step produces a call that banks in the wrong 8 KiB and executes
+ * whatever is there -- a crash with no diagnostic, the exact failure
+ * BANKED_CALL_THEORY.txt's "CRITICAL POST-PHASE-4 FIX" records from the VRC1
+ * rollout:
  *
- * SEVERAL KEYWORDS MAY SHARE ONE BANK, which is the point of separating the
- * keyword from the tag: ::TITLE and ::WORLD both place into .prg_rom_001, so
- * both areas' code shares bank 0's 8 KiB and both bind to bank001_tag. They
- * are separate keywords purely so a future split -- moving world code to its
- * own bank once it outgrows the shared one -- is a one-line change here plus
- * a re-bind, touching no game code at all.
+ *   1. demo/link.ld's MEMORY region  -- ORIGIN encodes (bank + 1)
+ *   2. demo/link.ld's OUTPUT_FORMAT  -- FULL() order IS the bank number
+ *   3. the bank_layout below         -- repeats that encoded address for C++
  *
  * WHAT BANKED CODE MAY CALL is the real constraint, and nothing enforces it.
- * While a domain is banked in through window 1, the resident code normally at
- * $8000-$9FFF IS NOT THERE. A banked function may safely call: anything in
- * the fixed bank (::FIXED, $E000-$FFFF), anything the linker placed at
- * $A000-$DFFF (the other two resident windows, which this file's domains
- * never switch), and anything in its own bank. It may NOT call ordinary code
- * that happens to have landed in $8000-$9FFF -- and which functions those are
- * is decided by the linker, not visible in the source. Keep banked code
- * self-contained or pointed at ::FIXED helpers.
+ * This ROM runs one resident window ($C000-$DFFF) plus the fixed bank; both
+ * switchable windows belong to the level domain. So banked code may call
+ * anything in ::FIXED, anything at $C000-$DFFF, and anything in its own
+ * domain -- and nothing else, because nothing else is in the address space
+ * while it runs.
  */
 
-/// @name Placement keywords
-/// Tag a function or variable definition with one of these to place it in
-/// that bank, exactly as ::FIXED places into $E000-$FFFF:
-/// `namespace title { TITLE void main() { ... } }`. Uppercase per this
-/// project's macro convention. Expands to nothing off-NES, where every
-/// backend is one flat address space with no banking at all.
-///
-/// THREE ATTRIBUTES, ALL LOAD-BEARING -- a bare section attribute is not
-/// enough to put something in a bank and keep it there:
-///
-/// - noinline: a section attribute only places an OUT-OF-LINE copy. Without
-///   this, LTO inlines a small banked function into its (resident) caller,
-///   drops the out-of-line copy as unreferenced, and the domain silently
-///   ends up empty. Observed on the first build of this file.
-/// - used, retain: banked content must survive even when nothing statically
-///   reaches it. A game mode is dispatched through a variable, so whether it
-///   is "reachable" depends on what the optimizer can prove about that
-///   variable -- and when it proved gameMode never becomes Title, it deleted
-///   both functions below and emptied the bank. Content you deliberately
-///   placed in a bank should be in the ROM because you put it there, not
-///   because the optimizer failed to prove it dead. `used` holds it through
-///   LTO, `retain` through --gc-sections.
-///
-/// The cost is honest: genuinely dead banked code stays in the ROM. That is
-/// the right trade for a bank, which is space you have already paid for.
+/// @name Domain tags
+/// The key ::MMC3_BIND takes, minus its `_tag` suffix. Named after the
+/// section rather than the game area on purpose: a tag identifies physical
+/// banks, which several areas of the game may share.
 /// @{
-#define TITLE CREATE_SEGMENT_KEYWORD(".prg_rom_001") __attribute__((noinline, used, retain)) ///< Title screen -> bank 0, shared with ::WORLD.
-#define WORLD CREATE_SEGMENT_KEYWORD(".prg_rom_001") __attribute__((noinline, used, retain)) ///< World map -> bank 0, shared with ::TITLE.
-/// @}
-
-/// @name Bank tags
-/// The key ::MMC3_BIND takes, minus its `_tag` suffix -- `MMC3_BIND(
-/// title::main, bank001)`. Named after the SECTION rather than the game area
-/// on purpose: a tag identifies one physical 8 KiB bank, which is exactly
-/// what several keywords can point at together.
-/// @{
-struct bank001_tag {}; ///< .prg_rom_001, physical bank 0, window 1. See ::TITLE / ::WORLD.
-struct bank002_tag {}; ///< .prg_rom_002, physical bank 1, window 1. Audio engine CODE.
-struct bank003_tag {}; ///< .prg_rom_003, physical bank 2, WINDOW 2. Audio engine DATA.
+struct audio_tag      {}; ///< .prg_rom_audio, bank 2, window 1. Engine + pnes audio module.
+struct audio_data_tag {}; ///< .prg_rom_audio_data, bank 3, WINDOW 2. Songs + SFX.
+struct level_tag {}; ///< .prg_rom_level, physical banks 0+1, BOTH windows. See ::EnterLevelBanks.
 /// @}
 
 #ifdef TARGET_NES
 /**
- * @brief Bank 0's location, as the farcall machinery needs it.
+ * @brief The LEVEL domain: banks 0 AND 1, at $8000-$BFFF, both windows.
  *
- * 0x00018000 = ((0 + 1) << 16) | 0x8000: physical bank 0, reached through
- * window 1 ($8000-$9FFF, R6). The +1 bias is mmc3.hpp's own encoding, NOT an
- * off-by-one -- see section_t's ENCODING comment there, and the matching
- * ORIGIN in demo/link.ld. MUST equal that ORIGIN exactly.
+ * 0x00018000 = ((0 + 1) << 16) | 0x8000: physical bank 0 through window 1. The
+ * +1 bias is mmc3.hpp's own encoding, not an off-by-one -- see section_t's
+ * ENCODING comment there. The 0x4000 size is what makes this two banks rather
+ * than one, and must match demo/link.ld's prg_rom_level LENGTH.
  *
- * constexpr, which is what makes this free: mmc3::Call folds the whole
- * window/bank resolution away at compile time, leaving just the two register
- * writes. A runtime section() computed from linker symbols costs ~120 bytes
- * per call site instead (measured -- see vrc1.hpp's bank_layout comment), and
- * is only needed for a domain sharing a region with unrelated content, which
- * none of these do.
+ * NOT REACHABLE BY FARCALL, and deliberately has no MMC3_BIND anywhere:
+ * mmc3::CallInSection derives ONE window index from the address and switches
+ * ONE register, so a farcall would map bank 0 at $8000 and leave $A000 showing
+ * whatever was there -- half the domain missing, no diagnostic. Entered by
+ * ::EnterLevelBanks() instead, once, on mode entry.
+ *
+ * constexpr, which is what makes it free: the window/bank resolution folds
+ * away at compile time, leaving just the register writes. A runtime section()
+ * computed from linker symbols costs ~120 bytes per call site instead
+ * (measured -- see vrc1.hpp's bank_layout comment).
  */
-template <> struct mmc3::bank_layout<bank001_tag> {
-    static constexpr bool always_mapped = false;
-    static constexpr mmc3::section_t section() { return { 0x00018000u, 0x2000u }; }
-};
-
-/// Audio engine CODE. 0x00028000 = bank 1, window 1 ($8000, R6).
-template <> struct mmc3::bank_layout<bank002_tag> {
-    static constexpr bool always_mapped = false;
-    static constexpr mmc3::section_t section() { return { 0x00028000u, 0x2000u }; }
+template <> struct mmc3::bank_layout<level_tag> {
+    static constexpr mmc3::section_t section() { return { 0x00018000u, 0x4000u }; }
 };
 
 /**
- * @brief Audio engine DATA. 0x0003a000 = bank 2, WINDOW 2 ($A000, R7).
+ * @brief The AUDIO CODE bank: FamiStudio's engine and platform-nes's audio
+ *        module. 0x00038000 = bank 2, window 1 ($8000, R6).
  *
- * The $a000 is the whole point, not a typo: this bank is mapped at the same
- * time as bank002_tag's, via mmc3::CallPairedBlock, because the engine walks
- * song data while it executes. Two switchable windows means the pair must use
- * one each -- CallPairedBlock static_asserts it.
+ * THOSE TWO SHARING A BANK IS THE CONTRACT, not packing convenience.
+ * src/nes/audio.cpp contains no bank switching whatsoever -- it reaches
+ * famistudio_update() with a plain call, valid only because the engine is
+ * mapped whenever the module is. PLATFORM_NES_AUDIO_SECTION (local.cmake) and
+ * FAMISTUDIO_CA65_CODE_SEGMENT (demo/famistudio_config.s) put them here.
+ *
+ * The song and SFX data is NOT here, deliberately -- see ::audio_data_tag.
  */
-template <> struct mmc3::bank_layout<bank003_tag> {
-    static constexpr bool always_mapped = false;
-    static constexpr mmc3::section_t section() { return { 0x0003a000u, 0x2000u }; }
+template <> struct mmc3::bank_layout<audio_tag> {
+    static constexpr mmc3::section_t section() { return { 0x00038000u, 0x2000u }; }
 };
 
-/// @name Audio backend roles
-/// platform-nes declares ::audio_code_bank_tag / ::audio_data_bank_tag (see
-/// audio.hpp) but leaves the banks to the project, since which bank holds
-/// what is a layout decision. This demo points them at banks 1 and 2, so
-/// src/nes/audio.cpp's farcalls resolve to those. A project not banking its
-/// audio would instead give both `always_mapped = true` and pay nothing.
-///
-/// Aliases rather than new tags: the engine has no bank of its own, it just
-/// occupies one this file already named.
-/// @{
-template <> struct mmc3::bank_layout<audio_code_bank_tag> : mmc3::bank_layout<bank002_tag> {};
-template <> struct mmc3::bank_layout<audio_data_bank_tag> : mmc3::bank_layout<bank003_tag> {};
-/// @}
+/**
+ * @brief The AUDIO DATA bank: songs and SFX. 0x0004a000 = bank 3, WINDOW 2.
+ *
+ * A separate bank because data has no reason to sit beside the engine, and
+ * forcing it there would cap every song this cart can hold at whatever is left
+ * of bank 2. The $a000 is the one part that is not free choice: the engine
+ * walks this data while it executes, so the two must be mapped simultaneously
+ * and therefore cannot share a window. mmc3::CallPairedBlock static_asserts it.
+ */
+template <> struct mmc3::bank_layout<audio_data_tag> {
+    static constexpr mmc3::section_t section() { return { 0x0004a000u, 0x2000u }; }
+};
+
+/**
+ * @brief Runs @p block with the audio code bank AND its data bank mapped.
+ *
+ * Both, because the engine reads song data while executing. Wrapping the call
+ * rather than binding each entry point with MMC3_BIND: a bind switches one
+ * bank, and every audio call needs two.
+ */
+template <typename Block>
+decltype(auto) InAudioBanks(Block &&block) {
+    return mmc3::CallPairedBlock<audio_tag, audio_data_tag>(
+        static_cast<Block &&>(block));
+}
 #endif
+
+/**
+ * @brief Maps the level domain into both switchable windows. Call once, on
+ *        entry to level mode; there is no matching "leave".
+ *
+ * R6 = 0 ($8000-$9FFF), R7 = 1 ($A000-$BFFF) -- the two banks prg_rom_level
+ * spans, in the order the linker laid them out. Must be called from code that
+ * is NOT in either window, i.e. from $C000-$DFFF or ::FIXED, or it unmaps
+ * itself mid-execution. main.cpp's dispatcher is ::FIXED and satisfies this.
+ *
+ * Audio farcalls made from inside level still work untouched: their thunks
+ * live in the fixed bank, save both shadows, map the audio pair, and restore
+ * level's pair before returning. What must NOT happen is an interrupt reaching
+ * code that is currently banked out -- which is why level's vector handlers
+ * are ::FIXED (level.cpp).
+ */
+inline void EnterLevelBanks() {
+#ifdef TARGET_NES
+    mmc3::SwitchBank(mmc3::window1Control, 0);
+    mmc3::SwitchBank(mmc3::window2Control, 1);
+#endif
+}

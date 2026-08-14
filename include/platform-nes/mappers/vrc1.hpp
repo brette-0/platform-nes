@@ -248,10 +248,11 @@ public:
      * @brief Hardware facts for one tag/domain. Primary template deliberately
      *        undefined: an un-tagged Tag is a compile error, not a silent default.
      *
-     * A non-fixed specialization (always_mapped = false) must also provide
-     * `static section_t section()` -- a FUNCTION, not a data member, so both
-     * shapes below share one calling convention (`L::section()`) at the
-     * Call<Fn>/CallBlock<Fn> call site.
+     * Every specialization provides `static section_t section()` -- a
+     * FUNCTION, not a data member, so both shapes below share one calling
+     * convention (`L::section()`) at the Call<Fn>/CallBlock<Fn> call site.
+     * There is no `always_mapped` escape hatch; see mmc3.hpp's bank_layout
+     * doc for why a layout that names no bank was a contradiction.
      *
      * PREFER `static constexpr section_t section() { return {addr, size}; }`,
      * a literal the human enters by hand, matched against a linker script rule
@@ -284,16 +285,6 @@ public:
      * initializer has run.)
      */
     template <typename Tag> struct bank_layout;
-
-    /// Key for vrc1.hpp's own always-mapped fixed bank ($E000-$FFFF, see ::FIXED).
-    /// Named fixed_bank_tag, not fixed_tag: VRC1_BANKED()'s tag argument gets
-    /// macro-expanded before tag##_tag pastes it (so a #define'd tag can be
-    /// forwarded through config headers, see VRC1_BANKED_IMPL below) -- but that
-    /// means the bare word `fixed` can never be used as a tag token here, since
-    /// `fixed` is ITSELF already a macro in this file (CREATE_SEGMENT_KEYWORD),
-    /// and would expand before pasting, producing garbage. VRC1_BANKED() call
-    /// sites for this domain must use the tag `fixed_bank`, not `fixed`.
-    struct fixed_bank_tag {};
 
     /// Which bank_layout<Tag> a specific tagged function was registered under.
     /// One specialization per VRC1_BANKED()/VRC1_BANKED_EXTERN() call site,
@@ -473,10 +464,6 @@ private:
     };
 };
 
-template <> struct VRC1::bank_layout<VRC1::fixed_bank_tag> {
-    static constexpr bool always_mapped = true;
-};
-
 template <typename R, typename... A>
 struct VRC1::function_traits<R (*)(A...)> {
     using return_type = R;
@@ -500,13 +487,9 @@ FIXED auto VRC1::Call(Args &&...args) -> typename function_traits<decltype(Fn)>:
     using TReturn = typename function_traits<decltype(Fn)>::return_type;
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
-    if constexpr (L::always_mapped) {
-        return Fn(std::forward<Args>(args)...);
-    } else {
-        return Detail::CallInSection<TReturn>(
-            L::section(),
-            [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
-    }
+    return Detail::CallInSection<TReturn>(
+        L::section(),
+        [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
 #else
     return Fn(std::forward<Args>(args)...);
 #endif
@@ -516,12 +499,8 @@ template <auto Fn, typename Block>
 FIXED auto VRC1::CallBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
-    if constexpr (L::always_mapped) {
-        return block();
-    } else {
-        return Detail::CallInSection<decltype(block())>(
-            L::section(), std::forward<Block>(block));
-    }
+    return Detail::CallInSection<decltype(block())>(
+        L::section(), std::forward<Block>(block));
 #else
     return block();
 #endif

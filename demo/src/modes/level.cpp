@@ -3,6 +3,8 @@
 #include <platform-nes/apu.hpp>
 #include <platform-nes/mappers/mmc3.hpp>
 
+#include "../banks.hpp"
+
 #include "../graphics/colours.hpp"
 #include "../graphics/strings.hpp"
 #include "../graphics/graphics.hpp"
@@ -33,7 +35,7 @@ namespace level {
 
     // Forward-declared so irq_handler can call it directly once the MMC3
     // scanline IRQ fires below the HUD (see kHudSplitLatch / irq_handler).
-    static void ApplyHudSplit();
+    static FIXED void ApplyHudSplit();
 
     constexpr u8 kCoinVramCap = 48;         // 16 tile writes = 4 coins (2x2 each)
     static u8 CoinVram[kCoinVramCap];
@@ -89,11 +91,22 @@ namespace level {
 #endif
     static i16 ClampRow(u16 y);
 
-    // Pinned to the fixed PRG-ROM bank: this function itself issues the MMC3
-    // bank switches below, and code doing that must not be able to switch its
-    // own bank out from under the CPU mid-execution (see interrupts.hpp's
-    // RESET macro comment for the same hazard/reasoning).
-    FIXED void main() {
+    // NOT pinned to the fixed bank, deliberately. This was ::FIXED while it
+    // opened with SwitchBank(window1Control/window2Control, ...) -- code that
+    // switches a PRG window must not be able to unmap itself mid-execution
+    // (interrupts.hpp's RESET macro comment has the same hazard). Boot now
+    // establishes R6/R7 (mmc3.cpp's ::_reset, via mmc3-helper.ld's
+    // __mmc3_boot_bank_window1/2), so those two calls are gone and only the
+    // SwitchCHRBank calls below remain -- R0-R5 move PPU pattern-table
+    // windows and cannot touch PRG mapping, so there is nothing left to
+    // protect against.
+    //
+    // Untagged, so the mangled-name rule in demo/link.ld sweeps it into the
+    // level domain along with the rest of this namespace. Reached by a plain
+    // call from main.cpp's dispatcher, which maps both of level's banks first
+    // (EnterLevelBanks) -- not by a farcall, which can only switch one window
+    // and would leave half the domain missing.
+    void main() {
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
         mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
@@ -151,8 +164,14 @@ namespace level {
 
         ppu::SetScroll(0, 0);
 
-        audio::Init(REGION);
-        audio::TrackPlay(0);
+        // Long-called into the audio banks: the module and engine share one
+        // (banks.hpp's audio_tag), the songs and SFX are in another. Both are
+        // mapped for the duration; inside, the module calls the engine
+        // directly and the engine reads its data directly.
+        InAudioBanks([] {
+            audio::Init(REGION);
+            audio::TrackPlay(0);
+        });
 
         ColMapSeed(0, { TileData }, { DynLengths, DynData, 0 });
 
@@ -185,7 +204,7 @@ namespace level {
             ColMapTrack(cameraX >> 4);
 
             ppu::SetColorPriority(0x20);   // red band:          Update
-            audio::Update();
+            InAudioBanks([] { audio::Update(); });
             ppu::SetColorPriority(0);
 
             video::WaitForPresent();
@@ -197,7 +216,11 @@ namespace level {
         }
     }
 
-    void nmi_handler() {
+    // ::FIXED, not banked. An interrupt fires with whatever banks happen to
+    // be mapped -- including the audio pair mid-farcall, when BOTH halves of
+    // level's domain are swapped out -- so anything a vector can reach has to
+    // live somewhere no register can displace. That is the fixed bank.
+    FIXED void nmi_handler() {
         lastPort1 = port1; lastPort2 = port2;
         oam::RefreshSprites(OAMBuffer);
 
@@ -235,7 +258,9 @@ namespace level {
         nmi_done = true;
     }
 
-    void irq_handler() {
+    // ::FIXED for the same reason as nmi_handler, and it calls ApplyHudSplit
+    // directly, which is therefore ::FIXED too.
+    FIXED void irq_handler() {
         mmc3::AcknowledgeScanlineIRQ();
         tech::SpinWait(kHUDSplitDelay);
         ApplyHudSplit();
@@ -261,9 +286,7 @@ namespace level {
         return r < levelHeight ? r : levelHeight - 1;
     }
 
-    // Called directly from irq_handler once the MMC3 scanline IRQ confirms the
-    // beam is in HBlank just above kHudSplitRow: the actual HUD split.
-    static void ApplyHudSplit() {
+    static FIXED void ApplyHudSplit() {
         #if defined(TARGET_NDS) || defined(TARGET_GBA)
             const i16 mid    = static_cast<i16>(video::viewport_py() >> 1);
             const i16 anchor = static_cast<i16>(240 - video::viewport_py());
