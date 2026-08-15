@@ -33,8 +33,14 @@ module's code is placed in, and MUST be the same bank the audio engine is \
 assembled into (see demo/famistudio_config.s). Set it from CMake -- \
 local.cmake.example has a worked example."
 #endif
-#define AUDIO_BANK CREATE_SEGMENT_KEYWORD(PLATFORM_NES_AUDIO_SECTION) \
-                   __attribute__((noinline, used, retain))
+// MODULE_PLACEMENT supplies the section and the noinline that makes the section
+// mean anything (see its comment). This used to add `used, retain` as well, on
+// the theory that a farcalled function looks uncalled to LTO and the linker.
+// Measured: it doesn't. The callers here go through blocks that call
+// audio::Update() perfectly ordinarily, so the references are visible, and the
+// attributes only kept the four API functions this demo never calls -- 36 bytes
+// of dead code. Removed.
+#define AUDIO_BANK MODULE_PLACEMENT(PLATFORM_NES_AUDIO_SECTION)
 
 #include <intsh>
 using namespace br0::intsh;

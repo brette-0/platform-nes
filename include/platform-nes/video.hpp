@@ -20,8 +20,7 @@
  *   corrupts the display. The ::VRAM block wraps a safe access window
  *   by toggling ::PPUMASK around the body.
  */
-#ifndef VIDEO_H
-#define VIDEO_H
+#pragma once
 
 #include <intsh>
 using namespace br0::intsh;
@@ -1087,6 +1086,59 @@ void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
  * @param latch Flag written non-zero when @p fn has completed.
  */
 void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
+
+/**
+ * @brief As above, but accepts any invocable rather than a bare function
+ *        pointer -- so the handler can carry a bank.
+ *
+ * A `void (*)()` is two bytes on the 6502 with nowhere to put a bank number.
+ * That is not a problem when the target's bank is a compile-time constant: a
+ * captureless lambda converts to the plain overload above and the bank travels
+ * in the constant, not the pointer --
+ *
+ *     constexpr auto split = mmc3::GetCallable<BankedSplit>();
+ *     video::WaitThenReactToSpriteZero(px, py, []{ mmc3::Call(split); }, &done);
+ *
+ * It IS a problem when the target is chosen at runtime, which is the whole
+ * reason mmc3::callable_t exists. A capturing lambda holding a runtime-selected
+ * callable_t cannot convert to a function pointer, so it needs this overload:
+ *
+ *     video::WaitThenReactToSpriteZero(px, py, [&]{ mmc3::Call(table[i]); }, &done);
+ *
+ * NOTHING HERE NAMES A MAPPER, deliberately -- same reasoning as
+ * audio::InBanks. This header states what the handler may be; which bank it
+ * lives in is the project's business.
+ *
+ * SAFE TO BANK-SWITCH INSIDE. Sprite-zero hit is a PPUSTATUS flag (bit 6),
+ * polled -- it is NOT an interrupt source on the NES, and this loop runs in
+ * ordinary code. @p fn therefore executes in normal context, and a farcall out
+ * of it is an ordinary farcall with no interrupt-reentrancy question attached.
+ *
+ * @note Off-NES @p fn must still be convertible to `void (*)()`: the desktop
+ *       renderer schedules the handler to fire later through a single
+ *       pointer-shaped slot (::SetSpriteZeroHandler), which cannot own a
+ *       stateful callable, and off-NES there are no banks for it to carry
+ *       anyway. Resolve the runtime choice before the call there.
+ */
+template <typename Handler>
+void WaitThenReactToSpriteZero(const u16 px, const u16 py, Handler &&fn,
+                               atomic u8* latch) {
+#ifdef TARGET_NES
+    (void)px; (void)py;
+    // Same loop as the out-of-line NES definition in src/nes/video.cpp: clear
+    // any stale hit left over from the previous frame's pre-render line, then
+    // wait for the real one.
+    while (!*latch) {
+        while (  tech::peek(ppu::raw::PPUSTATUS) & 0x40)  { }
+        while (!(tech::peek(ppu::raw::PPUSTATUS) & 0x40)) { }
+        fn();
+        *latch = true;
+    }
+#else
+    void (*thunk)() = fn;   // captureless off-NES; see @note above
+    WaitThenReactToSpriteZero(px, py, thunk, latch);
+#endif
+}
 } // namespace video
 
 #ifdef TARGET_NES
@@ -1120,7 +1172,5 @@ extern u8 PPUMASK;
  */
 #define VRAM \
 if (1)
-
-#endif
 
 #endif

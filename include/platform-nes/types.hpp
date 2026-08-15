@@ -5,8 +5,7 @@
  * Included first by ::platform-nes.h so later subsystem headers can rely
  * on a single point for common typedefs as the library grows.
  */
-#ifndef TYPES_H
-#define TYPES_H
+#pragma once
 
 template <typename t>
 concept addable = requires (t a, t b) {
@@ -44,5 +43,3 @@ struct vec2 {
         return { static_cast<u>(x), static_cast<u>(y) };
     }
 };
-
-#endif

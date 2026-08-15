@@ -195,6 +195,43 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             PROPERTIES COMPILE_DEFINITIONS
             "PLATFORM_NES_AUDIO_SECTION=\"${PLATFORM_NES_AUDIO_SECTION}\"")
 
+    # ------------------------------------------------------------------
+    # Placement for the other modules that produce code. OPTIONAL, unlike
+    # audio's: audio MUST share a bank with the engine it plain-calls, so an
+    # unset section there is an #error. These have no such contract, so unset
+    # means "don't place it" -- today's behaviour, inlined into callers.
+    #
+    # Setting one is a real tradeoff and the module's own comment says so: the
+    # section only governs a function's out-of-line copy, and LTO will inline
+    # the body into a caller elsewhere regardless, so the keyword also carries
+    # noinline. That is why video:: is 2,097 bytes compiled alone and 0 bytes
+    # in the linked ROM today. Placement means giving up inlining for that
+    # module; the section variable being set IS the opt-in.
+    #
+    # Only modules with out-of-line code get an entry. apu.cpp is register
+    # objects and technology.cpp is empty -- both compile to 0 bytes of text,
+    # so a section for them would name a place nothing goes. interrupts.cpp is
+    # deliberately excluded too: its one function is a `jmp ($fffc)` reset
+    # trampoline that has to stay in the fixed bank to work at all.
+    # ------------------------------------------------------------------
+    foreach(_mod video input)
+        string(TOUPPER ${_mod} _MOD)
+        if(PLATFORM_NES_${_MOD}_SECTION AND LLVM_MOS_PLATFORM STREQUAL "nes-nrom")
+            message(WARNING
+                    "PLATFORM_NES_${_MOD}_SECTION is set, but this is an NROM "
+                    "build: one fixed 32 KiB bank, nowhere to move code to. "
+                    "MODULE_PLACEMENT is inert here, so the section is ignored "
+                    "rather than silently costing you the module's inlining.")
+        endif()
+        if(PLATFORM_NES_${_MOD}_SECTION)
+            set_source_files_properties(${CMAKE_SOURCE_DIR}/src/nes/${_mod}.cpp
+                    PROPERTIES COMPILE_DEFINITIONS
+                    "PLATFORM_NES_${_MOD}_SECTION=\"${PLATFORM_NES_${_MOD}_SECTION}\"")
+            message(STATUS "platform-nes: ${_mod} module placed in "
+                           "${PLATFORM_NES_${_MOD}_SECTION} (inlining disabled for it)")
+        endif()
+    endforeach()
+
     set(LLVM_MOS_PLATFORM nes)
     find_package(llvm-mos-sdk REQUIRED)
     project(platform-nes CXX)
@@ -279,10 +316,15 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # instead, which is what that entry flags as the thing to fix). CMake's
     # own job here is reduced to READING values back out of that real file
     # (regex-extracted, never written) so audio.cpp's #if FAMISTUDIO_CFG_*
-    # checks and its BANKED_EXTERN segment tag stay in sync with whatever
-    # this file actually says -- editing the .s file is what changes the
-    # engine's real configuration; these extracted CMake variables can never
-    # drift from it because they're read from it, not a separate source.
+    # checks stay in sync with whatever this file actually says -- editing
+    # the .s file is what changes the engine's real configuration; these
+    # extracted CMake variables can never drift from it because they're read
+    # from it, not a separate source.
+    #
+    # THE CODE SEGMENT IS THE ONE EXCEPTION, and runs the other way: it is
+    # not a free choice of that file's, it MUST equal the section the audio
+    # module is compiled into, so it is derived from
+    # PLATFORM_NES_AUDIO_SECTION and fed in (see the encoder further down).
     file(READ ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s FAMISTUDIO_CONFIG_TEXT)
 
     macro(famistudio_extract var pattern)
@@ -293,7 +335,6 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
         set(${var} ${CMAKE_MATCH_1})
     endmacro()
 
-    famistudio_extract(FAMISTUDIO_SEGMENT          "FAMISTUDIO_CA65_CODE_SEGMENT[ \t]+([A-Za-z0-9_]+)")
     famistudio_extract(FAMISTUDIO_CFG_DPCM_SUPPORT "FAMISTUDIO_CFG_DPCM_SUPPORT[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_CFG_SFX_SUPPORT  "FAMISTUDIO_CFG_SFX_SUPPORT[ \t]*=[ \t]*([0-9]+)")
     famistudio_extract(FAMISTUDIO_CFG_SFX_STREAMS  "FAMISTUDIO_CFG_SFX_STREAMS[ \t]*=[ \t]*([0-9]+)")
@@ -327,6 +368,39 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
                 DESTINATION ${CMAKE_BINARY_DIR}/famistudio_include)
     endif()
 
+    # ------------------------------------------------------------------
+    # PLATFORM_NES_AUDIO_SECTION -> ca65 segment name.
+    #
+    # audio.cpp's ::AUDIO_BANK and FamiStudio's FAMISTUDIO_CA65_CODE_SEGMENT
+    # must name the SAME bank -- that shared placement is the entire reason
+    # audio.cpp can plain-call famistudio_update() and carry no bank
+    # switching. Two hand-written literals could drift apart silently and
+    # produce a cross-bank call with no diagnostic, so there is only one:
+    # local.cmake's readable ".prg_rom_audio", which link.ld and banks.hpp
+    # already use, with the ca65 spelling GENERATED from it here.
+    #
+    # ld.lld's XO65 reader treats '_' in a ca65 segment name as an escape
+    # character, so ".prg_rom_audio" is spelled "_pprg__rom__audio" -- every
+    # literal '_' doubled, '.' as "_p" -- plus a "_fx" suffix marking the
+    # ELF section executable. Escape literals FIRST or the "_p" introduced by
+    # the second replace would itself get doubled by the first.
+    # demo/famistudio_config.s documents the full escape table.
+    # ------------------------------------------------------------------
+    string(REPLACE "_" "__" FAMISTUDIO_SEGMENT "${PLATFORM_NES_AUDIO_SECTION}")
+    string(REPLACE "." "_p" FAMISTUDIO_SEGMENT "${FAMISTUDIO_SEGMENT}")
+    set(FAMISTUDIO_SEGMENT "${FAMISTUDIO_SEGMENT}_fx")
+
+    # file(CONFIGURE) rather than file(WRITE): it leaves the file untouched
+    # when the content is unchanged, so a re-configure doesn't bump the
+    # timestamp and force a needless reassembly through the DEPENDS below.
+    set(PNES_AUDIO_SEGMENT_INC
+            ${CMAKE_BINARY_DIR}/famistudio_include/pnes_audio_segment.inc)
+    file(CONFIGURE OUTPUT ${PNES_AUDIO_SEGMENT_INC} CONTENT
+"; GENERATED by CMakeLists.txt from PLATFORM_NES_AUDIO_SECTION -- do not edit.
+; ${PLATFORM_NES_AUDIO_SECTION} in ca65/XO65 segment spelling.
+.define PNES_AUDIO_SEGMENT ${FAMISTUDIO_SEGMENT}
+")
+
     # Assemble the real, project-owned config once. There is no longer a
     # separate "pass 1 without padding, pass 2 with padding" split -- see
     # the measurement step below for why: it was already a permanent no-op,
@@ -338,12 +412,20 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             OUTPUT ${FAMISTUDIO_OBJ}
             COMMAND ${CA65}
             -D REGION=${REGION}
+            # Switches famistudio_config.s from its standalone literal
+            # fallback to the generated pnes_audio_segment.inc. ca65's -D
+            # takes NUMERIC symbols only ("Invalid definition" otherwise),
+            # so the segment name itself cannot travel this way -- this flag
+            # only selects which branch of the .ifdef there is taken.
+            -D PNES_AUDIO_SEGMENT_INC=1
             -I ${CMAKE_SOURCE_DIR}/demo
+            -I ${CMAKE_BINARY_DIR}/famistudio_include
             -I ${FAMISTUDIO_DIR}
             -I ${FAMISTUDIO_DIR}/NoteTables
             -o ${FAMISTUDIO_OBJ}
             ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s
             DEPENDS ${CMAKE_SOURCE_DIR}/demo/famistudio_config.s
+            ${PNES_AUDIO_SEGMENT_INC}
             COMMENT "Assembling FamiStudio"
     )
 
@@ -440,12 +522,12 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             FAMISTUDIO_CFG_SFX_SUPPORT=${FAMISTUDIO_CFG_SFX_SUPPORT}
             FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
-            # Unquoted on purpose -- audio.cpp stringizes it itself (see
-            # FAMISTUDIO_SEGMENT_STR there), the standard two-level macro
-            # stringize idiom, rather than trying to pass an already-quoted
-            # string literal through this raw command-line definition (which
-            # would need shell-escaping that's easy to get subtly wrong).
-            FAMISTUDIO_SEGMENT=${FAMISTUDIO_SEGMENT}
+            # No FAMISTUDIO_SEGMENT here: audio.cpp used to need the engine's
+            # segment name for a BANKED_EXTERN tag, and no longer does
+            # anything with it -- it reaches the engine with a plain call now
+            # that the two share a bank by construction (see the encoder
+            # above). PLATFORM_NES_AUDIO_SECTION is the only placement value
+            # the C++ side still takes, and it goes to audio.cpp alone.
     )
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 

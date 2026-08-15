@@ -49,6 +49,58 @@ using namespace br0::intsh;
 #define CREATE_SEGMENT_KEYWORD(name)
 #endif
 
+#if defined(TARGET_NES) && defined(NES_MAPPER_BANKSWITCHED)
+/**
+ * @brief Builds a placement keyword for a whole library MODULE, from the
+ *        section the consuming project chose for it.
+ *
+ * Same builder-not-a-keyword rule as ::CREATE_SEGMENT_KEYWORD: use it as the
+ * right-hand side of the module's own keyword, guarded on whether the project
+ * asked for placement at all.
+ *
+ *     #ifdef PLATFORM_NES_VIDEO_SECTION
+ *     #define VIDEO_BANK MODULE_PLACEMENT(PLATFORM_NES_VIDEO_SECTION)
+ *     #else
+ *     #define VIDEO_BANK
+ *     #endif
+ *
+ * THE `noinline` IS THE WHOLE POINT, not a tuning choice. A section attribute
+ * governs only the out-of-line copy of a function; LTO is free to paste the
+ * body into a caller that lives somewhere else entirely, and it does. That is
+ * why video:: contributes 2,097 bytes of real code when compiled alone and
+ * exactly 0 bytes to the linked ROM: every one of its functions was inlined
+ * into its callers, and a section tag on its own would have placed nothing.
+ * Asking for placement therefore means giving up inlining for that module --
+ * a real cost, accepted deliberately, and only when the project opts in by
+ * setting the section.
+ *
+ * THERE IS DELIBERATELY NO `used`/`retain` HERE, and that was measured rather
+ * than assumed. The worry is a function reached only by a call LTO cannot see,
+ * which LTO then deletes -- a crash, not a link error. But every mechanism in
+ * this library NAMES its target: mmc3::Call<Fn> and mmc3::GetCallable<Fn> take
+ * Fn's address, and a bank switch opened around a scope leaves the calls inside
+ * it perfectly ordinary. Pinning bought nothing and cost real ROM: audio.cpp
+ * carried `used, retain` from an earlier design, and removing it dropped the
+ * four API functions the demo never calls, shrinking the audio bank by 36 bytes
+ * with nothing broken. On a placed video module the same attributes cost 1,544
+ * bytes.
+ *
+ * A module with a genuinely invisible caller -- hand-written assembly, a raw
+ * address in a table -- should say so itself, on the function that needs it,
+ * where the reason can be written down. See the `used` on
+ * famistudio_region_scratch in audio.cpp for that shape.
+ *
+ * Expands to nothing off-NES, and nothing on NROM: with a single fixed 32 KiB
+ * bank there is nowhere for placement to move code TO, so all this would buy
+ * is the loss of inlining. A project that sets a section on an NROM build gets
+ * a warning from CMake rather than a silent no-op here.
+ */
+#define MODULE_PLACEMENT(name) CREATE_SEGMENT_KEYWORD(name) \
+                               __attribute__((noinline))
+#else
+#define MODULE_PLACEMENT(name)
+#endif
+
 
 #ifdef __cplusplus
 namespace tech {
@@ -416,30 +468,69 @@ namespace prsv {
 #define RESTORE(name) ::tech::prsv::restore(name##_snapshot, name)
 
 /**
- * @brief Scoped save/restore of N variables — truly variadic.
+ * @brief Scoped save/restore of N registers — truly variadic, and cheap.
  *
- * `SHADOW(a, b, ...) { body }` snapshots each listed lvalue, runs the body
+ * `SHADOW(a, b, ...) { body }` snapshots each listed register, runs the body
  * once, then restores every snapshot in reverse (LIFO) order as the block
- * exits — including on `break`/`return` out of the body. Arguments may be of
- * mixed types; `volatile`/`atomic` lvalues are read and written exactly once.
+ * exits — including on `return` out of the body. Arguments may be of mixed
+ * types; `volatile`/`atomic` lvalues are read and written exactly once.
  *
- * Unlike the previous macro-unrolled form there is no fixed argument cap: the
- * snapshots live in a `br0::tuple`, so the count is bounded only by the
- * compiler's parameter-pack limits. We use `br0::tuple` rather than
- * `std::tuple` (which the llvm-mos freestanding library does not ship), so the
- * implementation is byte-for-byte the same on the NES and desktop toolchains.
+ * WHAT THIS COSTS, AND WHY IT IS SHAPED THIS WAY. The previous form held three
+ * things: a tuple of REFERENCES to the registers, a tuple of saved copies, and
+ * a `bool` guard for the single-iteration `for` loop the macro expanded to.
+ * Only the saved copies are real work. The references spent two bytes each
+ * pointing at globals whose addresses the linker already knows, and the flag
+ * existed purely to spell the scope as a loop. One register cost four bytes
+ * live across the body — enough to push the whole thing onto the soft stack,
+ * which is what made mmc3's farcall thunk 116 cycles of frame management around
+ * a 35-cycle bank switch.
  *
- * @warning A bare `break`/`continue` inside the body binds to SHADOW's own
- *          hidden loop, not to any enclosing loop (same caveat as ::VRAM).
+ * Taking the registers as TEMPLATE parameters makes their addresses
+ * compile-time, so the scope holds nothing but the saved bytes: one register is
+ * one byte, and shadowing all fifteen APU registers costs fifteen rather than
+ * forty-six. Each register gets its own ::one_shadow base, and base
+ * destructors run in reverse declaration order, which is what gives LIFO for
+ * free with no index arithmetic.
+ *
+ * @note The registers must therefore have LINKAGE — namespace-scope objects,
+ *       which every hardware register here is. A local or a function parameter
+ *       cannot be a template argument, so it cannot be shadowed. Nothing in the
+ *       library needs that: the mappers' thunks used to shadow their `reg`
+ *       PARAMETER, and both now save the single byte by hand instead, for the
+ *       cost reason above.
+ *
+ * @warning `SHADOW(x) { ... }` expands to an `if` with an init-statement, so an
+ *          `else` written after the block would bind to it. Unlike the previous
+ *          `for`-based form, a bare `break`/`continue` inside the body now binds
+ *          to the ENCLOSING loop, which is what it looks like it should do.
  */
+template <auto &Reg>
+struct one_shadow {
+    /// One read at entry, through the register's own copy constructor
+    /// (::wo_register snapshots the shadow without poking hardware).
+    // remove_cv_t, not remove_cvref_t: llvm-mos's freestanding library does not
+    // ship the latter, and it is not needed -- decltype on a reference template
+    // parameter already yields the referenced type, so only the `volatile` an
+    // `atomic` register carries has to come off.
+    std::remove_cv_t<decltype(Reg)> saved{Reg};
+
+    /// One write back on exit. For ::wo_register this pokes the hardware port
+    /// and updates the shadow; for a raw `atomic u8` it is a volatile store.
+    ~one_shadow() { Reg = saved; }
+};
+
+template <auto &...Regs>
+struct shadow_scope : one_shadow<Regs>... {};
+
+/// Retained only for ::PRESERVE/::RESTORE-style call sites that pass lvalues.
 template <class... Ts>
-struct shadow_scope {
+struct shadow_scope_dynamic {
     br0::tuple<Ts&...> refs;                    ///< the originals (pointers only)
     br0::tuple<std::remove_cv_t<Ts>...> saved;  ///< one read each at entry
     bool first = true;
 
-    explicit shadow_scope(Ts&... rs) : refs(rs...), saved(rs...) {}
-    ~shadow_scope() { restore(br0::index_sequence_for<Ts...>{}); }
+    explicit shadow_scope_dynamic(Ts&... rs) : refs(rs...), saved(rs...) {}
+    ~shadow_scope_dynamic() { restore(br0::index_sequence_for<Ts...>{}); }
 
     // One store, written as a discarded-value statement so the volatile
     // assignment's result is never "used" (avoids -Wdeprecated-volatile under
@@ -458,7 +549,7 @@ struct shadow_scope {
     explicit operator bool() { const bool f = first; first = false; return f; }
 };
 template <class... Ts>
-shadow_scope(Ts&...) -> shadow_scope<Ts...>;
+shadow_scope_dynamic(Ts&...) -> shadow_scope_dynamic<Ts...>;
 
 } // namespace tech
 
@@ -466,15 +557,19 @@ shadow_scope(Ts&...) -> shadow_scope<Ts...>;
 #define SH_CAT(a, b)  SH_CAT_(a, b)
 
 /**
- * @brief Open a SHADOW scope over the listed lvalues.
+ * @brief Open a SHADOW scope over the listed registers.
  *
- * Expands to a single-iteration `for` whose loop variable is a ::tech::shadow_scope
- * (CTAD deduces the element types). The body runs once; on exit the scope's
- * destructor restores every snapshot.
+ * Expands to an `if` with an init-statement, whose variable is a
+ * ::tech::shadow_scope parameterised on the registers themselves. The body runs
+ * once; on exit the scope's bases restore every snapshot, last-listed first.
+ *
+ * The registers are TEMPLATE arguments, not constructor arguments — that is
+ * what keeps their addresses out of the object at runtime (see
+ * ::tech::shadow_scope). They must have linkage; every hardware register in
+ * this library does.
  */
-#define SHADOW(...)                                              \
-    for (::tech::shadow_scope SH_CAT(_shadow_, __LINE__){__VA_ARGS__}; \
-         SH_CAT(_shadow_, __LINE__);)
+#define SHADOW(...)                                                    \
+    if (::tech::shadow_scope<__VA_ARGS__> SH_CAT(_shadow_, __LINE__){}; true)
 #endif // __cplusplus
 
 #if !defined(__cplusplus) && __STDC_VERSION__ < 202311L

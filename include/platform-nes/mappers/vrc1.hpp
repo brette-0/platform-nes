@@ -363,14 +363,33 @@ private:
          */
         template <typename TReturn, u16 addr, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInWindow(tech::wo_register<addr> &reg, u8 bank, TFunc fn) {
-            SHADOW(reg) {
-                SwitchBank(reg, bank);
-                return fn();
+            // DELIBERATELY NOT ::SHADOW -- same measured reason as mmc3.hpp's
+            // CallInWindow, which this mirrors. tech::shadow_scope is a real
+            // object (a tuple of REFERENCES to the registers, a tuple of saved
+            // copies, and a bool loop guard), and 4 bytes of live state across
+            // fn() is more than llvm-mos keeps in registers. The thunk then
+            // allocates a soft-stack frame, costing a frame-pointer adjust in
+            // and out plus four __rc20-23 pushes and pulls to free up the
+            // pointer registers to address it. Measured on the MMC3 side: 116
+            // of the thunk's ~171 cycles were that frame; the bank switch
+            // itself is 35.
+            //
+            // Nothing here needs a general scope. There is one register and its
+            // address is a link-time constant, so saving the single byte by
+            // hand leaves live state small enough to sit on the hardware stack.
+            // The restore still happens after fn() returns and still goes
+            // through set() (shadow AND hardware), which is exactly the write
+            // shadow_scope's destructor performed.
+            const u8 saved = reg.get();
+            SwitchBank(reg, bank);
+            if constexpr (__is_same(TReturn, void)) {
+                fn();
+                reg.set(saved);
+            } else {
+                TReturn result = fn();
+                reg.set(saved);
+                return result;
             }
-            __builtin_unreachable(); // SHADOW's scope always runs its body
-                                     // exactly once and returns; the compiler
-                                     // can't see that through the
-                                     // single-iteration for loop.
         }
 
         /**

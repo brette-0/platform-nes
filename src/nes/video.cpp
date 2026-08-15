@@ -1,5 +1,34 @@
 #include <platform-nes/video.hpp>
 #include <platform-nes/technology.hpp>
+
+// WHERE THIS MODULE'S CODE GOES -- the consuming project's choice, supplied as
+// PLATFORM_NES_VIDEO_SECTION (see local.cmake.example). Unlike audio's, this is
+// OPTIONAL: audio has to share a bank with the FamiStudio engine it plain-calls,
+// so an unset section there is an #error. video has no such contract, so leaving
+// it unset simply keeps today's behaviour -- inlined into callers, placed
+// nowhere in particular.
+//
+// Setting it is a real tradeoff, not free: see ::MODULE_PLACEMENT. Every
+// function below stops being inlined and becomes ~2 KiB of out-of-line code in
+// the section named.
+//
+// EVERY definition is tagged, including the three that are also
+// __attribute__((always_inline)) -- WriteSingleToAttributeTable, WriteSingle
+// and RefreshSprites. That combination is NOT an error (verified: clang accepts
+// section + always_inline + noinline together, no diagnostic); the tag is
+// simply inert on them, because an always-inlined function emits no
+// out-of-line copy for a section to place. Tagging them anyway keeps this file
+// free of an exception nobody would remember, and costs nothing.
+//
+// Those three are also the one category that is bank-safe for free: a function
+// copied into every caller is in reach of whatever bank the caller is in. The
+// only wrinkle is that taking one's address does force an out-of-line copy,
+// and that copy DOES honour the section.
+#ifdef PLATFORM_NES_VIDEO_SECTION
+#define VIDEO_BANK MODULE_PLACEMENT(PLATFORM_NES_VIDEO_SECTION)
+#else
+#define VIDEO_BANK
+#endif
 #include <intsh>
 using namespace br0::intsh;
 
@@ -48,7 +77,7 @@ namespace video {
 // TODO: This is a bad name, it does not actually wait on NES and shouldn't for NES multithreading
 //       a true 'wait for present' on NES would infinite loop, but won't return to main thread
 //       without special return tech which we don't have yet
-void WaitForPresent() {
+VIDEO_BANK void WaitForPresent() {
 
 }
 
@@ -56,12 +85,12 @@ void WaitForPresent() {
 
 namespace ppu {
 
-void EnableRendering(const u8 ppuCtrl_, const u8 ppuMask_) {
+VIDEO_BANK void EnableRendering(const u8 ppuCtrl_, const u8 ppuMask_) {
     PPUCTRL = 0x80 | ppuCtrl_;   // each assignment writes shadow + NMI enable
     PPUMASK = ppuMask_;
 }
 
-void Flush(const u8 nt, const u8 at) {
+VIDEO_BANK void Flush(const u8 nt, const u8 at) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, NameTables >> 8);
     tech::poke(raw::PPUADDR, NameTables & 0xFF);
@@ -84,7 +113,7 @@ void Flush(const u8 nt, const u8 at) {
 }
 
 __attribute__((hot))
-void SetScroll(const u16 x, u16 y) {
+VIDEO_BANK void SetScroll(const u16 x, u16 y) {
     xScroll = x; yScroll = y;
 
 
@@ -108,12 +137,12 @@ void SetScroll(const u16 x, u16 y) {
     tech::poke(raw::PPUSCROLL, static_cast<u8>(y & 0xFF));
 }
 
-void DeltaScroll(const i8 x, const i8 y) {
+VIDEO_BANK void DeltaScroll(const i8 x, const i8 y) {
     SetScroll(xScroll + x, yScroll + y);
 }
 
 __attribute__((hot))
-void WriteFromBufferToNameTable(
+VIDEO_BANK void WriteFromBufferToNameTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
@@ -131,7 +160,7 @@ void WriteFromBufferToNameTable(
 }
 
 __attribute__((hot))
-void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
+VIDEO_BANK void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_nt_addr(x, y);
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
@@ -144,7 +173,7 @@ void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
 // reset and three pokes. Meant for the vblank window, where the divide/modulo in the
 // (x,y) form is the cost worth hoisting out.
 __attribute__((hot))
-void WriteSingleToNameTable(const int address, const u8 value) {
+VIDEO_BANK void WriteSingleToNameTable(const int address, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
@@ -153,7 +182,7 @@ void WriteSingleToNameTable(const int address, const u8 value) {
 
 template <typename Idx>
 __attribute__((hot))
-void WriteFromProviderToNameTable(
+VIDEO_BANK void WriteFromProviderToNameTable(
     const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
@@ -176,7 +205,7 @@ template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
 template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
 
 __attribute__((hot))
-void WriteFromBufferToAttributeTable(
+VIDEO_BANK void WriteFromBufferToAttributeTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
     const u16 offset = xy_to_at_addr(x, y);
@@ -208,7 +237,7 @@ void WriteFromBufferToAttributeTable(
 }
 
 __attribute__((always_inline))
-void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
+VIDEO_BANK void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_at_addr(x, y);
 
     tech::peek(raw::PPUSTATUS);
@@ -217,7 +246,7 @@ void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     tech::poke(raw::PPUDATA, value);
 }
 
-u16 CartesianToAddress(const u16 x, const u16 y) {
+VIDEO_BANK u16 CartesianToAddress(const u16 x, const u16 y) {
     return xy_to_nt_addr(x, y);
 }
 
@@ -232,7 +261,7 @@ scroll_t CartesianToScroll(const u16 px, const u16 py) {
 }
 
 __attribute__((hot))
-void SetColorPriority(const u8 priority) {
+VIDEO_BANK void SetColorPriority(const u8 priority) {
     u8 mask = PPUMASK & ~(mask::RED | mask::GREEN | mask::BLUE);
     mask = mask | priority & (mask::RED | mask::GREEN | mask::BLUE);
     PPUMASK = mask;   // one write back: shadow + hardware
@@ -241,7 +270,7 @@ void SetColorPriority(const u8 priority) {
 namespace pal {
 
 __attribute__((hot))
-void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuffer) {
+VIDEO_BANK void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuffer) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
@@ -252,7 +281,7 @@ void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuffer) {
 }
 
 __attribute__((always_inline))
-void WriteSingle(const u8 offset, const u8 value) {
+VIDEO_BANK void WriteSingle(const u8 offset, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
@@ -266,13 +295,13 @@ void WriteSingle(const u8 offset, const u8 value) {
 namespace oam {
 
 __attribute__((always_inline))
-void RefreshSprites(const sprite_t *oam) {
+VIDEO_BANK void RefreshSprites(const sprite_t *oam) {
     u16 addr;
     __builtin_memcpy(&addr, &oam, sizeof addr);
     tech::poke(ppu::raw::OAMDMA, static_cast<u8>(addr >> 8));
 }
 
-void OAMFromBuffer(sprite_t *oam, const u8 slot, const u16 off,
+VIDEO_BANK void OAMFromBuffer(sprite_t *oam, const u8 slot, const u16 off,
                    const u8 width, const u8 *src, const u16 count) {
     (void)width;
     u8 *dst = reinterpret_cast<u8 *>(oam) + static_cast<u16>(slot) * spriteStride + off;
@@ -281,7 +310,7 @@ void OAMFromBuffer(sprite_t *oam, const u8 slot, const u16 off,
         dst[i * spriteStride] = s[i * spriteStride];
 }
 
-void OAMFromProvider(sprite_t *oam, const u8 slot, const u16 off,
+VIDEO_BANK void OAMFromProvider(sprite_t *oam, const u8 slot, const u16 off,
                      const u8 width, oam_t (*fn)(u16), const u16 count) {
     (void)width;
     u8 *base = reinterpret_cast<u8 *>(oam) + static_cast<u16>(slot) * spriteStride + off;
@@ -293,7 +322,7 @@ void OAMFromProvider(sprite_t *oam, const u8 slot, const u16 off,
 
 namespace ppu {
 
-void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
+VIDEO_BANK void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
@@ -305,7 +334,7 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 }   // namespace ppu
 
 __attribute__((hot))
-void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
+VIDEO_BANK void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
     (void)px; (void)py;
 
     while (!*latch) {

@@ -511,7 +511,42 @@ public:
     /// mmc3::bank_layout<Tag>.
     template <auto Fn> struct bank_of;
 
+    /**
+     * @brief A function pointer that carries its own bank -- the storable
+     *        form of what ::Call<Fn> knows at compile time.
+     *
+     * ::Call<Fn> and ::CallBlock<Fn> need Fn nameable AT THE CALL SITE as a
+     * template argument, and `table[runtime_index]` never is, however the
+     * table is declared. But nothing was ever missing for any one candidate:
+     * ::bank_of<Fn> is fully correct for each entry individually. So rather
+     * than making ::Call<Fn> smarter -- which the language does not allow --
+     * ::GetCallable materializes that knowledge into an ordinary value at the
+     * one point the function is still nameable (the table initializer, or
+     * wherever a callback slot is assigned), and the runtime index then only
+     * ever picks between entries that already describe themselves.
+     *
+     * WHY window/bank AND NOT section_t. The plan this comes from stored a
+     * whole section_t per entry (8 bytes: rom_address + size), but
+     * Detail::CallInSection never reads `size`, and it re-derives the window
+     * index and bank from `rom_address` on EVERY call -- work that is fully
+     * determined at the point ::GetCallable runs. Storing the two resolved
+     * bytes instead makes an entry 4 bytes rather than 10 (a 16-entry
+     * dispatch table: 64 bytes, not 160) and removes the runtime arithmetic
+     * from the call path entirely.
+     *
+     * A tag always names a real bank, so there is no "already mapped" case to
+     * encode -- see ::bank_layout's own note on why that escape hatch is gone.
+     */
+    template <typename Ret, typename... Args>
+    struct callable_t {
+        Ret (*fn)(Args...);  ///< the target, as an ordinary 16-bit pointer
+        u8 window;           ///< 0 = window1Control ($8000), 1 = window2Control ($A000)
+        u8 bank;             ///< value written to R6/R7, already un-biased
+    };
+
     /// Return-type extraction for a plain function pointer, used by mmc3::Call.
+    /// Also names the matching ::callable_t, so ::GetCallable can spell its own
+    /// return type without the caller restating the signature.
     template <typename T> struct function_traits;
 
     /**
@@ -544,6 +579,45 @@ public:
      */
     template <auto Fn, typename... Args>
     static FIXED auto Call(Args &&...args) -> typename function_traits<decltype(Fn)>::return_type;
+
+    /**
+     * @brief Resolves a tagged function into a storable, self-describing
+     *        ::callable_t. The compile-time half of runtime dispatch.
+     *
+     * Call it wherever the function is still nameable as a literal, then store
+     * or pass the result freely -- it needs no tag, no template argument, and
+     * no bank_of<> lookup ever again:
+     *
+     *     MMC3_BANKED(".prg_rom_enemies_a", enemiesA, void, UpdateGoomba, Entity*);
+     *     MMC3_BANKED(".prg_rom_enemies_b", enemiesB, void, UpdateBoss,   Entity*);
+     *
+     *     // two DIFFERENT domains -- no single bank_of<> is right for both.
+     *     // Spell the element type: `constexpr auto table[]` cannot deduce
+     *     // from a braced list, so the plan's original shorthand won't build.
+     *     constexpr mmc3::callable_t<void, Entity*> table[] = {
+     *         GetCallable<UpdateGoomba>(), GetCallable<UpdateBoss>() };
+     *
+     *     Call(table[entity.type], &entity);   // runtime index, correct bank
+     *
+     * `constexpr` so a table like that lands in ROM fully resolved, with the
+     * window/bank arithmetic folded away at compile time. That requires the
+     * tag's bank_layout<Tag>::section() to be constexpr, which is the
+     * preferred shape anyway (see ::bank_layout).
+     */
+    template <auto Fn>
+    static constexpr auto GetCallable() ->
+        typename function_traits<decltype(Fn)>::callable_type;
+
+    /**
+     * @brief Calls a ::callable_t, banking in whatever it says it needs.
+     *
+     * The runtime counterpart to ::Call<Fn>: an ordinary overload rather than
+     * a template on Fn, taking the already-resolved value ::GetCallable
+     * produced. Same switch-run-restore as every other farcall here, minus the
+     * address arithmetic, which ::GetCallable already did.
+     */
+    template <typename Ret, typename... Args, typename... Actual>
+    static FIXED Ret Call(const callable_t<Ret, Args...> &c, Actual &&...args);
 
     /**
      * @brief Runs an arbitrary block under Fn's resolved window, instead of
@@ -644,12 +718,38 @@ private:
          */
         template <typename TReturn, u8 Index, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInWindow(Register<Index> &reg, u8 bank, TFunc fn) {
-            SHADOW(reg) {
-                SwitchBank(reg, bank);
-                return fn();
+            // DELIBERATELY NOT ::SHADOW, and this is a measured decision, not a
+            // style one. tech::shadow_scope is a real object: a tuple of
+            // REFERENCES to the registers, a tuple of saved copies, and a bool
+            // loop guard. All of it has to stay live across fn(), and 4 bytes of
+            // live state is more than llvm-mos will keep in registers -- so the
+            // thunk allocated a soft-stack frame, which then cost a frame-pointer
+            // adjust in and out plus four __rc20-23 pushes and pulls to free up
+            // the pointer registers to address it. Measured on demo.nes: 116 of
+            // the thunk's ~171 cycles were that frame; the bank switch itself is
+            // 35.
+            //
+            // Nothing here needs a general scope. The register is a global whose
+            // address is a link-time constant, so the reference in shadow_scope
+            // is 2 bytes spent re-deriving something the linker already knows,
+            // and there is exactly one register, so the loop guard guards
+            // nothing. Saving the one byte by hand leaves live state small enough
+            // to sit on the hardware stack.
+            //
+            // The restore must still happen after fn() returns and must go
+            // through set() (shadow AND hardware), which is what the explicit
+            // non-void branch below preserves -- Register::operator=(u8) is the
+            // same write shadow_scope's destructor performed.
+            const u8 saved = reg.get();
+            SwitchBank(reg, bank);
+            if constexpr (__is_same(TReturn, void)) {
+                fn();
+                reg.set(saved);
+            } else {
+                TReturn result = fn();
+                reg.set(saved);
+                return result;
             }
-            __builtin_unreachable(); // SHADOW's scope always runs its body
-                                     // exactly once and returns.
         }
 
         /**
@@ -700,6 +800,7 @@ private:
 template <typename R, typename... A>
 struct mmc3::function_traits<R (*)(A...)> {
     using return_type = R;
+    using callable_type = mmc3::callable_t<R, A...>;
 };
 
 template <typename TReturn, typename TFunc>
@@ -724,6 +825,44 @@ FIXED auto mmc3::Call(Args &&...args) -> typename function_traits<decltype(Fn)>:
         [&]() -> TReturn { return Fn(std::forward<Args>(args)...); });
 #else
     return Fn(std::forward<Args>(args)...);
+#endif
+}
+
+template <auto Fn>
+constexpr auto mmc3::GetCallable() ->
+    typename function_traits<decltype(Fn)>::callable_type {
+#ifdef TARGET_NES
+    using L = typename bank_of<Fn>::layout;
+    const section_t s = L::section();
+    // Identical derivation to Detail::CallInSection, done ONCE here instead of
+    // on every call -- including the same bank+1 bias, where a zero high half
+    // means "nothing encoded" and the window index doubles as the bank.
+    const u16 vma = static_cast<u16>(s.rom_address);
+    const u8 window = static_cast<u8>((vma - Detail::kWindowBase) / Detail::kWindowSize);
+    const u8 encodedBank = static_cast<u8>(s.rom_address >> 16);
+    return { Fn, window, static_cast<u8>(encodedBank != 0 ? encodedBank - 1 : window) };
+#else
+    // Off-NES there are no banks and bank_layout<Tag> is typically not even
+    // specialized (the demo guards its specializations with TARGET_NES), so
+    // resolving anything here would be both meaningless and a compile error.
+    // The window/bank fields go unread -- Call() below ignores them off-NES.
+    return { Fn, 0, 0 };
+#endif
+}
+
+template <typename Ret, typename... Args, typename... Actual>
+FIXED Ret mmc3::Call(const callable_t<Ret, Args...> &c, Actual &&...args) {
+#ifdef TARGET_NES
+    // window1Control and window2Control are DIFFERENT TYPES (Register<6> vs
+    // Register<7>), so a runtime window choice cannot be a variable -- it has
+    // to be a branch between two instantiations. Same two-way shape
+    // Detail::CallInSection ends in, without the arithmetic that precedes it
+    // there.
+    auto invoke = [&]() -> Ret { return c.fn(static_cast<Actual &&>(args)...); };
+    if (c.window == 1) return Detail::CallInWindow<Ret>(window2Control, c.bank, invoke);
+    return Detail::CallInWindow<Ret>(window1Control, c.bank, invoke);
+#else
+    return c.fn(static_cast<Actual &&>(args)...);
 #endif
 }
 
