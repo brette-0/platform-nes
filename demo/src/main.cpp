@@ -7,7 +7,12 @@
 #include "modes/world.hpp"
 #include "banks.hpp"
 
-auto gameMode = eGameModes::Level;
+// Spelled out rather than `auto`: main.hpp already declares this
+// `extern eGameModes gameMode`, and GCC rejects a redeclaration that swaps an
+// explicit type for a placeholder one (clang allows it). Every devkitPro
+// target -- GBA, DS, DSi, 3DS, Wii, Wii U, Switch -- is GCC, so `auto` here
+// broke all seven while the clang targets (NES, linux, mac, win, web) built.
+eGameModes gameMode = eGameModes::Level;
 
 void (*pNMI)();
 void (*pIRQ)();
