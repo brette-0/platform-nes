@@ -102,19 +102,21 @@ template <> struct mmc3::bank_layout<audio_data_tag> {
     static constexpr mmc3::section_t section() { return { 0x0004a000u, 0x2000u }; }
 };
 
+#endif
+
 /**
- * @brief Runs @p block with the audio code bank AND its data bank mapped.
+ * @brief This project's two audio banks, bound into audio::InBanks.
  *
- * Both, because the engine reads song data while executing. Wrapping the call
- * rather than binding each entry point with MMC3_BIND: a bind switches one
- * bank, and every audio call needs two.
+ * The REQUIREMENT (code and data mapped together, in different windows) is the
+ * library's and lives in audio.hpp. All this supplies is which banks -- the
+ * one thing the library cannot know. Off-NES it collapses to a plain call, so
+ * call sites are identical on every backend.
  */
 template <typename Block>
 decltype(auto) InAudioBanks(Block &&block) {
-    return mmc3::CallPairedBlock<audio_tag, audio_data_tag>(
+    return audio::InBanks<mmc3, audio_tag, audio_data_tag>(
         static_cast<Block &&>(block));
 }
-#endif
 
 /**
  * @brief Maps the level domain into both switchable windows. Call once, on

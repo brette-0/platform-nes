@@ -179,6 +179,38 @@ void SfxSamplePlay(u8 index);
 void Init(u8 region = 0);
 
 /**
+ * @brief Runs @p block with everything the audio backend needs mapped.
+ *
+ * THIS IS WHERE THE BACKEND'S OWN REQUIREMENT LIVES, and it belongs to the
+ * library rather than to any game: the engine WALKS ITS SONG DATA WHILE IT
+ * EXECUTES, so the data has to be mapped at the same time as the code, which
+ * means the two cannot share a bank window. A caller that maps only the code
+ * bank gets an engine reading whatever else happens to be at that address --
+ * silence, noise, or a crash, with no diagnostic. No game should have to
+ * rediscover that by reading famistudio_update's disassembly.
+ *
+ * THE MAPPER IS A TEMPLATE PARAMETER, not an include, which is what lets this
+ * requirement live in the portable header instead of an NES-only one. Nothing
+ * here names MMC3, includes a mapper, or knows a bank exists -- @p Mapper
+ * supplies CallPairedBlock, @p CodeTag and @p DataTag are the consuming
+ * project's own bank map, and off-NES the whole thing is the block itself.
+ * Callers therefore spell audio the same way on every backend:
+ *
+ *     InAudioBanks([] { audio::Update(); });   // one project-side alias
+ *
+ * and that line compiles to a plain call on SDL3, GBA, Switch and the rest.
+ */
+template <typename Mapper, typename CodeTag, typename DataTag, typename Block>
+decltype(auto) InBanks(Block &&block) {
+#ifdef TARGET_NES
+    return Mapper::template CallPairedBlock<CodeTag, DataTag>(
+        static_cast<Block &&>(block));
+#else
+    return block();
+#endif
+}
+
+/**
  * @brief Drives the audio engine forward by one frame.
  *
  * Must be called once per video frame to advance the FamiStudio player
