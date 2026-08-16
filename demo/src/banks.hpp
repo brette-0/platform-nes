@@ -47,6 +47,7 @@
 struct audio_tag      {}; ///< .prg_rom_audio, bank 2, window 1. Engine + pnes audio module.
 struct audio_data_tag {}; ///< .prg_rom_audio_data, bank 3, WINDOW 2. Songs + SFX.
 struct level_tag {}; ///< .prg_rom_level, physical banks 0+1, BOTH windows. See ::EnterLevelBanks.
+struct cold_tag  {}; ///< .prg_rom_cold, bank 4, window 1. Code that runs once and never again.
 /// @}
 
 #ifdef TARGET_NES
@@ -102,7 +103,47 @@ template <> struct mmc3::bank_layout<audio_data_tag> {
     static constexpr mmc3::section_t section() { return { 0x0004a000u, 0x2000u }; }
 };
 
+/**
+ * @brief The COLD domain: bank 4, window 1 ($8000, R6). 0x00058000 = bank 4.
+ *
+ * Home for code that runs once, ever, and doesn't earn permanent residency in
+ * a domain that has to stay mapped -- level's own one-time level-entry setup,
+ * currently. UNLIKE ::level_tag this IS reachable by farcall: it only needs
+ * one window, so an ordinary mmc3::CallInBlock<cold_tag> (see ::InColdBank,
+ * below) switches, runs, and restores window 1 -- safe to call even from
+ * inside level's own domain, the same way ::InAudioBanks already is (the
+ * trampoline lives in the fixed bank, unaffected by whatever window 1 shows
+ * mid-call).
+ */
+template <> struct mmc3::bank_layout<cold_tag> {
+    static constexpr mmc3::section_t section() { return { 0x00058000u, 0x2000u }; }
+};
+
 #endif
+
+/**
+ * @brief Pins a function into the COLD bank's own section (.prg_rom_cold).
+ *
+ * Placement and the ::InColdBank/CallInBlock<cold_tag> call site are
+ * independent -- nothing checks they agree (see this file's own header
+ * comment, "THREE THINGS MUST AGREE"). A function reached through
+ * ::InColdBank must carry ::COLD or it stays wherever its namespace's own
+ * placement rule already sends it (e.g. level's own `.text._ZN5level*`
+ * wildcard in demo/link.ld) and the farcall banks in the wrong 8 KiB.
+ * Expands to nothing off-NES, same as mmc3.hpp's ::FIXED.
+ */
+#define COLD CREATE_SEGMENT_KEYWORD(".prg_rom_cold")
+
+/**
+ * @brief Runs @p block once, in the COLD bank, restoring window 1 after.
+ *
+ * Off-NES this collapses to a plain call (::CallInBlock does), so call sites
+ * are identical on every backend -- same shape as ::InAudioBanks.
+ */
+template <typename Block>
+decltype(auto) InColdBank(Block &&block) {
+    return mmc3::CallInBlock<cold_tag>(static_cast<Block &&>(block));
+}
 
 /**
  * @brief This project's two audio banks, bound into audio::InBanks.
@@ -118,21 +159,6 @@ decltype(auto) InAudioBanks(Block &&block) {
         static_cast<Block &&>(block));
 }
 
-/**
- * @brief Maps the level domain into both switchable windows. Call once, on
- *        entry to level mode; there is no matching "leave".
- *
- * R6 = 0 ($8000-$9FFF), R7 = 1 ($A000-$BFFF) -- the two banks prg_rom_level
- * spans, in the order the linker laid them out. Must be called from code that
- * is NOT in either window, i.e. from $C000-$DFFF or ::FIXED, or it unmaps
- * itself mid-execution. main.cpp's dispatcher is ::FIXED and satisfies this.
- *
- * Audio farcalls made from inside level still work untouched: their thunks
- * live in the fixed bank, save both shadows, map the audio pair, and restore
- * level's pair before returning. What must NOT happen is an interrupt reaching
- * code that is currently banked out -- which is why level's vector handlers
- * are ::FIXED (level.cpp).
- */
 inline void EnterLevelBanks() {
 #ifdef TARGET_NES
     mmc3::SwitchBank(mmc3::window1Control, 0);

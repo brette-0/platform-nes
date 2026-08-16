@@ -47,14 +47,12 @@
 PROVIDE(__prg_rom_size = 64);
 PROVIDE(__chr_rom_size = 8);
 
-/* Four banked domains, claiming EVERY bank the resident image doesn't use:
- * 64 KiB = 8 banks, of which 4 are resident (3 windows + the fixed bank), so
- * banks 0-3 are ours to name. Declaring all four leaves prg_rom_spare at
- * exactly 0 bytes -- no padding anywhere in this ROM. An unused domain costs
- * the same zeros the padding did, but is ready to fill without touching the
- * layout. MUST be set before `INCLUDE mmc3-helper.ld`: it is what shortens
- * prg_rom_spare, and PROVIDE() only takes its first-encountered value. */
-PROVIDE(__mmc3_reserved_banks = 4);
+/* Five banked domains, claiming banks the resident image doesn't use: level
+ * (0-1), audio (2), audio_data (3), and cold (4) -- one bank pulled out of
+ * what would otherwise be prg_rom_spare (see banks.hpp's ::cold_tag). MUST be
+ * set before `INCLUDE mmc3-helper.ld`: it is what shortens prg_rom_spare, and
+ * PROVIDE() only takes its first-encountered value. */
+PROVIDE(__mmc3_reserved_banks = 5);
 
 /* ONE resident window ($C000-$DFFF, the hardwired second-to-last bank), not
  * the default three. Both switchable windows are handed to the level domain
@@ -160,6 +158,12 @@ MEMORY {
    * two switchable windows, so a same-window pair would have the data
    * immediately displace the code. mmc3::CallPairedBlock static_asserts that
    * the two tags differ here. */
+  /* THE COLD BANK: bank 4, window 1 ($8000, R6). Home for level code that
+   * only ever runs once (level's own one-time setup, currently) -- reached by
+   * an ordinary mmc3::CallInBlock<cold_tag>, not a permanent switch like
+   * level's own domain, since nothing here needs to stay mapped once the call
+   * returns. See banks.hpp's ::cold_tag. */
+  prg_rom_cold : ORIGIN = 0x00058000, LENGTH = 0x2000  /* bank 4, window 1 */
 }
 
 /* Published for the build-time space report -- see mmc3-helper.ld's own
@@ -168,6 +172,8 @@ __space_origin_prg_rom_audio = ORIGIN(prg_rom_audio);
 __space_length_prg_rom_audio = LENGTH(prg_rom_audio);
 __space_origin_prg_rom_audio_data = ORIGIN(prg_rom_audio_data);
 __space_length_prg_rom_audio_data = LENGTH(prg_rom_audio_data);
+__space_origin_prg_rom_cold = ORIGIN(prg_rom_cold);
+__space_length_prg_rom_cold = LENGTH(prg_rom_cold);
 
 SECTIONS {
   /* Level's own placement rule is NOT here -- it is above `INCLUDE
@@ -184,6 +190,7 @@ SECTIONS {
     *(.prg_rom_music .prg_rom_music.*)
     *(.prg_rom_sfx .prg_rom_sfx.*)
   } >prg_rom_audio_data
+  .prg_rom_cold : { *(.prg_rom_cold .prg_rom_cold.*) } >prg_rom_cold
 }
 
 /* Moves the C writable arena (.data/.bss/heap, and the dynamic soft stack
@@ -236,15 +243,16 @@ ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
  *
  * Order is the whole layout contract:
  * - The banked domains come FIRST, and THIS ORDER IS WHAT ASSIGNS THEIR BANK
- *   NUMBERS: 001 -> bank 0, 002 -> bank 1, 003 -> bank 2, 004 -> bank 3,
- *   since a bank is just file offset / 0x2000. Their MEMORY ORIGINs above
- *   and their section()s in demo/src/banks.hpp both hard-code those same
- *   numbers; reordering these four lines silently re-banks every domain and
- *   nothing will warn you.
+ *   NUMBERS: level -> banks 0-1, audio -> bank 2, audio_data -> bank 3,
+ *   cold -> bank 4, since a bank is just file offset / 0x2000. Their MEMORY
+ *   ORIGINs above and their section()s in demo/src/banks.hpp both hard-code
+ *   those same numbers; reordering these lines silently re-banks every
+ *   domain and nothing will warn you.
  * - prg_rom_spare is the zero padding that makes the file exactly
- *   __prg_rom_size. It is EMPTY in this build -- __mmc3_reserved_banks = 4
- *   hands all four leftover banks to the domains above -- and it is the only
- *   thing that grows if __prg_rom_size does without new domains to match.
+ *   __prg_rom_size. __mmc3_reserved_banks = 5 hands all five leftover banks
+ *   to the domains above, leaving prg_rom_spare whatever remains -- 1 bank at
+ *   this file's current __prg_rom_size -- and it is the only thing that grows
+ *   if __prg_rom_size does without new domains to match.
  * - prg_rom_switchable then prg_rom_fixed occupy the top banks, in that
  *   order: real MMC3 hardware always shows the true last bank at $E000, and
  *   the second-to-last at $C000 -- which is prg_rom_switchable's own third
@@ -253,6 +261,7 @@ OUTPUT_FORMAT {
   FULL(prg_rom_level)
   FULL(prg_rom_audio)
   FULL(prg_rom_audio_data)
+  FULL(prg_rom_cold)
   FULL(prg_rom_spare)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)

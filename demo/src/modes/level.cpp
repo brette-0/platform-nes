@@ -106,7 +106,26 @@ namespace level {
     // call from main.cpp's dispatcher, which maps both of level's banks first
     // (EnterLevelBanks) -- not by a farcall, which can only switch one window
     // and would leave half the domain missing.
-    void main() {
+    // Everything level entry needs done exactly once -- never again for the
+    // rest of the level's lifetime -- lives here instead of inline in ::main,
+    // so it can be farcalled into the COLD bank (banks.hpp's ::cold_tag)
+    // instead of permanently occupying the level domain's own tight 16 KiB.
+    //
+    // Safe to call from inside level's own domain (window1 = bank 0) even
+    // though this runs in a DIFFERENT bank (bank 4, also window 1): the
+    // farcall trampoline is ::FIXED, so it survives window 1 changing under
+    // it, and window 2 (level's bank 1, holding ColMapStamp et al.) is never
+    // touched by this call -- only window 1 moves. Ordinary in-domain calls
+    // this makes into level's own bank 1 (ColMapSeed -> ColMapStamp) resolve
+    // exactly as they did when inlined into ::main, because window 2 never
+    // stops showing that bank while this runs.
+    //
+    // noinline: this is the ONLY call site, so without it LTO inlines the
+    // whole body straight into CallInBlock's ::FIXED trampoline instead of
+    // leaving it in ::COLD's own section -- defeating the point (confirmed
+    // empirically: prg_rom_cold measured 0 bytes used and prg_rom_fixed
+    // ballooned by ~5.2 KiB before this attribute was added).
+    static COLD __attribute__((noinline)) void EnterLevelSetup() {
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
         mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
@@ -185,6 +204,10 @@ namespace level {
 
         apu::DisableFrameIRQ();
         apu::DisableDMCIRQ();
+    }
+
+    void main() {
+        InColdBank(EnterLevelSetup);
         irq::EnableInterrupts();
         // ReSharper disable once CppDFAEndlessLoop
         while (!quit) {
