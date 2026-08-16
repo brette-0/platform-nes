@@ -9,16 +9,13 @@
  * framebuffer with the same register conventions, so application code
  * can compile unchanged against either backend.
  *
- * Two areas benefit from extra care:
+ * Two areas need care:
  *
- * - **CHR ROM linkage.** The ::CHARACTER_ROM macro places tile data in
- *   a platform-specific section (`.chr_rom` on NES, `__DATA,chr_rom`
- *   on Mach-O, etc.) so the linker can lay it out on the 8 KB
- *   boundary the PPU requires. Use ::CHARACTER_ROM_ALIGN to force
- *   that alignment explicitly.
- * - **Video-memory writes.** Register-poking the PPU outside VBlank
- *   corrupts the display. The ::VRAM block wraps a safe access window
- *   by toggling ::PPUMASK around the body.
+ * - **CHR ROM linkage.** ::CHARACTER_ROM places tile data in a
+ *   platform-specific section so the linker lands it on the PPU's 8 KB
+ *   boundary; ::CHARACTER_ROM_ALIGN forces that explicitly.
+ * - **Video-memory writes.** Poking the PPU outside VBlank corrupts the
+ *   display; the ::VRAM block toggles ::PPUMASK around its body.
  */
 #pragma once
 
@@ -61,33 +58,30 @@ extern const u16 PatternTables;
 /* ------------------------------------------------------------------------ *
  *  Symbolic CHR tiles (#embed)                                             *
  *                                                                          *
- *  Unlike ::CHARACTER_ROM (which `.incbin`s a blob and exposes only its    *
- *  link-time start/end), these macros pull each `.chr` file in via         *
- *  `#embed`, so the file's size is a *compile-time* constant. From that we  *
- *  derive, with zero runtime cost, a `<name>_tile` constant: the blob's    *
- *  base CHR-tile index (byte offset / 16). Tile ids are never hand-        *
- *  assigned and are usable inside `constexpr` tables (e.g. metatiles).     *
+ *  Unlike ::CHARACTER_ROM, which `.incbin`s a blob and exposes only its    *
+ *  link-time start/end, these `#embed` each `.chr` file so its size is a   *
+ *  compile-time constant. From that comes a `<name>_tile` constant -- the  *
+ *  blob's base tile index, byte offset / 16 -- at zero runtime cost. Tile  *
+ *  ids are never hand-assigned and work inside `constexpr` tables.         *
  *                                                                          *
  *  Authoring (one ordered list, e.g. in a `chr.hpp` shared header):        *
  *                                                                          *
  *      CHARACTER_ROM_BEGIN(chrSprite0)                                     *
- *      #embed "../../chr/sprites/sprite0.chr"                              *
+ *      #embed "chr/sprites/sprite0.chr"                                   *
  *      CHARACTER_ROM_END(chrSprite0, CHR_ORIGIN);   // first: chains origin *
  *                                                                          *
  *      CHARACTER_ROM_BEGIN(chrBush)                                        *
- *      #embed "../../chr/tiles/static/bush.chr"                            *
+ *      #embed "chr/tiles/bush.chr"                                         *
  *      CHARACTER_ROM_END(chrBush, chrSprite0);      // prev = line above   *
  *      ...                                                                 *
- *      CHARACTER_ROM_BEGIN(chrCoin)                                        *
- *      #embed "../../chr/tiles/dynamic/coin.chr"                           *
- *      CHARACTER_ROM_END_FINAL(chrCoin, chrBush, 0x2000); // last: + image *
+ *      CHARACTER_ROM_BEGIN(chrLast)                                        *
+ *      #embed "chr/tiles/last.chr"                                         *
+ *      CHARACTER_ROM_END_FINAL(chrLast, chrBush, 0x2000); // last: + image *
  *                                                                          *
- *  Just `#include` the list wherever you use tile ids. The FINAL blob's    *
- *  CHARACTER_ROM_END_FINAL emits the single padded CHR image as an `inline`*
- *  object, so the linker folds it to one copy no matter how many TUs       *
- *  include the list -- no dedicated emit TU and no magic define. (One TU is*
- *  cheapest; extra includers are merely safe.) `#embed` cannot be produced *
- *  by a macro, so the `#embed` line is written literally between BEGIN/END.*
+ *  `#include` the list wherever you use tile ids. CHARACTER_ROM_END_FINAL  *
+ *  emits the padded CHR image as an `inline` object, so the linker folds   *
+ *  it to one copy however many TUs include the list. `#embed` cannot come  *
+ *  from a macro, so that line is written literally between BEGIN/END.      *
  *                                                                          *
  *  Byte order (hence every `_tile`) follows the `prev` chain, not source   *
  *  position, so ids and placement can never disagree.                      *
@@ -174,24 +168,17 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
  *        index @p to_tile -- e.g. align background graphics to the $1000
  *        pattern-table boundary while sprites stay in pattern table 0.
  *
- * The PPU addresses background and sprite graphics through two independent 4 KB
- * pattern tables ($0000 and $1000, ::CHR_TILES_PER_TABLE tiles each), selected
- * separately by PPUCTRL (::ppu::ctrl::BG_ADDR / ::ppu::ctrl::SPRITE_ADDR). A blob
- * physically placed at tile 256 lives at $1000 and is addressed as PT-relative
- * tile 0 once BG_ADDR selects $1000 -- which is exactly the value its
- * `<name>_tile` takes, because these ids are `u8` and wrap mod 256 at the table
- * boundary. So a pad here keeps every downstream `_tile` correct for free.
+ * The PPU uses two independent 4 KB pattern tables, selected by PPUCTRL. A blob
+ * at tile 256 lives at $1000 and is addressed as PT-relative tile 0 -- exactly
+ * what its `<name>_tile` holds, since these ids are `u8` and wrap at the table
+ * boundary. So a pad keeps every downstream `_tile` correct for free.
  *
- * Like every link in the chain it defines `<name>_tile`, `<name>_ntiles`, and
- * `<name>_accum`, so the following blob simply names this pad as its @p prev.
- * That means it needs a name of its own even though nothing ever reads it back
- * -- if the gap sits right after a real blob's close, prefer
- * ::CHARACTER_ROM_END_PAD_TO instead, which folds the pad into that blob and
- * avoids the throwaway identifier. Reach for this one when the gap isn't
- * anchored to a blob you're closing right now (e.g. padding straight off
- * ::CHR_ORIGIN):
+ * Defines the usual `_tile`/`_ntiles`/`_accum`, so the next blob names this pad
+ * as its @p prev -- hence the otherwise-unread name. Prefer
+ * ::CHARACTER_ROM_END_PAD_TO when the gap follows a blob you are closing; use
+ * this when it does not:
  *
- *      CHARACTER_ROM_PAD_TO(chrBgGap, chrMushletStanding, CHR_TILES_PER_TABLE);
+ *      CHARACTER_ROM_PAD_TO(chrBgGap, chrPrev, CHR_TILES_PER_TABLE);
  *      CHARACTER_ROM_BEGIN(chrBush)                       // first BG tile
  *      #embed "..."
  *      CHARACTER_ROM_END(chrBush, chrBgGap);
@@ -219,18 +206,16 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
  *        index @p to_tile with zero-fill instead of stopping where the
  *        `#embed`ed data ends.
  *
- * Use this instead of a plain ::CHARACTER_ROM_END followed by a standalone
- * ::CHARACTER_ROM_PAD_TO when the gap sits immediately after the blob you're
- * closing -- the common case (e.g. rounding the last sprite up to the
- * background pattern table). The pad becomes part of @p name itself, so the
- * next blob just names @p name as its `prev`, same as any other link -- no
- * throwaway identifier for the gap:
+ * Use instead of ::CHARACTER_ROM_END plus a standalone ::CHARACTER_ROM_PAD_TO
+ * when the gap follows the blob being closed -- the common case. The pad becomes
+ * part of @p name, so the next blob names @p name as its `prev` like any other
+ * link, with no throwaway identifier:
  *
- *      CHARACTER_ROM_END_PAD_TO(chrMushletStanding, chrWand,
+ *      CHARACTER_ROM_END_PAD_TO(chrLastSprite, chrPrev,
  *                                CHR_TILES_PER_TABLE);   // last sprite
  *      CHARACTER_ROM_BEGIN(chrBush)                       // first BG tile
  *      #embed "..."
- *      CHARACTER_ROM_END(chrBush, chrMushletStanding);
+ *      CHARACTER_ROM_END(chrBush, chrLastSprite);
  *
  * @param name    This blob's identifier (as with ::CHARACTER_ROM_END).
  * @param prev    The blob declared immediately before (or ::CHR_ORIGIN).
@@ -276,21 +261,16 @@ constexpr unsigned CHR_TILES_PER_TABLE = 256;
  * @brief Close the FINAL blob in the chain and, in the emitting TU, emit the
  *        whole cartridge's CHR ROM image.
  *
- * Use this in place of ::CHARACTER_ROM_END for the last blob. It does
- * everything ::CHARACTER_ROM_END does, then materializes the single padded CHR
- * ROM image from this blob's accumulation (i.e. the entire chain) and places it
- * in the CHR section.
+ * Use in place of ::CHARACTER_ROM_END for the last blob: does everything that
+ * does, then materializes the padded CHR image from the whole chain's
+ * accumulation into the CHR section.
  *
- * @p total_bytes is the size of the *entire* CHR ROM -- not the 8 KB the PPU
- * sees at once. The mapper (e.g. MMC3) banks windows of this image into the
- * PPU's fixed $0000-$1FFF aperture, so it may be anything from 8 KB up to the
- * mapper's maximum (e.g. 256 KB). There is **no default**: omit it and the
- * preprocessor rejects the call.
+ * @p total_bytes is the ENTIRE CHR ROM, not the 8 KB the PPU sees at once -- the
+ * mapper banks windows of it into $0000-$1FFF. No default; omitting it is a
+ * preprocessor error.
  *
- * The image object is named internally; the caller neither passes nor sees a
- * name for it. Because that name is fixed, a second CHARACTER_ROM_END_FINAL in
- * the emitting TU is a redefinition error -- "exactly one CHR ROM image" is
- * enforced by the compiler, not by convention.
+ * The image object is named internally, so a second CHARACTER_ROM_END_FINAL in
+ * one TU is a redefinition error: one CHR image, enforced by the compiler.
  *
  * @param name        This (final) blob's identifier.
  * @param prev        The blob declared immediately before (or ::CHR_ORIGIN).
@@ -418,18 +398,12 @@ namespace ppu {
      *        by that macro alongside the image itself, so it always matches
      *        exactly what's actually embedded, on every target.
      *
-     * Declared unconditionally (not `#ifndef TARGET_NES`) because
-     * ::CHARACTER_ROM_END_FINAL itself is called unconditionally by every
-     * game (it embeds CHR data for the real NES ROM too) and a preprocessor
-     * macro's own replacement list can't itself branch on TARGET_NES to skip
-     * defining this on NES -- so the symbol exists there too, simply unused
-     * (real NES hardware needs no software CHR-address translation at all).
-     * A mapper's off-NES tile-address translator (e.g.
-     * src/emu/mappers/mmc3.cpp's ::mmc3::GetTileLMA) wraps its resolved
-     * offset against this so a bank register value that addresses past what
-     * this build actually embeds can't read out of bounds of ::CHR_ROM --
-     * the software counterpart to how a real, physically-smaller CHR-ROM
-     * chip's own address pins simply alias/wrap past its own capacity.
+     * Declared unconditionally, since ::CHARACTER_ROM_END_FINAL is called on
+     * every target and a macro cannot branch on TARGET_NES -- so the symbol
+     * exists on NES too, simply unused. Off-NES tile-address translators wrap
+     * their resolved offset against this, so a bank register addressing past
+     * what the build embeds cannot read out of bounds: the software
+     * counterpart to a smaller CHR chip's address pins aliasing.
      */
     extern const unsigned chrRomBytes;
 
@@ -528,22 +502,15 @@ namespace ppu {
      *        ::patternTable with -- i.e. that address resolved through
      *        whatever CHR banks are currently switched in.
      *
-     * Not a fetch: this returns an address, the caller still does the array
-     * read. Weak default (src/emu/ppu.cpp): identity, matching a board with
-     * no CHR bank switching at all. A bank-switching mapper's own emu-side
-     * TU (e.g. src/emu/mappers/mmc3.cpp) supplies a strong definition of this
-     * exact symbol that resolves through its own currently-switched banks
-     * instead; since a build's game code always references other symbols
-     * from that same mapper TU directly (bank-select calls, IRQ scheduling,
-     * ...), the mapper's object file is never "optional" in the link, so its
-     * strong definition always wins over the weak one with no runtime
-     * dispatch and no setup call needed.
+     * Not a fetch: returns an address, the caller does the read. Weak default is
+     * identity, matching a board with no CHR banking; a bank-switching mapper's
+     * emu-side TU supplies a strong definition resolving through its own
+     * switched banks. Game code always references other symbols from that TU,
+     * so it is never optional in the link and the strong definition wins with
+     * no runtime dispatch.
      *
-     * The emu PPU's own per-pixel background/sprite fetches (src/emu/ppu.cpp)
-     * call this directly for every tile. The native-hardware-2D backends
-     * (GBA/DS/3DS/GameCube-Wii), which bake a whole tile atlas rather than
-     * fetching per pixel, also call it -- see ::chrGeneration for how they
-     * know when to re-bake.
+     * Called per tile by the emu PPU's per-pixel fetches, and by the
+     * native-2D backends when baking their tile atlas -- see ::chrGeneration.
      *
      * @param tileVMA PPU pattern-table address, 0x0000-0x1FFF.
      * @return        Byte offset to index ::CHR_ROM with.
@@ -572,14 +539,10 @@ namespace ppu {
      *        $2000/$2400/$2800/$2C00 order, however many quadrants the linked
      *        board's ::nametableRows spans.
      *
-     * Weak default (src/emu/ppu.cpp): `return VideoRAM[logical];` -- every
-     * board's storage is the console's own ::VideoRAM unless a mapper says
-     * otherwise. A board that routes some of that space to its own
-     * cartridge-side storage instead (e.g. an MMC3 four-screen board's extra
-     * 2 KiB VRAM chip answering the $2800/$2C00 quadrants) supplies a strong
-     * definition of this exact symbol in its own emu-side TU, the same
-     * weak/strong relationship as ::ResolveTile -- see that function's own
-     * comment for why the mapper's object file is always linked regardless.
+     * Weak default is `VideoRAM[logical]`. A board routing part of that space to
+     * cartridge-side storage -- e.g. a four-screen board's extra 2 KiB chip
+     * answering $2800/$2C00 -- supplies a strong definition, same relationship
+     * as ::ResolveTile.
      *
      * @param logical Flattened nametable/attribute offset.
      * @return        The byte at that offset, from whichever storage answers it.
@@ -604,45 +567,30 @@ namespace ppu {
      *        cartridge VRAM's row, routed through ::ReadNametable/
      *        ::WriteNametable).
      *
-     * The emu PPU's per-pixel vertical scroll walk (src/emu/ppu.cpp's
-     * ::emu::GenerateFrame) and the native-hardware-2D backends' own
-     * tilemap bakes need this to know how far it's safe to let the
-     * background wrap vertically before folding back to row 0 -- without it,
-     * a board with only 1 row of real storage would have no way to stop the
-     * walk from deriving an address into storage it never allocated.
+     * The vertical scroll walk and the native-2D tilemap bakes need this to know
+     * how far the background may wrap before folding back to row 0; without it a
+     * one-row board could derive an address into storage it never allocated.
      *
-     * Weak default (src/emu/ppu.cpp): `1`, same idiom as ::sfxs/::nSfx
-     * (audio.hpp) -- a board that needs a different value supplies its own
-     * strong definition of this exact symbol, same weak/strong relationship
-     * as ::ResolveTile.
+     * Weak default `1`; a board needing more supplies a strong definition, same
+     * relationship as ::ResolveTile.
      */
     extern const u8 nametableRows;
 
     /**
-     * @brief A prompt, not an instruction: called once, from
-     *        ::emu::InitMemory right after it allocates ::VideoRAM. A board
-     *        that routes part of nametable space to its own cartridge-side
-     *        storage (see ::ReadNametable) allocates that storage here,
-     *        sized via ::video::nametable_row_bytes() -- the same per-row
-     *        page count the emu PPU's own render walk (src/emu/ppu.cpp's
-     *        ::emu::GenerateFrame) and the nametable-write API
-     *        (::CartesianToAddress's internal xy_to_nt_addr) already agree
-     *        on, so the cart-routed row's boundary always lines up exactly
-     *        with where those callers stop treating an offset as row 0.
-     *        Deliberately NOT sized from whatever ::emu::InitMemory happened
-     *        to allocate ::VideoRAM with (::video::vram_bytes()): that value
-     *        can be larger than one row's actual footprint on viewports
-     *        ::video::vram_bytes()'s own bank-count rounds up more
-     *        aggressively than ::video::nametable_row_bytes() does, and
-     *        sizing from it once left a real row-1 boundary mismatch (a
-     *        wider-than-native desktop window, and structurally 3DS/Switch/
-     *        Wii U's fixed viewports) that routed row-1 addresses into
-     *        ::VideoRAM's own unwritten tail instead of the cart storage
-     *        meant to answer them.
+     * @brief A prompt, not an instruction: called once, right after ::VideoRAM
+     *        is allocated.
      *
-     * Weak default (src/emu/ppu.cpp): no-op -- a board with no cart-routed
-     * storage has nothing to allocate. Same weak/strong relationship as
-     * ::ResolveTile.
+     * A board routing part of nametable space to cartridge-side storage (see
+     * ::ReadNametable) allocates it here, sized via
+     * ::video::nametable_row_bytes() -- the same per-row page count the render
+     * walk and the nametable-write API agree on, so the routed row's boundary
+     * lines up with where those callers stop treating an offset as row 0.
+     *
+     * NOT sized from ::video::vram_bytes(): that rounds up more aggressively,
+     * and sizing from it leaves a row-1 boundary mismatch on any viewport wider
+     * than native, routing row-1 addresses into ::VideoRAM's unwritten tail.
+     *
+     * Weak default: no-op. Same relationship as ::ResolveTile.
      */
     void InitCartVRAM();
 #endif
@@ -814,18 +762,12 @@ namespace video {
      *        nametable-write API (::ppu::CartesianToAddress's internal
      *        xy_to_nt_addr) already agree divides row 0 from row 1.
      *
-     * NOT the same quantity as ::vram_bytes(): that sizes the actual
-     * ::VideoRAM allocation, rounding viewport width up to whole 32-tile
-     * banks (::viewport_tx()-based) and always doubling for horizontal-
-     * scroll lookahead; this instead mirrors GenerateFrame's own nt_cols --
-     * a pixel-width threshold (::viewport_px()-based) -- so it can diverge
-     * from (and land below) ::vram_bytes() on a viewport wider than native
-     * but short of double-wide. That's exactly the case a mapper's
-     * ::ppu::InitCartVRAM must size its own cart-routed row against, not
-     * ::vram_bytes(): sizing from the wrong one leaves a real gap between
-     * where ::VideoRAM's own row 0 content actually ends and where a
-     * board's cart storage starts answering, silently routing row-1 reads
-     * into ::VideoRAM's own unwritten tail instead.
+     * NOT ::vram_bytes(): that sizes the ::VideoRAM allocation, rounding width
+     * up to whole 32-tile banks and doubling for scroll lookahead. This mirrors
+     * the render walk's pixel-width threshold instead, so it can land below
+     * ::vram_bytes() on a viewport wider than native but short of double-wide.
+     * ::ppu::InitCartVRAM must size against this one: the other leaves a gap
+     * between where row 0 ends and where cart storage starts answering.
      */
     constexpr unsigned nametable_row_bytes() {
         const unsigned vpw = viewport_px();
@@ -959,12 +901,9 @@ namespace ppu {
      * from `fn(i)` instead of a preallocated buffer — useful for patterns and
      * procedurally generated rows.
      *
-     * The provider's iteration/index type @p Idx is generic, so a `u8`
-     * provider (with a single-byte loop counter) binds directly without
-     * forcing the callback signature up to `u16`. The body differs per target
-     * (PPU register pokes on NES, host video RAM on SDL3), so it is defined
-     * out-of-line in each backend with explicit instantiations for the index
-     * types actually used (`u8` and `u16`).
+     * @p Idx is generic, so a `u8` provider binds without forcing the callback
+     * signature up to `u16`. The body differs per target, so it is defined
+     * out-of-line in each backend with explicit instantiations for `u8`/`u16`.
      *
      * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
      * @param x        Tile X position.
@@ -1091,34 +1030,26 @@ void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
  * @brief As above, but accepts any invocable rather than a bare function
  *        pointer -- so the handler can carry a bank.
  *
- * A `void (*)()` is two bytes on the 6502 with nowhere to put a bank number.
- * That is not a problem when the target's bank is a compile-time constant: a
- * captureless lambda converts to the plain overload above and the bank travels
- * in the constant, not the pointer --
+ * A `void (*)()` is two bytes with nowhere to put a bank number. That is fine
+ * when the target's bank is a compile-time constant -- a captureless lambda
+ * converts to the plain overload above and the bank rides in the constant:
  *
  *     constexpr auto split = mmc3::GetCallable<BankedSplit>();
  *     video::WaitThenReactToSpriteZero(px, py, []{ mmc3::Call(split); }, &done);
  *
- * It IS a problem when the target is chosen at runtime, which is the whole
- * reason mmc3::callable_t exists. A capturing lambda holding a runtime-selected
- * callable_t cannot convert to a function pointer, so it needs this overload:
+ * It is not fine when the target is chosen at runtime. A capturing lambda
+ * holding a runtime-selected callable cannot convert to a function pointer, so
+ * it needs this overload:
  *
  *     video::WaitThenReactToSpriteZero(px, py, [&]{ mmc3::Call(table[i]); }, &done);
  *
- * NOTHING HERE NAMES A MAPPER, deliberately -- same reasoning as
- * audio::InBanks. This header states what the handler may be; which bank it
- * lives in is the project's business.
+ * Nothing here names a mapper: which bank the handler lives in is the project's
+ * business. Bank-switching inside is safe -- sprite-zero hit is a polled
+ * PPUSTATUS flag, not an interrupt source, so @p fn runs in ordinary context.
  *
- * SAFE TO BANK-SWITCH INSIDE. Sprite-zero hit is a PPUSTATUS flag (bit 6),
- * polled -- it is NOT an interrupt source on the NES, and this loop runs in
- * ordinary code. @p fn therefore executes in normal context, and a farcall out
- * of it is an ordinary farcall with no interrupt-reentrancy question attached.
- *
- * @note Off-NES @p fn must still be convertible to `void (*)()`: the desktop
- *       renderer schedules the handler to fire later through a single
- *       pointer-shaped slot (::SetSpriteZeroHandler), which cannot own a
- *       stateful callable, and off-NES there are no banks for it to carry
- *       anyway. Resolve the runtime choice before the call there.
+ * @note Off-NES @p fn must still convert to `void (*)()`: the handler is stored
+ *       in a single pointer-shaped slot that cannot own a stateful callable,
+ *       and there are no banks to carry. Resolve the choice before the call.
  */
 template <typename Handler>
 void WaitThenReactToSpriteZero(const u16 px, const u16 py, Handler &&fn,

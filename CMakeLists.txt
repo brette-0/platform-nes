@@ -208,13 +208,14 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # in the linked ROM today. Placement means giving up inlining for that
     # module; the section variable being set IS the opt-in.
     #
-    # Only modules with out-of-line code get an entry. apu.cpp is register
-    # objects and technology.cpp is empty -- both compile to 0 bytes of text,
-    # so a section for them would name a place nothing goes. interrupts.cpp is
-    # deliberately excluded too: its one function is a `jmp ($fffc)` reset
-    # trampoline that has to stay in the fixed bank to work at all.
+    # Only modules worth moving get an entry. apu.cpp is register objects and
+    # technology.cpp is empty -- both compile to 0 bytes of text, so a section
+    # for them would name a place nothing goes. interrupts.cpp is excluded: its
+    # one function is a `jmp ($fffc)` reset trampoline that has to stay in the
+    # fixed bank. input.cpp is excluded too -- one ~40-byte function called
+    # every frame, so it is pinned inline (AI) rather than placed.
     # ------------------------------------------------------------------
-    foreach(_mod video input)
+    foreach(_mod video)
         string(TOUPPER ${_mod} _MOD)
         if(PLATFORM_NES_${_MOD}_SECTION AND LLVM_MOS_PLATFORM STREQUAL "nes-nrom")
             message(WARNING

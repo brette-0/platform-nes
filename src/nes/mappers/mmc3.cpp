@@ -62,7 +62,7 @@ extern "C" const char __mmc3_boot_bank_window2[];
 /// a switchable bank -- and it is not marked ::FIXED, since inlining leaves
 /// nothing to place. __UINTPTR_TYPE__ rather than <cstdint>'s uintptr_t: this
 /// file includes no standard headers, and the builtin is always available.
-[[gnu::always_inline]] static inline u8 BootBank(const char *symbol) {
+AI static inline u8 BootBank(const char *symbol) {
     return static_cast<u8>(reinterpret_cast<__UINTPTR_TYPE__>(symbol));
 }
 
@@ -71,71 +71,34 @@ extern "C" const char __mmc3_boot_bank_window2[];
  *        flat image's first two banks, enable PRG-RAM, then fall through
  *        to crt0's _start.
  *
- * Runs BEFORE .bss is zeroed (same constraint as VRC1's ::_reset, see its
- * own comment in vrc1.cpp): raw tech::poke() calls only, no MMC3::Register
- * shadow objects, and no calls to ordinary (non-::FIXED) functions like
- * ::AcknowledgeScanlineIRQ -- window1Control/window2Control aren't
- * established yet at this point, so anything not pinned to this fixed bank
- * could resolve into whatever switchable bank happens to be powered-up
- * mapped, not necessarily the right one. Real MMC3 hardware powers up with
- * R0-R7, mirroring, PRG-RAM, AND the scanline-IRQ unit's
- * $C000/$C001/$E000/$E001 all undefined (nesdev.org/wiki/MMC3: "the values
- * in R6, R7, and $8000 are unspecified at power on"; the IRQ unit is a
- * separate functional block from R0-R7/$A000/$A001 and gets no special
- * treatment on real silicon). Nothing here can be skipped as "probably
- * already correct."
+ * Runs BEFORE .bss is zeroed: raw tech::poke() only, no Register shadow
+ * objects, and no calls to non-::FIXED functions -- the windows aren't
+ * established yet, so anything unpinned could resolve into whatever bank
+ * powered up mapped. Real hardware powers up with R0-R7, mirroring, PRG-RAM
+ * and the IRQ unit all undefined, so nothing here can be skipped as probably
+ * already correct.
  *
- * The $E000 write is the safety-critical one, not just tidiness: it's the
- * one omission that could crash the game outright rather than just
- * misdraw a frame. If the IRQ-enable latch happens to already be set
- * (power-on state is genuinely undefined, and unlike R6/R7/$A001 -- which
- * this function reasserts on every single entry, so a soft reset can't
- * leave them stale -- an untouched $E000 latch survives however this
- * function left it last), the scanline counter can fire well before any
- * application code ever calls ::ScheduleScanlineIRQ. It doesn't even need
- * rendering on to do that: A12 (which clocks the counter) toggles on
- * ordinary $2006 writes too, and early boot is full of exactly those
- * (nametable/palette/attribute setup). The CPU's own interrupt-disable
- * flag -- set by the reset sequence itself, and still set through all of
- * this -- holds any such request pending instead of servicing it
- * immediately, so it surfaces later, right when ::EnableInterrupts
- * finally runs: a crash that looks intermittent/hardware-dependent rather
- * than consistent, because it tracks whatever residual state the counter/
- * latch happened to power up (or survive a soft reset) in, rather than
- * anything the source code visibly does differently run to run. Writing
- * $E000 unconditionally, first, before anything else, forecloses that
- * regardless of what state it finds: per the wiki it disables IRQ
- * generation outright (the counter keeps ticking in the background,
- * harmlessly, until the first real ::ScheduleScanlineIRQ re-arms it) and
- * acknowledges whatever was pending, so there is nothing left to fire once
- * ::EnableInterrupts runs later. $C000/$C001 don't need a matching
- * pre-seed: ::ScheduleScanlineIRQ already writes both before ever
- * re-enabling via $E001, so the counter's value is fully deterministic
- * again well before it can matter.
+ * THE $E000 WRITE IS SAFETY-CRITICAL, not tidiness. If the IRQ-enable latch
+ * powers up (or survives a soft reset) already set, the scanline counter can
+ * fire long before any application code arms it -- A12 clocks on ordinary
+ * $2006 writes, and early boot is full of those. The CPU's interrupt-disable
+ * flag holds the request pending rather than servicing it, so it surfaces
+ * later, the moment interrupts are enabled: a crash that looks intermittent
+ * because it tracks residual state rather than anything in the source.
+ * Writing $E000 first, unconditionally, disables generation and acknowledges
+ * whatever was pending. $C000/$C001 need no pre-seed, since
+ * ::ScheduleScanlineIRQ writes both before re-enabling via $E001.
  *
- * R0-R5 (CHR banks) and $A000 (mirroring) are deliberately NOT touched
- * here, same as VRC1's ::_reset leaves its own CHR windows unset: those
- * are per-game choices, not a mapper-level bootstrap fact the way "make
- * PRG a flat image" or "don't let a stale IRQ fire into unready code" are,
- * and getting them wrong is cosmetic (wrong pattern-table content/
- * nametable layout while rendering is still off) rather than a crash. This
- * project's demo sets CHR banks explicitly in its own RESET body (before
- * enabling rendering) -- but currently leaves mirroring unset, relying on
- * whatever the mapper happens to power up with; that's a real gap too if
- * it needs to be reliable, just not a crashing one, and not this
- * function's call to make since it doesn't know what layout any given game
- * wants.
+ * R0-R5 and $A000 are deliberately NOT touched: CHR banks and mirroring are
+ * per-game choices, not mapper bootstrap facts, and getting them wrong is
+ * cosmetic rather than fatal. A project sets them in its own RESET body.
  *
- * With no explicit MMC3_BANKED() domain in use, this reconstructs one flat,
- * contiguous $8000-$FFFF image out of the ROM's top four banks, at ANY
- * PRG-ROM size from 32 KiB to MMC3's own 512 KiB maximum: R6/R7 get the
- * resident image's first two banks (__mmc3_boot_bank_window1/2, from
- * mmc3-helper.ld -- N-4 and N-3, not 0 and 1, once the ROM is bigger than
- * the resident image), and the remaining two show up at $C000-$DFFF/
- * $E000-$FFFF automatically (second-to-last/last, PRG mode 0 hardware fact)
- * with no register write needed for either. That works size-independently
- * only because the linker script anchors the resident image to the top of
- * the ROM file -- see mmc3-helper.ld's own header comment.
+ * With no MMC3_BANKED() domain in use this reconstructs one flat $8000-$FFFF
+ * image from the ROM's top four banks, at any size from 32 KiB to MMC3's
+ * 512 KiB maximum: R6/R7 take the image's first two banks
+ * (__mmc3_boot_bank_window1/2), and the remaining two appear at
+ * $C000-$FFFF automatically in PRG mode 0. That is size-independent only
+ * because the linker script anchors the image to the top of the ROM file.
  */
 extern "C" FIXED void _reset() {
     tech::poke(0xe000, 0);    // IRQ: disable generation + acknowledge any pending/residual IRQ.

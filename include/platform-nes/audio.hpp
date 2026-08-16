@@ -109,7 +109,7 @@ extern const u8 nSfx;
  * @code
  *   SFX(
  *     { "assets/jump.wav" },
- *     { "assets/coin.wav" },
+ *     { "assets/hit.wav" },
  *   )
  * @endcode
  */
@@ -181,20 +181,16 @@ void Init(u8 region = 0);
 /**
  * @brief Runs @p block with everything the audio backend needs mapped.
  *
- * THIS IS WHERE THE BACKEND'S OWN REQUIREMENT LIVES, and it belongs to the
- * library rather than to any game: the engine WALKS ITS SONG DATA WHILE IT
- * EXECUTES, so the data has to be mapped at the same time as the code, which
- * means the two cannot share a bank window. A caller that maps only the code
- * bank gets an engine reading whatever else happens to be at that address --
- * silence, noise, or a crash, with no diagnostic. No game should have to
- * rediscover that by reading famistudio_update's disassembly.
+ * THE BACKEND'S REQUIREMENT LIVES HERE, not in any game: the engine walks its
+ * song data while executing, so data and code must be mapped together and
+ * cannot share a window. Map only the code bank and the engine reads whatever
+ * else is at that address -- silence, noise or a crash, with no diagnostic.
  *
- * THE MAPPER IS A TEMPLATE PARAMETER, not an include, which is what lets this
- * requirement live in the portable header instead of an NES-only one. Nothing
- * here names MMC3, includes a mapper, or knows a bank exists -- @p Mapper
- * supplies CallPairedBlock, @p CodeTag and @p DataTag are the consuming
- * project's own bank map, and off-NES the whole thing is the block itself.
- * Callers therefore spell audio the same way on every backend:
+ * THE MAPPER IS A TEMPLATE PARAMETER, not an include, which is what keeps this
+ * in the portable header. Nothing here names a mapper or knows a bank exists:
+ * @p Mapper supplies CallPairedBlock, the tags are the project's own bank map,
+ * and off-NES the whole thing is the block itself. So callers spell audio the
+ * same way on every backend:
  *
  *     InAudioBanks([] { audio::Update(); });   // one project-side alias
  *

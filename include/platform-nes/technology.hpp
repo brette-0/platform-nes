@@ -8,6 +8,7 @@
  *
  * - ::PEEK / ::POKE / ::SPACESHIP — portable memory and compare ops.
  * - ::atomic — maps to `volatile` on NES and `_Atomic` elsewhere.
+ * - ::AI — force a function to be copied into every caller.
  * - ::MINSIZE — Clang-only size-optimisation hint (silently dropped
  *   under GCC).
  * - ::CHARMAP, ::STRING, ::STRING_NT — define per-project character maps and
@@ -24,25 +25,32 @@ using namespace br0::intsh;
 #include <array>
 #include <cstddef>
 
+/**
+ * @brief Force a function to be copied into every caller.
+ *
+ * Not a speed hint: the inliner already says yes to almost everything here.
+ * ::AI is for when out-of-lining would be a CORRECTNESS bug -- an interrupt
+ * handler's budget is one vblank or one scanline, and the cost model can start
+ * declining a function on its own as call sites multiply.
+ *
+ * @warning Does not compose with `noinline`, which wins with no diagnostic --
+ *          so a function taking this must NOT also take ::MODULE_PLACEMENT.
+ *          The two are mutually exclusive: one copy in a named bank, or a copy
+ *          in every caller.
+ */
+#define AI __attribute__((always_inline))
+
 
 #ifdef TARGET_NES
 /**
  * @brief Builds the body of a segment-placement keyword like ::fixed.
  *
- * `CREATE_SEGMENT_KEYWORD(name)` expands to the `__attribute__((section(...)))`
- * that pins a function or variable into `.prg_rom_<name>`, the linker section
- * this mapper's script (vrc1.ld) maps into a real PRG-ROM region. It is a
- * builder, not a keyword itself: the preprocessor can't register a new macro
- * name from inside another macro's expansion, so a call like
- * `CREATE_SEGMENT_KEYWORD(fixed)` can only ever be the *right-hand side* of a
- * keyword's definition, e.g.
- *
- *     #define fixed CREATE_SEGMENT_KEYWORD(fixed)
- *
- * — one such line per segment name, after which the bare word (`fixed`) is
- * usable everywhere in VRC1 code as a ::direct / ::absolute-style qualifier.
- *
- * Expands to nothing off-NES.
+ * Expands to the `__attribute__((section(...)))` pinning a symbol into a section
+ * the mapper's linker script maps to a real PRG-ROM region. A builder, not a
+ * keyword: the preprocessor cannot register a macro name from inside another
+ * expansion, so this can only be the right-hand side of a keyword definition --
+ * `#define fixed CREATE_SEGMENT_KEYWORD(".prg_rom_fixed")` -- after which the
+ * bare word is usable as a qualifier. Nothing off-NES.
  */
 #define CREATE_SEGMENT_KEYWORD(name) __attribute__((section(name)))
 #else
@@ -54,9 +62,8 @@ using namespace br0::intsh;
  * @brief Builds a placement keyword for a whole library MODULE, from the
  *        section the consuming project chose for it.
  *
- * Same builder-not-a-keyword rule as ::CREATE_SEGMENT_KEYWORD: use it as the
- * right-hand side of the module's own keyword, guarded on whether the project
- * asked for placement at all.
+ * Same builder rule as ::CREATE_SEGMENT_KEYWORD, guarded on whether the project
+ * asked for placement:
  *
  *     #ifdef PLATFORM_NES_VIDEO_SECTION
  *     #define VIDEO_BANK MODULE_PLACEMENT(PLATFORM_NES_VIDEO_SECTION)
@@ -64,39 +71,21 @@ using namespace br0::intsh;
  *     #define VIDEO_BANK
  *     #endif
  *
- * THE `noinline` IS THE WHOLE POINT, not a tuning choice. A section attribute
- * governs only the out-of-line copy of a function; LTO is free to paste the
- * body into a caller that lives somewhere else entirely, and it does. That is
- * why video:: contributes 2,097 bytes of real code when compiled alone and
- * exactly 0 bytes to the linked ROM: every one of its functions was inlined
- * into its callers, and a section tag on its own would have placed nothing.
- * Asking for placement therefore means giving up inlining for that module --
- * a real cost, accepted deliberately, and only when the project opts in by
- * setting the section.
+ * THE `noinline` IS THE WHOLE POINT: a section governs only a function's
+ * out-of-line copy, and LTO will paste the body into callers elsewhere, leaving
+ * the section empty. Placement therefore costs that module its inlining.
+ * Functions that must stay inline take ::AI instead, and no section.
  *
- * THERE IS DELIBERATELY NO `used`/`retain` HERE, and that was measured rather
- * than assumed. The worry is a function reached only by a call LTO cannot see,
- * which LTO then deletes -- a crash, not a link error. But every mechanism in
- * this library NAMES its target: mmc3::Call<Fn> and mmc3::GetCallable<Fn> take
- * Fn's address, and a bank switch opened around a scope leaves the calls inside
- * it perfectly ordinary. Pinning bought nothing and cost real ROM: audio.cpp
- * carried `used, retain` from an earlier design, and removing it dropped the
- * four API functions the demo never calls, shrinking the audio bank by 36 bytes
- * with nothing broken. On a placed video module the same attributes cost 1,544
- * bytes.
+ * No `used`/`retain`: every mechanism here names its target, so pinning would
+ * only keep uncalled API alive. A module with a genuinely invisible caller says
+ * so on the function that needs it.
  *
- * A module with a genuinely invisible caller -- hand-written assembly, a raw
- * address in a table -- should say so itself, on the function that needs it,
- * where the reason can be written down. See the `used` on
- * famistudio_region_scratch in audio.cpp for that shape.
- *
- * Expands to nothing off-NES, and nothing on NROM: with a single fixed 32 KiB
- * bank there is nowhere for placement to move code TO, so all this would buy
- * is the loss of inlining. A project that sets a section on an NROM build gets
- * a warning from CMake rather than a silent no-op here.
+ * Nothing off-NES, and nothing on NROM -- one fixed bank has nowhere to move
+ * code to. CMake warns if a section is set on such a build.
  */
 #define MODULE_PLACEMENT(name) CREATE_SEGMENT_KEYWORD(name) \
                                __attribute__((noinline))
+
 #else
 #define MODULE_PLACEMENT(name)
 #endif
@@ -115,7 +104,7 @@ namespace tech {
  * @param addr Hardware address to read.
  * @return The byte currently stored at @p addr.
  */
-inline __attribute__((always_inline))
+inline AI
 u8 peek(const u16 addr) {
     return *reinterpret_cast<volatile const u8 *>(addr);
 }
@@ -129,7 +118,7 @@ u8 peek(const u16 addr) {
  * @param addr Hardware address to write.
  * @param data Byte to store.
  */
-inline __attribute__((always_inline))
+inline AI
 void poke(const u16 addr, const u8 data) {
     *reinterpret_cast<volatile u8 *>(addr) = data;
 }
@@ -138,39 +127,22 @@ void poke(const u16 addr, const u8 data) {
 /**
  * @brief Busy-waits for a precise number of CPU cycles.
  *
- * `always_inline`: this asm body is spliced directly into the caller, with
- * no `jsr`/`rts` around it. Total elapsed time -- measured from the
- * instruction immediately before this call to the instant execution
- * resumes after it -- is exactly `c + 15` CPU cycles, for *any* `c` value
- * (the full `u8` range), i.e. anywhere from 15 to 270 cycles. That is the
- * asm body's own cost, independent of however the caller happens to get
- * @p c into place. For a shorter, compile-time-known wait, hand-pick a
- * NOP/BIT sled instead (nesdev.org/wiki/Fixed_cycle_delay).
+ * ::AI, so the asm body is spliced into the caller with no `jsr`/`rts`. Elapsed
+ * time is exactly `c + 15` cycles for any `c` -- 15 to 270 -- independent of how
+ * the caller gets @p c into place. For a shorter compile-time-known wait,
+ * hand-pick a NOP/BIT sled instead (nesdev.org/wiki/Fixed_cycle_delay).
  *
- * Implementation is the NESdev "Delay code" article's runtime-variable
- * "A + 27 cycles of delay" callable function (nesdev.org/wiki/Delay_code),
- * transcribed instruction-for-instruction: a `sec`/`sbc #5`/`bcs` loop
- * peels off 5-cycle slices of @p c until fewer than 5 remain, then a
- * short cascade of conditionally-taken branches burns the 0-4-cycle
- * remainder, each branch contributing exactly 2 or 3 cycles depending on
- * which way it goes so the total lands on the exact requested count either
- * way. Cross-checked against the wiki's own published figures by an
- * independent from-scratch cycle-stepping simulation of this exact
- * compiled instruction stream (`sec`/`sbc`/`bcs`/`adc`/`bcc`/`lsr`/`beq`)
- * over all 256 possible inputs: every one lands on `c + 15` -- the wiki's
- * own published figure assumes a `jsr`-called, non-inlined body (`+ 27`,
- * 12 more for `jsr`/`rts`); inlined here, only the `+ 15` survives.
+ * From NESdev's "Delay code" article: an `sbc #5` loop peels 5-cycle slices off
+ * @p c, then a branch cascade burns the 0-4 remainder. The wiki's `+ 27` assumes
+ * a `jsr`-called body; inlined, only the `+ 15` survives.
  *
- * @warning Same assumptions the wiki source makes: no branch inside this
- * routine crosses a page boundary (link-time code placement decides that,
- * outside this function's control -- a probabilistic, not absolute,
- * guarantee); no interrupt fires during the wait (pair with
- * ::irq::DisableInterrupts first if that matters); and no DMA is stealing
- * cycles concurrently.
+ * @warning Same assumptions as that source: no branch crosses a page boundary
+ * (link-time placement decides that, so it is probabilistic), no interrupt
+ * fires during the wait, no concurrent DMA.
  *
  * @param c Delay selector; total wait is `c + 15` CPU cycles.
  */
-inline __attribute__((always_inline))
+inline AI
 void SpinWait(const u8 c) {
     __asm__ volatile (
         "sec\n"
@@ -256,15 +228,11 @@ inline void SpinWait(const u8) {}
 /**
  * @brief Pins a variable into 6502 zero page ("direct page").
  *
- * Forces the symbol into `.zp.bss`, which the linker routes to zero page, so
- * every access is a 2-byte/3-cycle direct-page instruction instead of the
- * 3-byte/4-cycle absolute form. Reserve it for the hottest mutable state
- * (cursors, counters, per-frame scratch): zero page is only 256 bytes and is
- * shared with the compiler's imaginary registers and the FamiStudio enclave,
- * so spend it deliberately. For zero-initialised / runtime-assigned objects —
- * an object with a static initialiser belongs in `.zp.data` instead.
- *
- * Expands to nothing off-NES (the desktop host has no zero page).
+ * Forces the symbol into `.zp.bss`, so access is a 2-byte/3-cycle direct-page
+ * instruction rather than the 3-byte/4-cycle absolute form. Zero page is 256
+ * bytes shared with the compiler's imaginary registers, so reserve this for the
+ * hottest mutable state. Objects with a static initialiser belong in `.zp.data`.
+ * Nothing off-NES.
  */
 #define direct __attribute__((section(".zp.bss")))
 /**
@@ -298,16 +266,13 @@ namespace tech {
  * the only write path also pokes the hardware, shadow and register can never
  * drift: `get()` returns the shadow, `set()` writes both.
  *
- * The value-like surface (`operator u8`, `operator=(u8)`) lets an instance be
- * used in expressions exactly like the bare `atomic u8` shadow it replaces, so
- * existing read-modify-write code compiles unchanged. Copy-construction takes a
- * snapshot *without* poking, while copy-assignment writes through — precisely
- * what ::SHADOW needs to save on entry and restore (re-poking) on exit.
+ * `operator u8` / `operator=(u8)` let an instance be used exactly like the bare
+ * `atomic u8` it replaces. Copy-construction snapshots *without* poking while
+ * copy-assignment writes through -- what ::SHADOW needs to save and restore.
  *
- * The shadow keeps the `atomic` qualifier the bare shadow had, so its ordering
- * guarantees survive for callers that touch it from an interrupt. The default
- * constructor is trivial, so instances live in zero-initialised `.bss` with no
- * startup constructor — identical placement to the `atomic u8` they replace.
+ * The shadow stays `atomic`, so ordering guarantees survive for interrupt-side
+ * callers, and the trivial default constructor keeps it in `.bss` with no
+ * startup constructor.
  *
  * @tparam Addr Memory-mapped address backing this register.
  */
@@ -330,33 +295,23 @@ public:
 /**
  * @brief Zero-overhead bitmask wrapper for a scoped enum.
  *
- * A scoped enum (`enum class`) is the right tool for a set of flag bits: the
- * enumerators stay out of the surrounding namespace, so a common name like
- * `Clear` or `DONE` can't collide with anything. The cost is that a scoped enum
- * deliberately does *not* implicitly convert to its underlying integer, so
- * `a | b`, `mask & flag`, and `if (flags)` no longer compile -- you would have
- * to `static_cast` at every use, which is exactly the casting bloat we want to
- * avoid.
+ * A scoped enum keeps flag names out of the surrounding namespace but does not
+ * implicitly convert to its underlying integer, so `a | b` and `if (flags)`
+ * stop compiling and every use needs a static_cast.
  *
- * `enum_flags<E>` is the storage type for such a flag register. It holds one
- * `std::underlying_type_t<E>` (a single byte for a `: u8` enum) and supplies the
- * bitwise operators plus a contextual `bool` test, so flag code reads like plain
- * integer code while every value remains type-checked against `E`. Because an
- * enumerator converts implicitly *into* an `enum_flags<E>` (but not the other
- * way), you still cannot accidentally mix two unrelated enums or leak a flag set
- * into arithmetic.
+ * `enum_flags<E>` is the storage type for such a register: one
+ * `std::underlying_type_t<E>` plus the bitwise operators and a contextual
+ * `bool`, so flag code reads like integer code while staying type-checked
+ * against `E`. Enumerators convert implicitly *into* it but not back out, so
+ * two unrelated enums still cannot mix.
  *
- * It is a pure compile-time abstraction: no member is `virtual`, so there is no
- * vtable and no per-object vptr; `sizeof(enum_flags<E>) == sizeof(underlying)`.
- * Every operation is `constexpr` (hence inline), lowering to the identical 6502
- * `and`/`ora`/`eor` the raw byte math would emit. The default constructor is
- * trivial/zero, so an instance lives in zero-initialised `.bss` with no startup
- * constructor -- the same placement as the bare `atomic u8` it replaces.
+ * Pure compile-time abstraction: no vtable, `sizeof` equals the underlying type,
+ * every operation `constexpr` and lowering to the same `and`/`ora`/`eor` raw
+ * byte math would.
  *
- * @note For an `atomic` (volatile) flag register, keep read-modify-write as a
- *       single `reg = reg | E::FLAG;` statement: the by-value operators read the
- *       register exactly once and the assignment writes it once, side-stepping
- *       the `-Wdeprecated-volatile` (P1152) compound-assignment pitfall.
+ * @note On an `atomic` register keep read-modify-write as one
+ *       `reg = reg | E::FLAG;` statement -- one read, one write, side-stepping
+ *       the `-Wdeprecated-volatile` compound-assignment pitfall.
  *
  * @tparam E A scoped enumeration whose enumerators are single-bit flag values.
  */
@@ -444,13 +399,9 @@ namespace prsv {
  *   inline u8 MY_REGS_snapshot[3] = {};
  * @endcode
  *
- * `PRESERVE(MY_REGS)` saves the current shadow value of every listed
- * register into `MY_REGS_snapshot`. The `##` in the expansion prevents the
- * family name from being macro-expanded when building the snapshot symbol, so
- * the same symbol name is produced at both ::PRESERVE and ::RESTORE, even
- * across translation-unit boundaries (e.g. ISR in a different file).
- *
- * No hardware is read on save; only the ::wo_register shadows are accessed.
+ * Saves every listed register's shadow into `MY_REGS_snapshot`. The `##` stops
+ * the family name expanding while building that symbol, so ::PRESERVE and
+ * ::RESTORE agree on it across translation units. No hardware is read.
  *
  * @param name Bare identifier of the family macro (e.g. `APU_REGISTERS`).
  */
@@ -475,44 +426,28 @@ namespace prsv {
  * exits — including on `return` out of the body. Arguments may be of mixed
  * types; `volatile`/`atomic` lvalues are read and written exactly once.
  *
- * WHAT THIS COSTS, AND WHY IT IS SHAPED THIS WAY. The previous form held three
- * things: a tuple of REFERENCES to the registers, a tuple of saved copies, and
- * a `bool` guard for the single-iteration `for` loop the macro expanded to.
- * Only the saved copies are real work. The references spent two bytes each
- * pointing at globals whose addresses the linker already knows, and the flag
- * existed purely to spell the scope as a loop. One register cost four bytes
- * live across the body — enough to push the whole thing onto the soft stack,
- * which is what made mmc3's farcall thunk 116 cycles of frame management around
- * a 35-cycle bank switch.
+ * The registers are TEMPLATE parameters, so their addresses are compile-time and
+ * the scope holds only the saved bytes -- one per register. Base destructors run
+ * in reverse declaration order, which gives LIFO for free.
  *
- * Taking the registers as TEMPLATE parameters makes their addresses
- * compile-time, so the scope holds nothing but the saved bytes: one register is
- * one byte, and shadowing all fifteen APU registers costs fifteen rather than
- * forty-six. Each register gets its own ::one_shadow base, and base
- * destructors run in reverse declaration order, which is what gives LIFO for
- * free with no index arithmetic.
+ * @note They must therefore have LINKAGE. A local or parameter cannot be a
+ *       template argument, so save such a byte by hand.
  *
- * @note The registers must therefore have LINKAGE — namespace-scope objects,
- *       which every hardware register here is. A local or a function parameter
- *       cannot be a template argument, so it cannot be shadowed. Nothing in the
- *       library needs that: the mappers' thunks used to shadow their `reg`
- *       PARAMETER, and both now save the single byte by hand instead, for the
- *       cost reason above.
- *
- * @warning `SHADOW(x) { ... }` expands to an `if` with an init-statement, so an
- *          `else` written after the block would bind to it. Unlike the previous
- *          `for`-based form, a bare `break`/`continue` inside the body now binds
- *          to the ENCLOSING loop, which is what it looks like it should do.
+ * @warning Expands to an `if` with an init-statement, so a trailing `else` binds
+ *          to it, and `break`/`continue` bind to the enclosing loop.
  */
 template <auto &Reg>
 struct one_shadow {
     /// One read at entry, through the register's own copy constructor
     /// (::wo_register snapshots the shadow without poking hardware).
-    // remove_cv_t, not remove_cvref_t: llvm-mos's freestanding library does not
-    // ship the latter, and it is not needed -- decltype on a reference template
-    // parameter already yields the referenced type, so only the `volatile` an
-    // `atomic` register carries has to come off.
-    std::remove_cv_t<decltype(Reg)> saved{Reg};
+    //
+    // remove_reference_t is load-bearing: `decltype` on a reference template
+    // parameter yields the REFERENCE type, and remove_cv_t does not strip it.
+    // Without it `saved` binds to the register instead of copying it, and the
+    // destructor's restore degenerates into writing the current value back --
+    // silently, since it compiles either way. remove_cvref_t would say this in
+    // one step but llvm-mos's freestanding library does not ship it.
+    std::remove_cv_t<std::remove_reference_t<decltype(Reg)>> saved{Reg};
 
     /// One write back on exit. For ::wo_register this pokes the hardware port
     /// and updates the shadow; for a raw `atomic u8` it is a volatile store.
@@ -651,17 +586,13 @@ namespace tech::nes_str {
 /**
  * @brief Defines a named character map used by ::STRING.
  *
- * Expands to a @c constexpr function `charmap_<mapname>(char)` whose body is the
- * juxtaposed ::CM arms. A character with no ::CM entry falls through to
- * ::nes_str::unmapped (see there) -- a compile error at the offending string.
+ * Expands to a @c constexpr `charmap_<mapname>(char)` whose body is the
+ * juxtaposed ::CM arms; an unmapped character falls through to
+ * ::nes_str::unmapped, a compile error at the offending string. Being an
+ * ordinary constexpr function it can live in a header and be included freely.
  *
- * Being an ordinary @c constexpr (hence @c inline) function, a charmap can live
- * in a header and be included by any number of translation units: no assembler
- * macro, no per-TU re-emission, and no LTO "macro already defined" collision.
- *
- * @note ::CM still uses bareword tokens (`CM(M, 0xed)`); the token is stringized
- *       and its first character taken, so the authoring syntax is unchanged from
- *       the original assembler-based charmap.
+ * @note ::CM takes bareword tokens (`CM(M, 0xed)`), stringized with the first
+ *       character taken.
  *
  * @param mapname Identifier for the character map.
  */
@@ -674,16 +605,11 @@ constexpr u8 charmap_##mapname(char _c) {       \
 /**
  * @brief Defines a string translated through a ::CHARMAP (no terminator).
  *
- * One header-only definition -- no separate `extern` declaration and no
- * definition TU to keep in sync. Each character of @p chars is mapped through
- * `charmap_<mapname>` at compile time, yielding an @c inline @c constexpr
- * `std::array<u8, N>` of the *unterminated* source length. Being an inline
- * variable, it can be defined in a header and included by any number of TUs;
- * the linker folds the copies to a single object in rodata. `sizeof(name)` (and
- * ::SIZED_OBJ) therefore yield the character count, and because it is @c
- * constexpr the value is usable in constant expressions in every includer.
- *
- * An unmapped character is a compile error (see ::nes_str::unmapped).
+ * Header-only: each character of @p chars is mapped through `charmap_<mapname>`
+ * at compile time into an @c inline @c constexpr `std::array<u8, N>` of the
+ * unterminated source length, which the linker folds to one rodata object
+ * however many TUs include it. `sizeof(name)` is therefore the character count,
+ * usable in constant expressions. An unmapped character is a compile error.
  *
  * @note Requires `charmap_<mapname>` to be in scope at the point of use (include
  *       the header that declares the ::CHARMAP).
@@ -721,15 +647,11 @@ inline constexpr auto name = ::tech::nes_str::encode_nt<charmap_##mapname>(#char
 /**
  * @brief General-purpose byte copy from @p buffer into @p target with stride.
  *
- * Writes `buffer[i]` to `target[offset + i * step]` for `i` in
- * `[0, sBuffer)`. @p step is signed; a negative value walks backward
- * from @p offset. The caller must ensure every written index stays
- * inside the target buffer.
- *
- * The count and stride types are generic: pass `u8`/`i8` where the run is
- * short to keep the loop counter and comparison single-byte, or the wider
- * `u16`/`i16` for larger spans. The index arithmetic is evaluated in `int`
- * so a negative @p step is portable across the 16-bit (NES) and host builds.
+ * Writes `buffer[i]` to `target[offset + i * step]` for `i` in `[0, sBuffer)`.
+ * A negative @p step walks backward; the caller keeps every index in range.
+ * Count and stride types are generic, so pass `u8`/`i8` for short runs to keep
+ * the loop counter single-byte. Index arithmetic is evaluated in `int` so
+ * negative strides are portable.
  *
  * @tparam Count Unsigned integer type of @p sBuffer / the loop counter.
  * @tparam Step  Signed integer type of @p step.
@@ -753,11 +675,9 @@ void PopulateFromBuffer(u8* target, const u16 offset,
  * Writes `fn(i)` to `target[offset + i * step]` for `i` in `[0, amt)`.
  * @p step is signed; a negative value walks backward from @p offset.
  *
- * The iteration/index type (@p Idx, deduced from @p fn), the count type
- * (@p Count) and the stride type (@p Step) are rest generic, so a caller can
- * pass narrow integers (e.g. a `u8` provider with a `u8` count and unit
- * stride) and the loop control / callback argument stay single-byte. The
- * index multiply is evaluated in `int` for portable negative-stride support.
+ * @p Idx (deduced from @p fn), @p Count and @p Step are generic, so narrow
+ * integers keep the loop control and callback argument single-byte. The index
+ * multiply is evaluated in `int` for portable negative strides.
  *
  * @tparam Idx   Parameter type of @p fn (the value handed to the callback).
  * @tparam Count Unsigned integer type of @p amt / the loop counter.

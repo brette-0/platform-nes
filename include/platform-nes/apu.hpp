@@ -17,11 +17,9 @@
  *   RESTORE(APU_REGISTERS);
  * @endcode
  *
- * The 2A03 register addresses are hardware-mapped and meaningless off NES,
- * so non-NES targets get an inert stand-in (see the class-level @note on
- * ::apu below) instead of an absent header — this keeps ::PRESERVE /
- * ::RESTORE / ::SHADOW call sites and direct `apu::` calls compiling
- * unchanged on every target.
+ * The 2A03 addresses are meaningless off NES, so non-NES targets get an inert
+ * stand-in rather than an absent header, keeping every call site compiling
+ * unchanged.
  */
 #pragma once
 
@@ -77,17 +75,13 @@ namespace apu {
  * @brief PRESERVE/RESTORE family covering APU registers except DMC timing
  *        and the channel-enable register.
  *
- * Expand this macro wherever ::PRESERVE / ::RESTORE / ::SHADOW expect a
- * comma-separated list of lvalues. It names every field of ::apu except
- * dmc_freq/dmc_raw/dmc_start/dmc_len and snd_chn, in the same order as the
- * struct definition. DMC/snd_chn are kept out of this family since they're
- * hardware-distinct from the melodic channels (sample playback and channel
- * enables, not tone generation) and are managed directly where needed.
+ * Expand wherever ::PRESERVE / ::RESTORE / ::SHADOW expect a comma-separated
+ * list of lvalues. Names every ::apu field except the DMC registers and
+ * snd_chn, in struct order -- those are hardware-distinct from the melodic
+ * channels and managed directly where needed.
  *
- * The companion `APU_REGISTERS_snapshot` array (defined in `src/nes/apu.cpp`,
- * declared `extern` below) is the flat byte storage that ::PRESERVE writes
- * into and ::RESTORE reads back from. Its size matches the number of
- * registers in this list exactly.
+ * `APU_REGISTERS_snapshot` is the flat byte storage ::PRESERVE writes and
+ * ::RESTORE reads, sized to match this list exactly.
  *
  * @code
  *   PRESERVE(APU_REGISTERS);   // snapshot all 15 shadows, no poke

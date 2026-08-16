@@ -7,9 +7,9 @@
  *
  * THE WHOLE POINT: the audio backend must land in the SAME PRG-ROM bank as
  * the engine it drives. A project already controls where the engine goes
- * (demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT, and the ca65
- * wrappers around any exported data); this is the matching knob for the
- * module, so the two can be put side by side.
+ * (its FamiStudio config's FAMISTUDIO_CA65_CODE_SEGMENT, and the ca65 wrappers
+ * around any exported data); this is the matching knob for the module, so the
+ * two can be put side by side.
  *
  * Once they are neighbours, THIS MODULE CONTAINS NO BANK-SWITCHING AT ALL.
  * A caller long-calls audio::Update(); inside it, famistudio_update() is an
@@ -30,16 +30,13 @@
 #ifndef PLATFORM_NES_AUDIO_SECTION
 #error "PLATFORM_NES_AUDIO_SECTION is not set. It names the ELF section this \
 module's code is placed in, and MUST be the same bank the audio engine is \
-assembled into (see demo/famistudio_config.s). Set it from CMake -- \
+assembled into (see the project's FamiStudio config). Set it from CMake -- \
 local.cmake.example has a worked example."
 #endif
 // MODULE_PLACEMENT supplies the section and the noinline that makes the section
-// mean anything (see its comment). This used to add `used, retain` as well, on
-// the theory that a farcalled function looks uncalled to LTO and the linker.
-// Measured: it doesn't. The callers here go through blocks that call
-// audio::Update() perfectly ordinarily, so the references are visible, and the
-// attributes only kept the four API functions this demo never calls -- 36 bytes
-// of dead code. Removed.
+// mean anything (see its comment). No `used`/`retain`: a farcall opens a bank
+// switch around an otherwise ordinary call, so LTO can see every reference, and
+// pinning only keeps uncalled API alive.
 #define AUDIO_BANK MODULE_PLACEMENT(PLATFORM_NES_AUDIO_SECTION)
 
 #include <intsh>
@@ -57,8 +54,8 @@ using namespace br0::intsh;
 
 /*
  * FamiStudio is assembled by a genuine standalone ca65 binary
- * (CMakeLists.txt), and is placed by demo/famistudio_config.s into whichever
- * PRG-ROM bank the project chose. EVERY FUNCTION IN THIS FILE IS TAGGED
+ * (CMakeLists.txt), and its own config places it into whichever PRG-ROM bank
+ * the project chose. EVERY FUNCTION IN THIS FILE IS TAGGED
  * ::AUDIO_BANK so it lands in that same bank -- which is the only reason the
  * calls below can be plain calls.
  *

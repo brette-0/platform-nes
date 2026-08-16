@@ -135,17 +135,11 @@ namespace nes2 {
  * Device are always zero -- none of these are supported yet, so none are
  * parameters here.
  *
- * Mapper number and submapper come from the ::MAPPER / ::SUBMAPPER compiler
- * defines (set per mapper subtarget in CMakeLists.txt), not from arguments:
- * each mapper subtarget in this project is a specific, known board, so both
- * values are compile-time facts about the build rather than something a
- * call site should restate.
- *
- * Four-screen/alternative nametable wiring (NES2.0 flags 6, bit 3) comes from
- * the ::ALTERNATIVE_NAMETABLE compiler define (set via ALTERNATIVE_NAMETABLE
- * in local.cmake), not from an argument here -- like MAPPER/SUBMAPPER, it's a
- * compile-time fact about the board being built, not something a call site
- * should restate. Only the define's non-zero-ness is used.
+ * Mapper, submapper and four-screen wiring (flags 6, bit 3) come from the
+ * ::MAPPER / ::SUBMAPPER / ::ALTERNATIVE_NAMETABLE compiler defines rather than
+ * arguments: each is a compile-time fact about the board being built, not
+ * something a call site should restate. Only ALTERNATIVE_NAMETABLE's
+ * non-zero-ness is used.
  *
  * @param mirroring       Hard-wired nametable mirroring (::Mirroring).
  * @param battery         Battery-backed PRG-RAM/NVRAM present.

@@ -2,28 +2,25 @@
 #include <platform-nes/technology.hpp>
 
 // WHERE THIS MODULE'S CODE GOES -- the consuming project's choice, supplied as
-// PLATFORM_NES_VIDEO_SECTION (see local.cmake.example). Unlike audio's, this is
-// OPTIONAL: audio has to share a bank with the FamiStudio engine it plain-calls,
-// so an unset section there is an #error. video has no such contract, so leaving
-// it unset simply keeps today's behaviour -- inlined into callers, placed
-// nowhere in particular.
+// PLATFORM_NES_VIDEO_SECTION. Optional, unlike audio's: unset means the default,
+// everything inlined into callers and placed nowhere in particular.
 //
-// Setting it is a real tradeoff, not free: see ::MODULE_PLACEMENT. Every
-// function below stops being inlined and becomes ~2 KiB of out-of-line code in
-// the section named.
+// VIDEO_BANK tags every definition that may move. ::AI tags the ones that must
+// NOT: anything an interrupt handler reaches pays argument marshalling plus
+// jsr/rts inside a budget of one vblank or one scanline, and a placed module
+// adds a bank switch on top. Which functions those are is a property of the
+// CALLER, so the pinned set is what a project can plausibly call from an NMI or
+// IRQ -- the scroll helpers, the name/attribute-table writers, RefreshSprites.
 //
-// EVERY definition is tagged, including the three that are also
-// __attribute__((always_inline)) -- WriteSingleToAttributeTable, WriteSingle
-// and RefreshSprites. That combination is NOT an error (verified: clang accepts
-// section + always_inline + noinline together, no diagnostic); the tag is
-// simply inert on them, because an always-inlined function emits no
-// out-of-line copy for a section to place. Tagging them anyway keeps this file
-// free of an exception nobody would remember, and costs nothing.
+// The two are mutually exclusive, and ::AI alone is the whole answer. A section
+// cannot place an inlined function, and in the one case where it could -- taking
+// its address forces an out-of-line copy -- landing that copy in the banked
+// section is precisely wrong, since the pin exists to keep it reachable without
+// banking. So pinned functions carry no section at all.
 //
-// Those three are also the one category that is bank-safe for free: a function
-// copied into every caller is in reach of whatever bank the caller is in. The
-// only wrinkle is that taking one's address does force an out-of-line copy,
-// and that copy DOES honour the section.
+// Pinning is free at present: LTO inlines all of them anyway. It only stops the
+// inliner from deciding otherwise later, where the failure is an overrun with no
+// diagnostic.
 #ifdef PLATFORM_NES_VIDEO_SECTION
 #define VIDEO_BANK MODULE_PLACEMENT(PLATFORM_NES_VIDEO_SECTION)
 #else
@@ -48,7 +45,7 @@ tech::wo_register<ppu::raw::OAMADDR> OAMADDR;
 tech::wo_register<ppu::raw::OAMDMA>  OAMDMA;
 }   // namespace oam
 
-inline static u16 xy_to_nt_addr(const u16 x, const u16 y) {
+static u16 xy_to_nt_addr(const u16 x, const u16 y) {
     constexpr u16 base = 0x2000;
     const u16 nt_h = static_cast<u16>((x >> 5 & 1) << 10);
     const u16 col  = x & 0x1F;
@@ -60,7 +57,7 @@ inline static u16 xy_to_nt_addr(const u16 x, const u16 y) {
     return base + nt_h + nt_v + row * 32 + col;
 }
 
-inline static u16 xy_to_at_addr(const u16 x, const u16 y) {
+static u16 xy_to_at_addr(const u16 x, const u16 y) {
     constexpr u16 base = 0x2000;
     const u16 nt_h = static_cast<u16>((x >> 5 & 1) << 10);
     const u16 col  = x & 0x1F;
@@ -112,8 +109,10 @@ VIDEO_BANK void Flush(const u8 nt, const u8 at) {
     }
 }
 
+// Pinned: a raster split writes PPUSCROLL at an exact dot, so anything added in
+// front of these writes moves the split.
 __attribute__((hot))
-VIDEO_BANK void SetScroll(const u16 x, u16 y) {
+AI void SetScroll(const u16 x, u16 y) {
     xScroll = x; yScroll = y;
 
 
@@ -137,12 +136,12 @@ VIDEO_BANK void SetScroll(const u16 x, u16 y) {
     tech::poke(raw::PPUSCROLL, static_cast<u8>(y & 0xFF));
 }
 
-VIDEO_BANK void DeltaScroll(const i8 x, const i8 y) {
+AI void DeltaScroll(const i8 x, const i8 y) {
     SetScroll(xScroll + x, yScroll + y);
 }
 
 __attribute__((hot))
-VIDEO_BANK void WriteFromBufferToNameTable(
+AI void WriteFromBufferToNameTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
     const auto offset = xy_to_nt_addr(x, y);
@@ -173,7 +172,7 @@ VIDEO_BANK void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value)
 // reset and three pokes. Meant for the vblank window, where the divide/modulo in the
 // (x,y) form is the cost worth hoisting out.
 __attribute__((hot))
-VIDEO_BANK void WriteSingleToNameTable(const int address, const u8 value) {
+AI void WriteSingleToNameTable(const int address, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
@@ -205,7 +204,7 @@ template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
 template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
 
 __attribute__((hot))
-VIDEO_BANK void WriteFromBufferToAttributeTable(
+AI void WriteFromBufferToAttributeTable(
     const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
     const u16 offset = xy_to_at_addr(x, y);
@@ -236,8 +235,7 @@ VIDEO_BANK void WriteFromBufferToAttributeTable(
     }
 }
 
-__attribute__((always_inline))
-VIDEO_BANK void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
+AI void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     const auto offset = xy_to_at_addr(x, y);
 
     tech::peek(raw::PPUSTATUS);
@@ -250,7 +248,7 @@ VIDEO_BANK u16 CartesianToAddress(const u16 x, const u16 y) {
     return xy_to_nt_addr(x, y);
 }
 
-scroll_t CartesianToScroll(const u16 px, const u16 py) {
+AI scroll_t CartesianToScroll(const u16 px, const u16 py) {
     auto y = py;
     if (y >= 240) { y -= 240; y ^= 0x100; }
     if (y >= 240) { y -= 240; y ^= 0x100; }
@@ -261,7 +259,7 @@ scroll_t CartesianToScroll(const u16 px, const u16 py) {
 }
 
 __attribute__((hot))
-VIDEO_BANK void SetColorPriority(const u8 priority) {
+AI void SetColorPriority(const u8 priority) {
     u8 mask = PPUMASK & ~(mask::RED | mask::GREEN | mask::BLUE);
     mask = mask | priority & (mask::RED | mask::GREEN | mask::BLUE);
     PPUMASK = mask;   // one write back: shadow + hardware
@@ -280,8 +278,7 @@ VIDEO_BANK void WriteFromBuffer(const u8 offset, const u8* source, const u8 sBuf
     }
 }
 
-__attribute__((always_inline))
-VIDEO_BANK void WriteSingle(const u8 offset, const u8 value) {
+AI void WriteSingle(const u8 offset, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>((offset + PaletteTables) >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(offset + PaletteTables & 0xFF));
@@ -294,8 +291,7 @@ VIDEO_BANK void WriteSingle(const u8 offset, const u8 value) {
 
 namespace oam {
 
-__attribute__((always_inline))
-VIDEO_BANK void RefreshSprites(const sprite_t *oam) {
+AI void RefreshSprites(const sprite_t *oam) {
     u16 addr;
     __builtin_memcpy(&addr, &oam, sizeof addr);
     tech::poke(ppu::raw::OAMDMA, static_cast<u8>(addr >> 8));

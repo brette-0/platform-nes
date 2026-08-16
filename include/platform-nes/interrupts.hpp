@@ -2,19 +2,10 @@
  * @file interrupts.hpp
  * @brief IRQ registration and dispatch.
  *
- * The NES target relies on the MMC3-style scanline IRQ; the desktop
- * target simulates the same semantics from the renderer. On NES the
- * application defines the single hardware IRQ handler directly with
- * ::IRQ, placed at the hardware vector exactly like ::NMI -- there is no
- * runtime arming. On desktop, which has no hardware vector to place code
- * at, the renderer instead schedules a scanline event directly into
- * ::irqPending and fires it by calling the given function pointer.
- *
- * On desktop builds the armed handler is a plain function pointer, and
- * the pending IRQ is held in ::irqPending for the renderer to drain once
- * per frame. On NES builds ::interrupt just tags a function so llvm-mos
- * emits the imaginary-register save/restore prologue and epilogue ending
- * in RTI.
+ * On NES the application defines one hardware IRQ handler with ::IRQ, placed at
+ * the vector like ::NMI, with no runtime arming. Off NES there is no vector, so
+ * the renderer holds a function pointer in ::irqPending and drains it once per
+ * frame.
  */
 #pragma once
 #include <intsh>
@@ -25,18 +16,13 @@ using namespace br0::intsh;
 /**
  * @brief Tags a function as an interrupt entry point.
  *
- * On NES this expands to `ASM_LINKAGE __attribute__((used, interrupt_norecurse))
- * void`: `ASM_LINKAGE` (extern "C") keeps the symbol name stable so the linker
- * script (nes.ld) can place it directly at the hardware vector by raw symbol
- * name (`nmi`/`irq`), `used` stops LTO from discarding a function nothing
- * calls via ordinary C++ call syntax -- that raw-symbol reference from the
- * vector table is invisible to the compiler's call-graph analysis -- and
- * `interrupt_norecurse` makes llvm-mos emit the full imaginary-register
- * save/restore prologue and epilogue, ending with RTI. Off NES it's just
- * `void` — there's no hardware vector or register file to protect.
+ * On NES: `extern "C"` keeps the symbol name stable for the linker script to
+ * place at the vector, `used` stops LTO discarding a function only the vector
+ * table references, and `interrupt_norecurse` emits the save/restore prologue
+ * and epilogue ending in RTI. Off NES it is just `void`.
  *
- * Use it in place of a return type. ::NMI and ::IRQ expand to this same
- * attribute set, pinned to the two hardware vector symbol names:
+ * Use in place of a return type. ::NMI and ::IRQ expand to the same set, pinned
+ * to the two vector symbol names:
  *
  * @code
  *   interrupt MyHandler() {
@@ -82,23 +68,17 @@ extern bool           irqPendingValid;
 /**
  * @brief Declares the program's reset handler on bankswitched NES builds.
  *
- * Expands to `int main()`, which the llvm-mos crt0 invokes at cold boot,
- * pinned to `.prg_rom_fixed`. main is the one piece of code that must
- * always be resident no matter what any switchable window currently holds
- * -- everything else, including the bankswitching calls themselves, runs
- * from it. NES_MAPPER_BANKSWITCHED is set by CMakeLists.txt from
- * LLVM_MOS_PLATFORM, so this follows the mapper choice automatically.
- * Follow the macro with the handler body.
+ * Expands to `int main()`, invoked by crt0 at cold boot, pinned to
+ * `.prg_rom_fixed`: main must stay mapped whatever any switchable window holds,
+ * since everything including the bankswitching runs from it.
  */
 #define RESET __attribute__((section(".prg_rom_fixed"))) int main()
 #else
 /**
  * @brief Declares the program's reset handler on NES builds.
  *
- * Expands to `int main()`, which the llvm-mos crt0 invokes at cold
- * boot. Follow the macro with the handler body. NROM has no banks to
- * escape to, so unlike the bankswitched variant of this macro, main isn't
- * pinned to any particular section.
+ * Expands to `int main()`, invoked by crt0 at cold boot. NROM has no banks, so
+ * unlike the bankswitched variant main is not pinned to a section.
  */
 #define RESET int main()
 #endif
@@ -111,80 +91,29 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
 /**
  * @brief Declares the NMI handler on NES builds.
  *
- * The resulting function is tagged `used` so the linker keeps it, and
- * `interrupt_norecurse` so the compiler emits a hardware-safe
- * prologue/epilogue. Follow with the handler body. The function is placed
- * directly at the hardware NMI vector (mos-platform's nes.ld: `.vector
- * 0xfffa : { SHORT(nmi) ... }`) by raw symbol name -- there is no
- * indirection and no runtime rearming; NMI has exactly one handler, chosen
- * at compile time.
+ * Sits at the hardware vector by raw symbol name: no indirection, no runtime
+ * rearming, one handler chosen at compile time.
  *
- * Takes an optional attribute-specifier-seq, spliced in right after the
- * `extern "C"` this expands to -- the same position real-world code uses
- * for e.g. `extern "C" [[noreturn]] void abort();`. That position (not a
- * leading prefix on the macro invocation) is required: `extern "C" void
- * nmi()` is a *linkage-specification* wrapping a declaration, not an
- * ordinary declaration itself, and a leading attribute-specifier-seq is only
- * grammatically valid at the start of an ordinary declaration --
- * `[[noreturn]] extern "C" void nmi();` is not valid C++. Write:
+ * The optional attribute-specifier-seq is spliced after the `extern "C"` this
+ * expands to. That position is required -- a leading attribute is only valid at
+ * the start of an ordinary declaration, and this is a linkage-specification.
  *
  * @code
- *   NMI() {
- *     ...   // ordinary handler: falls through, compiler-generated RTI returns
- *   }
- *
- *   NMI([[noreturn]]) {
- *     for (;;) { ... }   // body genuinely never falls off the end
- *   }
+ *   NMI()             { ... }              // falls through; RTI returns
+ *   NMI(FIXED)        { ... }              // and pinned to an always-mapped bank
+ *   NMI([[noreturn]]) { for (;;) { ... } } // never falls off the end
  * @endcode
  *
- * `[[noreturn]]` is only correct if the body truly never reaches its closing
- * brace by falling through (an infinite loop, or a tail transfer via ::JUMP
- * into something else that itself never returns) -- if it does return
- * normally every call, the compiler-generated RTI is exactly what hands
- * control back to the interrupted code, and `[[noreturn]]` is a lie about
- * that.
+ * PLACEMENT MATTERS: an interrupt arrives when nothing controls what is mapped,
+ * so a handler in a switchable window is correct only while nobody banks that
+ * window. Which section is always mapped is a project's layout decision, hence
+ * the composable argument. A project that banks nothing can omit it.
  *
- * @note Unverified: whether llvm-mos's `interrupt_norecurse` lowering
- * actually drops the RTI epilogue for a `[[noreturn]]`-marked, genuinely
- * non-falling-through body, or unconditionally emits it regardless (RTI
- * insertion may be tied to the interrupt calling convention itself, not to
- * the generic noreturn/unreachable codegen path that ordinary functions
- * use). If you need a vector-placed function with *guaranteed* zero
- * compiler-generated epilogue, don't rely on `[[noreturn]]` here -- use
- * ::NAKED_NMI / ::NAKED_IRQ instead, which sidestep the question entirely by
- * never asking llvm-mos to generate interrupt bookkeeping in the first
- * place.
+ * `[[noreturn]]` is a lie unless the body truly never reaches its closing brace.
  *
- * @note The C++-level function is named `nmi_vector`, not `nmi`, matching
- * ::IRQ's treatment for consistency -- an explicit `asm("nmi")` label
- * overrides the emitted symbol name back to the literal `nmi` nes.ld's
- * vector table expects, so the linker sees no difference.
- */
-/*
- * WHERE VECTOR HANDLERS SHOULD LIVE (a recommendation, not something these
- * macros impose).
- *
- * An interrupt arrives at a moment nothing controls: whatever bank a farcall
- * -- or a hand-rolled bank switch -- happens to have mapped is what the
- * vector lands in. A handler placed in a SWITCHABLE window is therefore only
- * correct while nobody banks that window. This project hit exactly that:
- * `nmi` sat at $A38C, inside MMC3's R7 window, so banking anything through
- * R7 would have vectored interrupts into that bank's contents.
- *
- * The fix is to place the handler somewhere always mapped -- on MMC3/VRC1
- * that is `.prg_rom_fixed` ($E000-$FFFF), the same region ::RESET uses. But
- * WHICH section that is, and whether a given board even has one, is a
- * project's own layout decision (an NROM build has no banking to hide from
- * in the first place), so it belongs at the definition, not here. Both
- * macros forward their arguments onto the function, so a project states it
- * where it defines the handler:
- *
- *     NMI(FIXED) { ... }      // FIXED from mmc3.hpp / vrc1.hpp
- *     IRQ(FIXED) { ... }
- *
- * composing exactly the way NMI([[noreturn]]) already does. A project that
- * banks nothing can leave them untagged and pay nothing.
+ * @note Unverified whether llvm-mos drops the RTI epilogue for `[[noreturn]]`.
+ *       For a guaranteed empty epilogue use ::NAKED_NMI / ::NAKED_IRQ.
+ * @note The C++ function is `nmi_vector`; `asm("nmi")` restores the symbol.
  */
 #define NMI(...)                                                          \
 ASM_LINKAGE __VA_ARGS__ void nmi_vector() asm("nmi");                     \
@@ -194,22 +123,12 @@ void nmi_vector()
 /**
  * @brief Declares the IRQ handler on NES builds.
  *
- * Same shape as ::NMI: the resulting function is placed directly at the
- * hardware IRQ vector (nes.ld: `SHORT(irq)`) by raw symbol name, tagged
- * `used`/`interrupt_norecurse`. There is exactly one IRQ handler, chosen at
- * compile time -- no gate, no lock, no runtime arming. Whatever IRQ sources
- * are enabled (e.g. the MMC3 scanline counter) all vector here; the handler
- * itself is responsible for telling them apart if more than one is active.
- * Follow with the handler body: `IRQ()` for an ordinary handler,
- * `IRQ([[noreturn]])` composes the same way as on ::NMI, with the same
- * caveat -- only correct if the body never falls through.
+ * Same shape as ::NMI, at the IRQ vector. Exactly one handler, chosen at compile
+ * time: every enabled IRQ source vectors here, and the handler tells them apart
+ * if more than one is active. Composes with attributes like ::NMI does.
  *
- * @note The C++-level function is named `irq_vector`, not `irq`: the
- * `::irq` namespace already occupies the unqualified name `irq` at global
- * scope, and a namespace and a function can't share one name in the same
- * scope. An explicit `asm("irq")` label overrides the emitted symbol name
- * back to the literal `irq` nes.ld's vector table expects, so the linker
- * sees no difference -- this is purely a C++-side rename.
+ * @note Named `irq_vector` because the `::irq` namespace already holds `irq` at
+ *       global scope; `asm("irq")` restores the symbol the vector expects.
  */
 #define IRQ(...)                                                          \
 ASM_LINKAGE __VA_ARGS__ void irq_vector() asm("irq");                     \
@@ -220,34 +139,17 @@ void irq_vector()
  * @brief Declares the NMI handler on NES builds with zero compiler-generated
  *        interrupt bookkeeping.
  *
- * Same vector placement as ::NMI (raw symbol name `nmi`, nes.ld: `SHORT(nmi)`
- * at $fffa), but tagged `naked` instead of `interrupt_norecurse`: llvm-mos
- * emits NO prologue or epilogue at all for this function -- no
- * imaginary-register save/restore, no compiler-generated RTI, nothing.
- * Whatever asm the body contains is *exactly* what ends up at the vector,
- * verbatim. The tradeoff for that certainty is that `naked` function bodies
- * may contain only `asm` statements -- ::JUMP / ::JUMP_INDIRECT are plain
- * single `asm` statements with no wrapper, so they're fine here, but nothing
- * else (no C++ statements at all) is, and the body is entirely responsible
- * for its own interrupt housekeeping if it doesn't tail-jump straight into
- * something else that handles that itself.
- *
- * The canonical use is a bare tail-jump trampoline into a real, separately
- * defined ::interrupt handler -- that handler's own prologue/epilogue does
- * all the actual register save/restore and RTI, so the vector-placed
- * function needs to do nothing but jump:
+ * Same vector placement as ::NMI but `naked`: no prologue, epilogue or RTI, so
+ * the body's asm is verbatim what lands at the vector. The price is that the
+ * body may contain only `asm` (::JUMP / ::JUMP_INDIRECT qualify) and owns its
+ * own housekeeping unless it tail-jumps somewhere that handles it.
  *
  * @code
  *   interrupt nmiHandler() { ... }   // real logic, own save/restore + RTI
- *
- *   NAKED_NMI {
- *     JUMP(nmiHandler);
- *   }
+ *   NAKED_NMI { JUMP(nmiHandler); }
  * @endcode
  *
- * Prefer plain ::NMI unless you specifically need the guarantee that no
- * compiler-generated code exists at the vector at all -- see the `@note` on
- * ::NMI's `[[noreturn]]` for why that guarantee isn't otherwise available.
+ * Prefer plain ::NMI unless you need the guarantee of no generated code.
  */
 #define NAKED_NMI                                            \
 ASM_LINKAGE void nmi_vector() asm("nmi");                     \
@@ -258,11 +160,8 @@ void nmi_vector()
  * @brief Declares the IRQ handler on NES builds with zero compiler-generated
  *        interrupt bookkeeping.
  *
- * Same relationship to ::IRQ as ::NAKED_NMI has to ::NMI: `naked` instead of
- * `interrupt_norecurse`, raw symbol name `irq` (nes.ld: `SHORT(irq)` at
- * $fffe), body must be pure `asm` (::JUMP / ::JUMP_INDIRECT are fine; nothing
- * else is). Same canonical use: a bare tail-jump into a separately defined
- * ::interrupt handler that does the real save/restore and RTI itself.
+ * To ::IRQ what ::NAKED_NMI is to ::NMI: `naked`, pure-`asm` body, same
+ * tail-jump-into-a-real-handler use.
  */
 #define NAKED_IRQ                                            \
 ASM_LINKAGE void irq_vector() asm("irq");                     \
@@ -274,17 +173,11 @@ void irq_vector()
  *        link-time-known entry point, e.g. another ::interrupt-tagged
  *        handler). Never falls through.
  *
- * Nothing more than `__asm__ volatile ("jmp " #target)` -- a single inline
- * `asm` statement, no wrapper, no runtime or compile-time branch. That
- * means it's usable anywhere plain `asm` is, including inside a `naked`
- * function body (which may contain only `asm` statements):
+ * A single `asm` statement, no wrapper -- so it is usable anywhere plain `asm`
+ * is, including a `naked` body:
  *
  * @code
- *   interrupt nmiHandler() { ... }   // real logic, own save/restore + RTI
- *
- *   NAKED_NMI {
- *     JUMP(nmiHandler);
- *   }
+ *   NAKED_NMI { JUMP(nmiHandler); }
  * @endcode
  */
 #define JUMP(target) __asm__ volatile ("jmp " #target)
@@ -294,10 +187,8 @@ void irq_vector()
  *        variable holding a runtime-chosen entry point (e.g. ::irqTrampoline
  *        elsewhere). Never falls through.
  *
- * Nothing more than `__asm__ volatile ("jmp (" #target ")")` -- same
- * single-statement, zero-overhead shape as ::JUMP, just through the
- * variable's contents instead of straight to a fixed address. Also usable
- * inside a `naked` function body.
+ * Same single-statement shape as ::JUMP, through the variable's contents rather
+ * than a fixed address. Also usable in a `naked` body.
  */
 #define JUMP_INDIRECT(target) __asm__ volatile ("jmp (" #target ")")
 
@@ -351,18 +242,9 @@ inline static void usr_main ()
  * The SDL3 renderer calls this once per simulated VBlank, matching
  * the NES NMI cadence so the same source works on both targets.
  *
- * @note Named `nmi_vector`, not `nmi`, matching ::IRQ's desktop-side
- * treatment for consistency with the NES macro of the same name (there's
- * no `::nmi` namespace to collide with here, but every backend's
- * `extern void nmi_vector();` / call site is kept in lock-step with this
- * name either way).
- *
- * @note Takes and discards the same optional attribute-specifier-seq
- * argument the NES-side ::NMI does (there's no `extern "C"`/`interrupt_norecurse`
- * splice point to inject it into here -- this is an ordinary function). It's
- * only there so `NMI()`/`NMI([[noreturn]])` are valid call syntax on every
- * target, matching the NES side, instead of NES needing `NMI()` while every
- * other backend needs the parens omitted entirely.
+ * @note Named `nmi_vector` to stay in lock-step with the NES macro.
+ * @note Takes and discards the attribute argument, so `NMI(...)` is valid call
+ *       syntax on every target.
  */
 #define NMI(...)                \
 void nmi_vector()
@@ -370,25 +252,14 @@ void nmi_vector()
 /**
  * @brief Declares the IRQ handler on non-NES builds.
  *
- * Non-NES equivalent of ::NMI, for symmetry with NES source that defines
- * both vectors. Unlike ::NMI it isn't called directly by the renderer --
- * instead it's the single fixed entry point that library code arms as
- * ::irq::irqHandler for any *real* interrupt source (e.g.
- * ::mmc3::ScheduleScanlineIRQ), matching the NES side where the hardware
- * IRQ vector is one compile-time-fixed function no matter which mapper
- * feature raised the interrupt -- only ::irq::irqPosition (the scanline)
- * varies per source. Application-level convenience handlers that don't
- * go through a real interrupt source (e.g.
- * ::video::WaitThenReactToSpriteZero) instead arm their own callback
- * directly and never touch this function.
+ * Non-NES equivalent of ::NMI. Not called by the renderer directly: it is the
+ * single fixed entry point library code arms as ::irq::irqHandler for any real
+ * interrupt source, mirroring the NES vector, with only ::irq::irqPosition
+ * varying per source. Convenience handlers that bypass a real source arm their
+ * own callback and never touch this.
  *
- * @note Named `irq_vector`, not `irq`, so it doesn't collide with the
- * `::irq` namespace at global scope -- see the NES-side ::IRQ's @note.
- * There's no hardware vector on this target, so nothing needs the literal
- * name `irq`.
- *
- * @note Takes and discards an optional attribute-specifier-seq argument,
- * same reasoning as this file's own ::NMI just above.
+ * @note Named `irq_vector` to avoid the `::irq` namespace; attribute argument
+ *       taken and discarded, as with ::NMI above.
  */
 #define IRQ(...)                \
 void irq_vector()
@@ -408,11 +279,8 @@ extern void irq_vector();
 /**
  * @brief Non-NES equivalent of ::NAKED_NMI.
  *
- * There is no hardware vector or naked-function restriction off NES --
- * ::nmi() is just an ordinary function the renderer calls once per
- * simulated VBlank -- so this collapses to the same thing as ::NMI. Exists
- * so shared source (e.g. a trampoline written once as `NAKED_NMI { JUMP(x); }`)
- * compiles unchanged on every target.
+ * No vector and no naked-body restriction off NES, so this collapses to ::NMI.
+ * Exists so a shared trampoline compiles unchanged on every target.
  */
 #define NAKED_NMI               \
 void nmi_vector()
@@ -426,9 +294,7 @@ void irq_vector()
 /**
  * @brief Non-NES equivalent of ::JUMP: an ordinary tail call.
  *
- * There's no `naked` body restriction to a single `asm` statement off NES,
- * so this is just `target();` -- a normal call, immediately followed by
- * the compiler-generated return from ::NAKED_NMI / ::NAKED_IRQ.
+ * Just `target();` -- there is no single-`asm` body restriction off NES.
  */
 #define JUMP(target) target()
 
@@ -441,11 +307,9 @@ void irq_vector()
 /**
  * @brief Enables the CPU interrupt line — a no-op off NES.
  *
- * @note This function does nothing on non-NES targets: the emu/console
- * backends dispatch their scanline IRQ synchronously from the renderer, with
- * no hardware interrupt line to mask in the first place. Declared so a
- * ::RESET body written once (calling ::EnableInterrupts / ::DisableInterrupts
- * around setup) compiles unchanged on every target.
+ * @note Off-NES backends dispatch their scanline IRQ synchronously from the
+ * renderer, so there is no interrupt line to mask. Declared so a ::RESET body
+ * written once compiles unchanged on every target.
  */
 namespace irq {
 inline void EnableInterrupts()  {}
@@ -464,11 +328,8 @@ namespace irq {
 /**
  * @brief Soft-resets the application.
  *
- * On NES builds, re-enters through the hardware reset vector (`jmp ($FFFC)`),
- * the same entry point a cold boot uses. On desktop builds, runs
- * ::irq::post to tear down SDL and audio, then calls `exit(0)`. Lets
- * application code spin back to ::RESET on NES or quit cleanly on desktop
- * from the same call site, with no `#ifdef` needed.
+ * On NES re-enters through the hardware reset vector, the cold-boot entry
+ * point. Off NES runs ::irq::post and exits. One call site, no `#ifdef`.
  */
 void reset();
 } // namespace irq

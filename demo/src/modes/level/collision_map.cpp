@@ -155,7 +155,7 @@ void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
 // always_inline: both callers are in this TU; the compiler sees the concrete
 // global addresses and emits absolute addressing instead of the indirect ZP
 // addressing that noinline + reference parameters forced.
-__attribute__((always_inline))
+AI
 static void AdvancePairForward(Cursor& s, DynamicCursor& d) {
     s.dp += levelHeight;
     const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;
@@ -166,7 +166,7 @@ static void AdvancePairForward(Cursor& s, DynamicCursor& d) {
     d.lp = dlp; d.dp = ddp; d.progress = dprog;
 }
 
-__attribute__((always_inline))
+AI
 static void AdvancePairBackward(Cursor& s, DynamicCursor& d) {
     s.dp -= levelHeight;
     const u8* dlp  = d.lp;  u8* ddp = d.dp;  u8 dprog = d.progress;

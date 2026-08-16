@@ -53,32 +53,17 @@ volatile u8 bankedCallWindowTestMarker = 0;
 }
 
 /*
- * BANKED CALL, Phase 3 smoke test: exercises a REAL multi-bank window --
- * window3Control now has TWO distinct physical banks that can appear at
- * $C000-$DFFF (bank 2, window_test_tag's default bank above, and bank 3,
- * here), so CallInSection has to write the CORRECT one each time instead of
- * reasserting the one bank that was always right (::VRC1::Long's own doc
- * comment on the project's old degenerate assumption). See PRG-ROM growing
- * to 40 KiB and prg_rom_bank3 in vrc1.ld for the ORIGIN-encoding this
- * depends on.
+ * Smoke test: a REAL multi-bank window. window3Control now has two distinct
+ * banks that can appear at $C000-$DFFF, so CallInSection must write the correct
+ * one each time rather than reasserting the one that was always right. The tag
+ * hand-encodes bank 3 in rom_address's high bits as a constexpr literal, so it
+ * pays no runtime-resolution cost.
  *
- * bank3_test_tag's section() hand-encodes bank 3 directly into rom_address's
- * high bits ((3 << 16) | 0xc000) -- CallInSection extracts it back out with
- * rom_address >> 16 (see its own comment) -- still a real constexpr literal,
- * so this pays the same ~0 overhead window_test_tag's fix established, not
- * the ~120-byte runtime-resolution tax.
- *
- * This function ALSO calls Call<BankedCallWindowTest>() from inside itself
- * -- a NESTED cross-bank call, both targeting window3Control but different
- * banks (3, then 2, then back to 3). This is the real test: it only comes
- * out correct if CallInSection's SHADOW-based save/restore threads through
- * a genuine BANK VALUE change on entry/exit, not just window-register
- * identity (Phase 2's test never exercised this, since window_test_tag was
- * the ONLY non-fixed tag in the domain and never nested into another one).
- * Getting the bank number wrong here doesn't just miss reasserting a value
- * that was already correct -- it means whichever bank is ACTUALLY switched
- * in doesn't contain the code control returns to, the first real case in
- * this design where that's true.
+ * It also calls Call<BankedCallWindowTest>() from inside itself: a NESTED
+ * cross-bank call, same window, different banks. That is the real test -- it
+ * only comes out right if the save/restore threads through a genuine bank VALUE
+ * change, not just window-register identity. Get the bank wrong and the bank
+ * actually switched in does not contain the code control returns to.
  */
 struct bank3_test_tag {};
 
@@ -102,28 +87,16 @@ volatile u8 bankedCallBank3TestMarker = 0;
 }
 
 /*
- * BANKED CALL, Phase 4 smoke test: an OVERSIZED domain -- bigger than one
- * 8 KiB window, spanning window2Control AND window3Control simultaneously
- * (banks 4+5, $A000-$DFFF, see prg_rom_oversized in vrc1.ld). Unlike every
- * earlier tag, size here is NOT a hand-entered literal: it's genuinely
- * read from the linker's own SIZEOF(), because how big this domain gets is
- * exactly the fact nobody should have to declare in advance (that's the
- * whole point of the feature -- see BANKED_CALL_THEORY.txt). CallInSection
- * ceil-divides it to get a window count and, when that's >1, hands off to
- * CallInWindows2 (vrc1.hpp) instead of the single-register path.
+ * Smoke test: an OVERSIZED domain, bigger than one window and spanning
+ * window2Control and window3Control at once. Unlike every earlier tag, size
+ * here is read from the linker's SIZEOF() rather than hand-entered -- how big
+ * the domain gets is exactly what nobody should have to declare in advance.
+ * CallInSection ceil-divides it and hands off to CallInWindows2 when >1.
  *
- * BUG, CAUGHT LATE (found via a real runtime crash, not this file's own
- * review): base bank was originally hand-entered as 5, matching a mental
- * "next free bank after bank3_test's 3" model that was never checked
- * against the REAL file layout FULL() actually produces (vrc1.ld). Real
- * banks are assigned by FILE OFFSET / 0x2000, in FULL()'s listed order --
- * prg_rom_oversized is the 4th PRG region listed, immediately after
- * prg_rom_bank3 (which ends exactly at file offset 0x8000 = the START of
- * bank 4), so its two halves are REALLY banks 4 and 5, not 5 and 6. Bank 6
- * is actually prg_rom_fixed's own real bank identity. Writing 6 into
- * window3Control (as the old, wrong base+1 did) therefore mapped in
- * prg_rom_fixed's content, not OversizedFuncHigh's -- genuine garbage
- * execution, not a data/marker mismatch a marker check would have caught.
+ * WATCH THE BANK NUMBER. Real banks are file offset / 0x2000 in FULL()'s listed
+ * order, NOT "next free after the previous tag". Hand-entering the wrong base
+ * mapped in the fixed bank's content instead of this domain's -- garbage
+ * execution, found by a runtime crash rather than review.
  */
 struct oversized_tag {};
 

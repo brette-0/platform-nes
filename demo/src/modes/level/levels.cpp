@@ -97,7 +97,7 @@ namespace level {
         return true;
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetNextMetaTile() {
         const u8 s = edgeR.Fetch();
         const u8 d = dynEdgeR.Fetch();
@@ -106,7 +106,7 @@ namespace level {
         return d ? d : s;
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetPrevMetaTile() {
         const u8 s = edgeL.Fetch();
         const u8 d = dynEdgeL.Fetch();
@@ -115,7 +115,7 @@ namespace level {
         return d ? d : s;
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetNextWrite(const u8 step) {
         if (~step & 1) {
             if (step == 0) {
@@ -140,7 +140,7 @@ namespace level {
         return step & 1 ? Metatiles_UR[m] : Metatiles_UL[m];
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetPrevWrite(const u8 step) {
         if (~step & 1) {
             if (step == 0) {
@@ -165,13 +165,13 @@ namespace level {
         return step & 1 ? Metatiles_UL[m] : Metatiles_UR[m];
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetCurrentNext(const u8 step) {
         const u8 m = MetatileBuffer[step >> 1];
         return step & 1 ? Metatiles_BR[m] : Metatiles_BL[m];
     }
 
-    __attribute__((always_inline))
+    AI
     u8 GetCurrentPrev(const u8 step) {
         const u8 m = MetatileBuffer[step >> 1];
         return step & 1 ? Metatiles_BL[m] : Metatiles_BR[m];

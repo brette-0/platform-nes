@@ -10,13 +10,9 @@
  * must survive a bankswitch into the mapper's always-mapped $E000-$FFFF
  * window.
  *
- * This module is a class (::VRC1), not a namespace, matching ::mmc3's own
- * shape: every member is static, and the class itself is non-instantiable
- * (all constructors deleted) -- the NES target has exactly one physical VRC1
- * chip on the cartridge, so there is never a real object to construct there.
- * See mmc3.hpp's own file comment for the fuller rationale (a future
- * emulated-cartridge model gets somewhere to hold real per-instance state
- * without colliding names with this NES-side, state-free version).
+ * A class rather than a namespace, matching ::mmc3: all members static, no
+ * constructor, since there is one physical chip and no object to build. See
+ * mmc3.hpp's file comment for the fuller rationale.
  */
 #pragma once
 
@@ -103,34 +99,21 @@ public:
      * @brief Calls @p fn with one of VRC1's three switchable windows temporarily
      *        re-banked, then restores whatever was banked there before returning.
      *
-     * @p window selects *which* window gets switched -- 0 for window1Control
-     * ($8000-$9FFF), 1 for window2Control ($A000-$BFFF), 2 for window3Control
-     * ($C000-$DFFF) -- defaulting to window 0 when omitted. Lives in the fixed
-     * bank (::FIXED) so it's always reachable regardless of what's currently
-     * banked in elsewhere.
+     * @p window is 0, 1 or 2, defaulting to 0. Lives in the fixed bank so it is
+     * reachable regardless of what is banked elsewhere. @p fn may be any
+     * callable whose `fn()` converts to @p TReturn.
      *
-     * @p fn may be any callable -- a captureless function pointer or a lambda
-     * (captures included, for passing arguments) -- so long as `fn()` is valid
-     * and convertible to @p TReturn.
-     *
-     * @note At the project's current 32 KiB PRG-ROM there is exactly one valid
-     *       bank per window, so the bank written here is that window's own
-     *       boot-time default (see vrc1.cpp) -- today this call reasserts the
-     *       window's already-active bank rather than switching to a different
-     *       one. Once real multi-bank content exists per window (the
-     *       `.prg_rom_0` / `.prg_rom_1` / `.prg_rom_2` tagging vrc1.ld's file
-     *       comment calls out as future work), an explicit target-bank
-     *       parameter will need to be added here.
+     * @note Writes the window's boot-time default bank, so with one bank per
+     *       window this reasserts what is already mapped. Multi-bank content
+     *       per window will need an explicit target-bank parameter here.
      *
      * @tparam TReturn Result type of the call; not deducible from @p fn, so
      *                 specify it explicitly at the call site, e.g. `Long<int>(...)`.
      * @param fn     Callable to invoke once the selected window is banked in.
      * @param window Which window to switch: 0, 1, or 2 (default 0); ignored off-NES.
      *
-     * @note Off-NES there is no PRG-ROM to bank -- window1Control/2/3 aren't even
-     *       defined there (vrc1.cpp is an NES-only source file) -- so this
-     *       collapses to a plain `return fn();`, skipping ::Detail::CallInWindow
-     *       entirely rather than binding a reference to an undefined extern.
+     * @note Off-NES the window registers do not exist, so this collapses to a
+     *       plain `return fn();` rather than binding an undefined extern.
      */
     template <typename TReturn, typename TFunc>
     static FIXED TReturn Long(TFunc fn, u8 window = 0);
@@ -198,11 +181,9 @@ public:
      * @p reg) picks between chr0Control ($E000, PPU $0000-$0FFF / pattern table
      * 0) and chr1Control ($F000, PPU $1000-$1FFF / pattern table 1).
      *
-     * On NES: which bit of the *shared* chrHighBits register this call is
-     * allowed to touch -- see the comment above chrHighBits. The read-modify-
-     * write against chrHighBits' shadow is what keeps the other window's high
-     * bit untouched. Off-NES: there's no hardware to poke, so this instead
-     * records the full bank number into ::chrBanks for ::GetTileLMA to resolve.
+     * On NES the read-modify-write against chrHighBits' shadow is what keeps the
+     * other window's high bit untouched. Off-NES it records the full bank number
+     * into ::chrBanks for ::GetTileLMA to resolve.
      *
      * @param reg  chr0Control or chr1Control; any other instantiation is a
      *             compile error.
@@ -248,41 +229,26 @@ public:
      * @brief Hardware facts for one tag/domain. Primary template deliberately
      *        undefined: an un-tagged Tag is a compile error, not a silent default.
      *
-     * Every specialization provides `static section_t section()` -- a
-     * FUNCTION, not a data member, so both shapes below share one calling
-     * convention (`L::section()`) at the Call<Fn>/CallBlock<Fn> call site.
-     * There is no `always_mapped` escape hatch; see mmc3.hpp's bank_layout
-     * doc for why a layout that names no bank was a contradiction.
+     * Every specialization provides `static section_t section()` -- a function,
+     * not a data member, so both shapes below share one call convention. There
+     * is no `always_mapped` escape hatch; see mmc3.hpp's bank_layout.
      *
-     * PREFER `static constexpr section_t section() { return {addr, size}; }`,
-     * a literal the human enters by hand, matched against a linker script rule
-     * that gives this domain its OWN dedicated MEMORY region at that SAME known
-     * ORIGIN on purpose (see bank_layout<window_test_tag> in vrc1.cpp, and
-     * prg_rom_window_test in vrc1.ld, for a worked example, including a
-     * link-time ASSERT that catches the two drifting apart). This is a real
-     * compile-time constant, so CallInSection's window/bank resolution folds
-     * away entirely -- measured equivalent to a hand-supplied ::Long window
-     * argument, i.e. free.
+     * PREFER `static constexpr section_t section() { return {addr, size}; }` --
+     * a hand-entered literal matched against a linker rule giving this domain
+     * its own MEMORY region at that same ORIGIN, ideally with a link-time
+     * ASSERT catching the two drifting apart. Being a real constant,
+     * CallInSection's window/bank resolution folds away entirely: free.
      *
-     * A non-constexpr `static section_t section()`, computing the value at
-     * runtime from a linker-PROVIDE()'d symbol's address (LOADADDR() is a
-     * link-time fact; converting a linker symbol's address to an integer is not
-     * a constant expression in standard C++), is the fallback for a domain that
-     * genuinely can't be given a fixed address -- e.g. sharing a region with
-     * other, unrelated content, so its final placement depends on everything
-     * else placed before it. MEASURED COST: ~120 bytes of real 6502 code per
-     * Call<Fn>/CallBlock<Fn> call site (a 32-bit subtract/shift-divide/branch),
-     * because the compiler doesn't fold the computation back down to the
-     * compile-time constant it actually is for any one Call<Fn> instantiation
-     * -- not a byte-width issue (confirmed: narrowing to u16 barely helps), a
-     * genuine missed optimization through the runtime section_t indirection.
-     * Reach for this only when a dedicated region truly isn't possible; it is
-     * NOT the default. (If ever needed: a stored, dynamically-initialized data
-     * member is NOT a safe alternative to computing fresh in the function body
-     * -- unprioritized dynamic initializers run AFTER every explicitly
-     * prioritized __attribute__((constructor(N))) on this toolchain, so an
-     * early constructor calling Call<Fn> could read the member before its own
-     * initializer has run.)
+     * A non-constexpr section(), computing from a linker-PROVIDE()'d symbol at
+     * runtime, is the fallback for a domain that genuinely cannot be given a
+     * fixed address. It costs ~120 bytes per call site, since the compiler will
+     * not fold the computation back down through the runtime indirection.
+     * Reach for it only when a dedicated region is impossible.
+     *
+     * If you do: compute fresh in the function body. A stored,
+     * dynamically-initialized member is unsafe, because unprioritized dynamic
+     * initializers run after every prioritized constructor(N) on this
+     * toolchain.
      */
     template <typename Tag> struct bank_layout;
 
@@ -292,7 +258,35 @@ public:
     /// deliberately undefined, same reasoning as bank_layout<Tag>.
     template <auto Fn> struct bank_of;
 
+    /**
+     * @brief A function pointer that carries its own bank -- the storable form
+     *        of what ::Call<Fn> knows at compile time.
+     *
+     * Same purpose as mmc3::callable_t, whose doc has the full reasoning:
+     * ::Call<Fn> needs Fn nameable as a template argument and
+     * `table[runtime_index]` never is, so ::GetCallable resolves bank_of<Fn>
+     * into a value at the one point Fn is still nameable.
+     *
+     * Five bytes here against MMC3's four. VRC1's windows are contiguous, so a
+     * domain may span two of them, and `windows` records that. It is also the
+     * one part of Detail::CallInSection that does NOT constant-fold for an
+     * oversized domain, `size` being link-computed, so resolving it here saves
+     * real work per call.
+     *
+     * Bank encoding follows CallInSection: the high half read literally, zero
+     * meaning "use the window index". No bank+1 bias, unlike MMC3.
+     */
+    template <typename Ret, typename... Args>
+    struct callable_t {
+        Ret (*fn)(Args...);  ///< the target, as an ordinary 16-bit pointer
+        u8 window;           ///< 0 = window1Control ($8000), 1 = window2Control, 2 = window3Control
+        u8 bank;             ///< value written to the selected window's register
+        u8 windows;          ///< how many adjacent windows the domain spans (1, or 2 for an oversized domain)
+    };
+
     /// Return-type extraction for a plain function pointer, used by Call<Fn>.
+    /// Also names the matching ::callable_t, so ::GetCallable can spell its own
+    /// return type without the caller restating the signature.
     template <typename T> struct function_traits;
 
     /**
@@ -316,6 +310,44 @@ public:
     template <auto Fn, typename Block>
     static FIXED auto CallBlock(Block &&block) -> decltype(block());
 
+    /**
+     * @brief Resolves a tagged function into a storable, self-describing
+     *        ::callable_t. The compile-time half of runtime dispatch.
+     *
+     * Call it wherever the function is still nameable as a literal, then store
+     * or pass the result freely -- it needs no tag, no template argument, and
+     * no bank_of<> lookup ever again:
+     *
+     *     VRC1_BANKED(".prg_rom_enemies_a", enemiesA, void, UpdateWalker, Entity*);
+     *     VRC1_BANKED(".prg_rom_enemies_b", enemiesB, void, UpdateFlyer,   Entity*);
+     *
+     *     // two DIFFERENT domains -- no single bank_of<> is right for both.
+     *     // Spell the element type: `constexpr auto table[]` cannot deduce
+     *     // from a braced list.
+     *     constexpr VRC1::callable_t<void, Entity*> table[] = {
+     *         VRC1::GetCallable<UpdateWalker>(), VRC1::GetCallable<UpdateFlyer>() };
+     *
+     *     VRC1::Call(table[entity.type], &entity);   // runtime index, correct bank
+     *
+     * `constexpr` so such a table lands in ROM fully resolved. That needs the
+     * tag's bank_layout<Tag>::section() to be constexpr, the preferred shape
+     * anyway; a runtime section() still works but initializes dynamically.
+     */
+    template <auto Fn>
+    static constexpr auto GetCallable() ->
+        typename function_traits<decltype(Fn)>::callable_type;
+
+    /**
+     * @brief Calls a ::callable_t, banking in whatever it says it needs.
+     *
+     * The runtime counterpart to ::Call<Fn>: an ordinary overload rather than a
+     * template on Fn, taking the already-resolved value ::GetCallable produced.
+     * Same switch-run-restore as every other farcall here, minus the address
+     * arithmetic and the size division, which ::GetCallable already did.
+     */
+    template <typename Ret, typename... Args, typename... Actual>
+    static FIXED Ret Call(const callable_t<Ret, Args...> &c, Actual &&...args);
+
 private:
     /**
      * @brief Implementation details not part of VRC1's public interface.
@@ -336,50 +368,26 @@ private:
         /**
          * @brief Implementation of ::Long once the target register is resolved.
          *
-         * Not for direct use -- call ::Long. Saves @p reg (via ::SHADOW, which
-         * restores on any exit path, including a `return` straight out of the
-         * body below), switches it to @p bank, invokes @p fn, and writes the
-         * prior value back as the scope closes.
+         * Not for direct use -- call ::Long. Saves @p reg, switches it to @p bank,
+         * invokes @p fn, writes the prior value back.
          *
-         * [[gnu::noinline]] is LOAD-BEARING, not a size/style choice: `fixed`
-         * only places an out-of-line SYMBOL, and a template this small is an
-         * easy inlining target at -Os -- confirmed empirically, it was getting
-         * fully inlined into EVERY caller, with no separate out-of-line copy
-         * ever existing at all. That's silently fatal the moment a caller
-         * whose OWN code lives inside the very window being switched (e.g. a
-         * bank3-resident function reaching another function that also lives in
-         * window3Control's range) inlines this: the restore-after-return half
-         * of this function's own body ends up physically embedded inside the
-         * window that just got switched AWAY from the caller's own bank, so by
-         * the time the inner call returns, that restore code isn't the bank
-         * mapped in anymore -- the CPU resumes into whatever unrelated bytes
-         * the OTHER bank happens to have at that address. Confirmed as a real,
-         * reproduced crash (illegal opcodes immediately after the inner call
-         * returns), not a theoretical concern -- see BANKED_CALL_THEORY.txt.
-         * noinline forces a real, separate, permanently-fixed-bank-resident
-         * symbol to exist, so this function's own execution -- switch, call,
-         * restore -- never depends on which window is currently mapped in
-         * anywhere else, including the caller's own.
+         * [[gnu::noinline]] IS LOAD-BEARING. A section attribute places only an
+         * out-of-line symbol, and a template this small is an easy inlining
+         * target -- confirmed, no separate copy existed at all. That is fatal
+         * once a caller whose own code lives in the window being switched
+         * inlines it: the restore half ends up embedded in the bank just
+         * switched away, so the CPU resumes into unrelated bytes. A reproduced
+         * crash, not a theory. noinline forces a real fixed-bank symbol, so
+         * switch/call/restore never depends on what is mapped elsewhere.
          */
         template <typename TReturn, u16 addr, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInWindow(tech::wo_register<addr> &reg, u8 bank, TFunc fn) {
             // DELIBERATELY NOT ::SHADOW -- same measured reason as mmc3.hpp's
-            // CallInWindow, which this mirrors. tech::shadow_scope is a real
-            // object (a tuple of REFERENCES to the registers, a tuple of saved
-            // copies, and a bool loop guard), and 4 bytes of live state across
-            // fn() is more than llvm-mos keeps in registers. The thunk then
-            // allocates a soft-stack frame, costing a frame-pointer adjust in
-            // and out plus four __rc20-23 pushes and pulls to free up the
-            // pointer registers to address it. Measured on the MMC3 side: 116
-            // of the thunk's ~171 cycles were that frame; the bank switch
-            // itself is 35.
-            //
-            // Nothing here needs a general scope. There is one register and its
-            // address is a link-time constant, so saving the single byte by
-            // hand leaves live state small enough to sit on the hardware stack.
-            // The restore still happens after fn() returns and still goes
-            // through set() (shadow AND hardware), which is exactly the write
-            // shadow_scope's destructor performed.
+            // CallInWindow, which this mirrors: a shadow scope's live state
+            // across fn() forces a soft-stack frame, costing more than the bank
+            // switch itself. One register at a link-time constant address needs
+            // no general scope, and the hand-saved byte stays on the hardware
+            // stack. The restore still goes through set(), shadow and hardware.
             const u8 saved = reg.get();
             SwitchBank(reg, bank);
             if constexpr (__is_same(TReturn, void)) {
@@ -394,22 +402,17 @@ private:
 
         /**
          * @brief Like CallInWindow, but for a domain spanning TWO adjacent
-         *        windows simultaneously (BANKED_CALL_THEORY.txt's "oversized
-         *        domain" case, Phase 4) -- switches windowIndexBase to bankBase
-         *        AND windowIndexBase+1 to bankBase+1 (nested SHADOW, same
-         *        save/restore composition CallInWindow already gives a single
-         *        register), runs @p fn with BOTH mapped, restores both on any
-         *        exit path. Only the two pairings this project's own windows
-         *        allow exist: (window1,window2) or (window2,window3) -- VRC1's
-         *        three windows are physically contiguous, so N adjacent ones can
-         *        be driven as one flat region, but there are only two possible
-         *        adjacent PAIRS to enumerate, not a general N-window loop.
+         *        windows: switches windowIndexBase to bankBase and the next
+         *        window to bankBase+1, runs @p fn with both mapped, restores
+         *        both on any exit path.
+         *
+         * The three windows are physically contiguous, so adjacent ones drive
+         * one flat region -- but only two adjacent PAIRS exist to enumerate,
+         * hence no general N-window loop.
          */
-        // [[gnu::noinline]]: same load-bearing reason as CallInWindow's own --
-        // see its comment. Doubly true here, since this function's own body
-        // calls CallInWindow twice more (nested), all of which needs to stay a
-        // real, separate, permanently-fixed-bank-resident unit regardless of
-        // which switchable bank any CALLER of this function happens to live in.
+        // [[gnu::noinline]] for CallInWindow's reason, doubly so: this body
+        // nests two more CallInWindow calls, all of which must stay one real
+        // fixed-bank unit whatever bank the caller lives in.
         template <typename TReturn, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInWindows2(u8 windowIndexBase, u8 bankBase, TFunc fn) {
             switch (windowIndexBase) {
@@ -429,40 +432,21 @@ private:
          * @brief Resolves a section_t (rom_address+size) to whatever register(s)
          *        writes VRC1 needs, then runs @p fn.
          *
-         * WINDOW is always derived from the low 16 bits of rom_address (the real
-         * CPU-visible VMA -- exactly what an absolute JSR to this content would
-         * truncate to on real hardware, since 6502 relocations only ever carry
-         * 16 bits regardless of what the linker privately tracked). BANK is
-         * separate: for content sharing the project's original, un-encoded
-         * switchable region (rom_address fits in 16 bits, no high bits set),
-         * bank == window index -- the project's long-standing "one bank per
-         * window" degenerate default (::_reset boot-init, ::Long's own doc
-         * comment). For an EXPLICIT alternate bank (bank_layout<Tag>::section()
-         * hand-encodes its real bank number in rom_address's high bits, matching
-         * prg_rom_bankN's ORIGIN convention in vrc1.ld -- see that file's Phase 3
-         * comment), the encoded number wins. This lets old, un-encoded tags
-         * (window_test_tag) keep working unchanged while new, explicit-bank tags
-         * (bank3_test_tag) get a real, distinct bank -- see BANKED_CALL_THEORY.txt.
+         * WINDOW comes from the low 16 bits of rom_address -- the CPU-visible
+         * VMA, exactly what an absolute JSR truncates to. BANK is separate: with
+         * no high bits set, bank == window index, the one-bank-per-window
+         * default; where bank_layout hand-encodes a real bank number in the high
+         * bits, that wins. So un-encoded tags keep working while explicit-bank
+         * tags get a distinct bank.
          *
-         * WINDOW COUNT (Phase 4) comes from `size`, ceil-divided by kWindowSize.
-         * Unlike rom_address, size is genuinely link-computed for an oversized
-         * domain (SIZEOF() of however much content actually got tagged into it
-         * -- nobody hand-declares this, the whole point of the feature), so
-         * this division is NOT a compile-time constant the way Phase 2/3's
-         * single-window resolution is -- it costs real runtime bytes, unlike
-         * everything else CallInSection does. That's an accepted, necessary
-         * cost of dynamic sizing, not a missed optimization to chase; see
-         * BANKED_CALL_THEORY.txt's Phase 4 notes.
+         * WINDOW COUNT is `size` ceil-divided by kWindowSize. Unlike
+         * rom_address, size is genuinely link-computed for an oversized domain,
+         * so this division costs real runtime bytes -- an accepted cost of
+         * dynamic sizing, not a missed optimization.
          *
-         * [[gnu::noinline]]: same load-bearing reason as CallInWindow's own --
-         * see its comment. This is the entry point Call<Fn>/CallBlock<Fn>
-         * actually invoke, so it's the one that matters most: without this,
-         * confirmed empirically, no separate out-of-line copy of this
-         * machinery ever existed at all -- it got fully inlined into every
-         * caller, silently defeating `fixed` the moment a caller living in a
-         * switchable bank called into another function sharing that same
-         * window (a real, reproduced crash -- illegal opcodes immediately
-         * after the inner call returns -- not a theoretical concern).
+         * [[gnu::noinline]] for the same load-bearing reason as CallInWindow's,
+         * and this is the entry point Call<Fn>/CallBlock<Fn> invoke, so it
+         * matters most.
          */
         template <typename TReturn, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInSection(const section_t &section, TFunc fn) {
@@ -486,6 +470,7 @@ private:
 template <typename R, typename... A>
 struct VRC1::function_traits<R (*)(A...)> {
     using return_type = R;
+    using callable_type = VRC1::callable_t<R, A...>;
 };
 
 template <typename TReturn, typename TFunc>
@@ -525,24 +510,57 @@ FIXED auto VRC1::CallBlock(Block &&block) -> decltype(block()) {
 #endif
 }
 
+template <auto Fn>
+constexpr auto VRC1::GetCallable() ->
+    typename function_traits<decltype(Fn)>::callable_type {
+#ifdef TARGET_NES
+    using L = typename bank_of<Fn>::layout;
+    const section_t s = L::section();
+    // Detail::CallInSection's derivation, done once here instead of per call:
+    // same un-biased bank encoding (zero high half means the window index
+    // doubles as the bank) and the same ceil-division of size.
+    const u16 vma = static_cast<u16>(s.rom_address);
+    const u8 window = static_cast<u8>((vma - Detail::kWindowBase) / Detail::kWindowSize);
+    const u8 explicitBank = static_cast<u8>(s.rom_address >> 16);
+    const u8 windows = static_cast<u8>((s.size + Detail::kWindowSize - 1) / Detail::kWindowSize);
+    return { Fn, window, static_cast<u8>(explicitBank != 0 ? explicitBank : window), windows };
+#else
+    // Off-NES there are no banks and bank_layout<Tag> is typically not even
+    // specialized, so resolving here would be a compile error. Call() below
+    // ignores these fields off-NES.
+    return { Fn, 0, 0, 1 };
+#endif
+}
+
+template <typename Ret, typename... Args, typename... Actual>
+FIXED Ret VRC1::Call(const callable_t<Ret, Args...> &c, Actual &&...args) {
+#ifdef TARGET_NES
+    // window1Control/2/3 are different types, so a runtime window choice has to
+    // be a branch between instantiations rather than a variable -- the shape
+    // Detail::CallInSection ends in, minus the arithmetic preceding it there.
+    auto invoke = [&]() -> Ret { return c.fn(static_cast<Actual &&>(args)...); };
+    if (c.windows > 1) return Detail::CallInWindows2<Ret>(c.window, c.bank, invoke);
+    switch (c.window) {
+        case 1:  return Detail::CallInWindow<Ret>(window2Control, c.bank, invoke);
+        case 2:  return Detail::CallInWindow<Ret>(window3Control, c.bank, invoke);
+        default: return Detail::CallInWindow<Ret>(window1Control, c.bank, invoke);
+    }
+#else
+    return c.fn(static_cast<Actual &&>(args)...);
+#endif
+}
+
 /**
  * @brief Declares a tagged, out-of-line C++ function and registers it with
  *        VRC1::bank_of<>, so VRC1::Call/VRC1::CallBlock can resolve its bank
  *        later.
  *
- * section_name is whatever literal the CALLER's own linker script uses --
- * this library never picks or enforces a naming convention on it. tag is a
- * separate, plain-identifier-safe token used only to key bank_of<>/
- * bank_layout<Tag> (tag##_tag), kept apart from section_name because most
- * real section-name strings (leading dots, slashes) aren't valid identifier
- * characters. The VRC1_BANKED -> VRC1_BANKED_IMPL indirection is load-bearing:
- * it forces section_name/tag to be macro-expanded to their final literal text
- * before # or ## ever sees them, so a #define'd section_name/tag (see
- * VRC1_BANKED_EXTERN below) stringizes/pastes correctly instead of pasting
- * the macro's own name. Named VRC1_BANKED rather than plain BANKED
- * specifically so both mapper headers can be seen by the same translation
- * unit without a macro-redefinition clash -- mirrors mmc3.hpp's own
- * MMC3_BANKED naming for exactly the same reason.
+ * section_name is whatever literal the caller's linker script uses; this
+ * library enforces no naming convention. tag is a separate identifier-safe
+ * token keying bank_of<>/bank_layout<Tag>, kept apart because real section
+ * names are not valid identifiers. The _IMPL indirection is load-bearing: it
+ * expands section_name/tag to final text before # or ## sees them. Named
+ * VRC1_BANKED, not BANKED, so both mapper headers can be included together.
  */
 #define VRC1_BANKED(section_name, tag, ret, name, ...) \
     VRC1_BANKED_IMPL(section_name, tag, ret, name, __VA_ARGS__)
@@ -555,20 +573,13 @@ FIXED auto VRC1::CallBlock(Block &&block) -> decltype(block()) {
 /**
  * @brief Registers a function with VRC1::bank_of<> without declaring/placing it.
  *
- * For functions this project's own C++ codegen never emits -- hand-written
- * assembly, or a third-party engine assembled separately (FamiStudio; see
- * BANKED_CALL_THEORY.txt). Only performs the bank_of<> registration half;
- * actual placement is controlled by whatever assembled/linked that symbol,
- * and has to be kept in sync with section_name by hand (or a shared build
- * variable).
+ * For functions this codegen never emits -- hand-written assembly, or an
+ * engine assembled separately. Registration only: placement belongs to whatever
+ * assembled the symbol, and must be kept in sync with section_name by hand.
  *
- * The declaration carries its own `extern "C"` rather than relying on a
- * caller-supplied `extern "C" { ... }` block: every real user of this macro
- * (hand-written asm, ca65-assembled third-party code) exposes an unmangled,
- * C-style symbol name, so this is the correct default, not a shortcut --
- * and it has to be self-contained regardless, since the bank_of<>
- * specialization right below it is a template, which requires C++ linkage
- * and therefore can never itself sit inside an `extern "C"` block.
+ * Carries its own `extern "C"` because every real user exposes an unmangled
+ * symbol, and because the bank_of<> specialization below it is a template,
+ * which can never sit inside an `extern "C"` block.
  */
 #define VRC1_BANKED_EXTERN(section_name, tag, ret, name, ...) \
     VRC1_BANKED_EXTERN_IMPL(section_name, tag, ret, name, __VA_ARGS__)

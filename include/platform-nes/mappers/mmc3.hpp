@@ -13,30 +13,20 @@
  *   $6000-$7FFF  up to 8 KiB PRG-RAM ("cartridge memory", see ::CARTMEM)
  *   $0000-$07FF  CHR-ROM, six windows: two 2 KiB (R0/R1), four 1 KiB (R2-R5)
  *
- * UNLIKE VRC1's three independently-selectable PRG windows, MMC3 in PRG
- * mode 0 only exposes TWO registers a project can point anywhere: R6
- * ($8000) and R7 ($A000). $C000-$DFFF is hardware-fixed to the second-to-
- * last bank regardless of any register write -- there is no third
- * switchable window, and this file never declares a "window3Control": no
- * register backs one. Its content also isn't stable across ROM growth (it
- * always shows whatever is CURRENTLY second-to-last, which shifts as more
- * banks are added), so unlike ::FIXED, nothing should target it through the
- * farcall machinery below -- see ::mmc3::Detail::CallInSection's own comment.
+ * Only TWO registers can be pointed anywhere: R6 ($8000) and R7 ($A000).
+ * $C000-$DFFF is hardware-fixed to the second-to-last bank regardless of any
+ * write, so there is no window3Control -- no register backs one. Its content
+ * also shifts as the ROM grows, so unlike ::FIXED nothing should target it
+ * through the farcall machinery below.
  *
- * Every register on this chip except $A000 (mirroring) and $A001 (PRG-RAM
- * protect) is reached through the SAME two physical addresses ($8000
- * select, $8001 data) -- see ::mmc3::Register, the indexed analogue of
- * VRC1's ::wo_register.
+ * Every register except $A000 (mirroring) and $A001 (PRG-RAM protect) is
+ * reached through the same two addresses -- $8000 select, $8001 data. See
+ * ::mmc3::Register, the indexed analogue of VRC1's ::wo_register.
  *
- * This module is a class (::mmc3), not a namespace: every member is static,
- * and the class itself is non-instantiable (all constructors are deleted).
- * The NES target has exactly one physical MMC3 chip on the cartridge, so
- * there is never a real object to construct there -- ::mmc3 is used purely
- * as a scoping/organisational device, the same as the namespace it replaces.
- * A class (rather than a namespace) leaves room for a future emulated MMC3
- * -- e.g. a desktop/console-backend cartridge model -- to hold genuine
- * per-instance state as an ordinary object, without colliding names with
- * this NES-side, state-free version.
+ * A class rather than a namespace, with every member static and no
+ * constructor: there is one physical chip, so no object to build. The class
+ * leaves room for a future emulated MMC3 to hold per-instance state without
+ * colliding with this state-free version.
  */
 #pragma once
 
@@ -159,23 +149,11 @@ public:
      *        into a byte offset in the flat CHR-ROM image, resolving it
      *        through the currently-selected CHR banks and ::shape.
      *
-     * This is a tile ADDRESS translator, not a tile fetch: it returns an
-     * offset for the caller to index into CHR-ROM itself (e.g.
-     * `patternTable[GetTileLMA(chr_base)]`), it does not read any bytes
-     * itself.
-     *
-     * Library-internal, like ::NotifyCHRWrite: the only caller is this
-     * module's own strong `ppu::ResolveTile` override
-     * (src/emu/mappers/mmc3.cpp), which the emu PPU (src/emu/ppu.cpp) calls
-     * unconditionally for every tile fetch -- see that function's own doc
-     * comment (video.hpp) for the weak/strong relationship. Public rather
-     * than private purely because its caller is a free function, not a
-     * member of this class -- C++ access control has no "same translation
-     * unit" exemption the way `poke_only`'s access to ::NotifyCHRWrite gets
-     * for free (::Register is a *nested* class of ::mmc3, so it already has
-     * member-level access). A game selects banks through the ordinary
-     * ::SwitchCHRBank(chr0Control, ...) call sites (shared with the NES
-     * build) and never calls this directly.
+     * An ADDRESS translator, not a fetch: returns an offset for the caller to
+     * index CHR-ROM with. Library-internal -- the only caller is this module's
+     * strong `ppu::ResolveTile` override. Public only because that caller is a
+     * free function, not a member. A game selects banks through
+     * ::SwitchCHRBank and never calls this.
      */
     static u32 GetTileLMA(u16 tileVMA);
 
@@ -358,12 +336,9 @@ public:
      * @brief Selects which CHR-ROM bank appears in one of MMC3's six CHR
      *        windows.
      *
-     * A named alias for ::SwitchBank restricted to the CHR registers
-     * (chr0Control-chr5Control), matching VRC1's separate ::SwitchCHRBank entry
-     * point -- MMC3's hardware doesn't actually need a different write path
-     * (unlike VRC1's shared chrHighBits read-modify-write), but the distinct
-     * name keeps PRG and CHR bank switches visually distinguishable at the call
-     * site, same as on VRC1.
+     * A named alias for ::SwitchBank restricted to chr0Control-chr5Control. The
+     * hardware needs no different write path here, unlike VRC1; the distinct
+     * name just keeps PRG and CHR switches distinguishable at the call site.
      *
      * @param reg  chr0Control through chr5Control; any other instantiation is a
      *             compile error.
@@ -384,38 +359,22 @@ public:
      *        PPU A12 rising edges (in practice, roughly @p scanline scanlines
      *        with 8x8 sprites/background rendering enabled).
      *
-     * Sets the reload latch ($C000), forces an immediate reload on the next
-     * clock ($C001), and enables IRQ generation ($E001). Does not by itself
-     * acknowledge any IRQ still pending from a previous split -- call
-     * ::AcknowledgeScanlineIRQ first if one might be. Pairs naturally with this
-     * project's ::IRQ (interrupts.hpp): the user-written handler placed there
-     * knows which split is due, does its work, acknowledges, and schedules the
-     * next one.
+     * Sets the reload latch ($C000), forces a reload ($C001), enables generation
+     * ($E001). Does NOT acknowledge an IRQ still pending from a previous split
+     * -- call ::AcknowledgeScanlineIRQ first if one might be.
      *
      * @param scanline Reload value for the countdown; 0 fires on the very next
      *                 qualifying PPU address change. Meaningful on NES only --
      *                 it becomes the real $C000 register value.
-     * @param position Off-NES ONLY: exactly where the software rasterizer's
-     *                  raster split fires (see ::irq::irqPosition, which this
-     *                  sets directly). Defunct on NES -- real MMC3 silicon has
-     *                  no pixel-column concept for its scanline counter, only
-     *                  a scanline-repetition count, so there is nothing for
-     *                  this to mean there.
+     * @param position Off-NES ONLY: where the software rasterizer's split
+     *                  fires (::irq::irqPosition). Defunct on NES, which counts
+     *                  A12 edges and has no pixel-column concept.
      *
-     *                  Deliberately NOT derived from @p scanline off-NES
-     *                  either, even though both nominally describe "which
-     *                  scanline": @p scanline is tuned against REAL
-     *                  hardware's own IRQ-counter timing quirks (a caller
-     *                  reaching for a specific visible split row on NES
-     *                  typically has to pass a slightly different register
-     *                  value to land there, once real A12-edge-counting
-     *                  latency is accounted for) -- reusing that NES-tuned
-     *                  number as the software rasterizer's own fire position
-     *                  mixes two unrelated timing models and lands the split
-     *                  at the wrong row there, off by whatever that fudge
-     *                  factor was. @p position is the row (and column) the
-     *                  caller actually means, independent of any real-
-     *                  hardware counter quirk.
+     *                  Deliberately NOT derived from @p scanline: that value is
+     *                  tuned against real A12-edge-counting latency, so reusing
+     *                  it off-NES mixes two timing models and lands the split
+     *                  at the wrong row. @p position is the row the caller
+     *                  actually means.
      */
     static void ScheduleScanlineIRQ(u8 scanline, vec2<u16> position);
 
@@ -443,13 +402,10 @@ public:
     /**
      * @brief One physical bank/segment's location in the linked ROM image.
      *
-     * Same shape as VRC1's section_t, and the same reason for existing:
-     * rom_address is the LOADADDR-side encoded address, not the CPU-visible
-     * VMA, since every bank that ever aliases onto a switchable window shares
-     * one VMA.
+     * rom_address is the LOADADDR-side encoded address, not the CPU-visible VMA,
+     * since every bank aliasing onto a switchable window shares one VMA.
      *
-     * ENCODING (this differs from VRC1's by one, deliberately -- read this
-     * before hand-writing a bank_layout):
+     * ENCODING -- differs from VRC1's by one, deliberately:
      *
      *     rom_address = ((bank + 1) << 16) | vma
      *
@@ -457,33 +413,21 @@ public:
      * `bank` is the domain's real physical bank -- its file offset / 0x2000,
      * in the order regions are FULL()'d in the consuming project's own
      * OUTPUT_FORMAT. The linker script must encode the SAME bias in its
-     * MEMORY region ORIGIN; see demo/link.ld's own prg_rom_001 block.
+     * MEMORY region ORIGIN.
      *
-     * VRC1 uses an unbiased `bank << 16`, inherited from llvm-mos's own
-     * banked NES platforms. Two things forced the +1 here, both discovered
-     * against a real link rather than reasoned about:
+     * VRC1 uses an unbiased `bank << 16`. Two things force the +1 here:
      *
-     * 1. BANK 0 WOULD BE UNREPRESENTABLE. CallInSection treats a zero high
-     *    half as "no explicit bank encoded" and falls back to the window
-     *    index -- fine for VRC1, whose bank 0 is by convention the
-     *    already-resident bank nobody needs to switch to, but wrong here: an
-     *    MMC3 project's domains start at physical bank 0 (the bottom of the
-     *    ROM file), and a domain reached through window 2 would silently bank
-     *    in bank 1 instead of bank 0.
-     * 2. LD.LLD REJECTS THE UNBIASED REGION OUTRIGHT. This project's ordinary
-     *    .text lives at $8000-$DFFF (see mmc3-helper.ld's resident image), so
-     *    an unbiased bank 0 region -- ORIGIN 0x8000 -- overlaps it, and the
-     *    linker errors with "section .text virtual address range overlaps
-     *    with .prg_rom_001" the moment that section holds real content. The
-     *    SDK's own nes-mmc3 scripts don't hit this only because they put
-     *    ordinary code in the FIXED region at $C000 instead. Biasing lifts
-     *    every domain region clear of the resident image's address range.
+     * 1. BANK 0 WOULD BE UNREPRESENTABLE. CallInSection reads a zero high half
+     *    as "no bank encoded" and falls back to the window index. MMC3 domains
+     *    start at physical bank 0, so one reached through window 2 would
+     *    silently bank in bank 1.
+     * 2. LD.LLD REJECTS THE UNBIASED REGION. Ordinary .text lives at
+     *    $8000-$DFFF, so an unbiased bank 0 region at ORIGIN 0x8000 overlaps
+     *    it and the link fails. Biasing lifts every domain clear of it.
      *
-     * The bias costs nothing at runtime: every high bit above 16 is discarded
-     * by ordinary 6502 relocation truncation (a JSR operand has 16 bits and
-     * no more), so the linked code still calls $8000/$A000 exactly as it
-     * would have. Only the linker's own bookkeeping -- and this decode --
-     * ever sees it.
+     * The bias is free at runtime: a JSR operand carries 16 bits, so every high
+     * bit is discarded by ordinary relocation truncation. Only the linker and
+     * this decode ever see it.
      */
     struct section_t {
         u32 rom_address;
@@ -515,27 +459,20 @@ public:
      * @brief A function pointer that carries its own bank -- the storable
      *        form of what ::Call<Fn> knows at compile time.
      *
-     * ::Call<Fn> and ::CallBlock<Fn> need Fn nameable AT THE CALL SITE as a
-     * template argument, and `table[runtime_index]` never is, however the
-     * table is declared. But nothing was ever missing for any one candidate:
-     * ::bank_of<Fn> is fully correct for each entry individually. So rather
-     * than making ::Call<Fn> smarter -- which the language does not allow --
-     * ::GetCallable materializes that knowledge into an ordinary value at the
-     * one point the function is still nameable (the table initializer, or
-     * wherever a callback slot is assigned), and the runtime index then only
-     * ever picks between entries that already describe themselves.
+     * ::Call<Fn> needs Fn nameable AT THE CALL SITE as a template argument, and
+     * `table[runtime_index]` never is, however the table is declared. But
+     * ::bank_of<Fn> is correct for each candidate individually, so ::GetCallable
+     * materializes it into an ordinary value at the one point the function is
+     * still nameable, and the runtime index then only picks between entries that
+     * already describe themselves.
      *
-     * WHY window/bank AND NOT section_t. The plan this comes from stored a
-     * whole section_t per entry (8 bytes: rom_address + size), but
-     * Detail::CallInSection never reads `size`, and it re-derives the window
-     * index and bank from `rom_address` on EVERY call -- work that is fully
-     * determined at the point ::GetCallable runs. Storing the two resolved
-     * bytes instead makes an entry 4 bytes rather than 10 (a 16-entry
-     * dispatch table: 64 bytes, not 160) and removes the runtime arithmetic
-     * from the call path entirely.
+     * WINDOW AND BANK, NOT section_t: Detail::CallInSection never reads `size`
+     * and re-derives window and bank from `rom_address` on every call, all of it
+     * determined once ::GetCallable runs. Two resolved bytes make an entry 4
+     * rather than 10, and take the arithmetic off the call path.
      *
      * A tag always names a real bank, so there is no "already mapped" case to
-     * encode -- see ::bank_layout's own note on why that escape hatch is gone.
+     * encode -- see ::bank_layout.
      */
     template <typename Ret, typename... Args>
     struct callable_t {
@@ -584,25 +521,23 @@ public:
      * @brief Resolves a tagged function into a storable, self-describing
      *        ::callable_t. The compile-time half of runtime dispatch.
      *
-     * Call it wherever the function is still nameable as a literal, then store
-     * or pass the result freely -- it needs no tag, no template argument, and
-     * no bank_of<> lookup ever again:
+     * Call it wherever the function is still nameable, then store or pass the
+     * result freely -- no tag, no template argument, no bank_of<> lookup again:
      *
-     *     MMC3_BANKED(".prg_rom_enemies_a", enemiesA, void, UpdateGoomba, Entity*);
-     *     MMC3_BANKED(".prg_rom_enemies_b", enemiesB, void, UpdateBoss,   Entity*);
+     *     MMC3_BANKED(".prg_rom_enemies_a", enemiesA, void, UpdateWalker, Entity*);
+     *     MMC3_BANKED(".prg_rom_enemies_b", enemiesB, void, UpdateFlyer,   Entity*);
      *
      *     // two DIFFERENT domains -- no single bank_of<> is right for both.
      *     // Spell the element type: `constexpr auto table[]` cannot deduce
-     *     // from a braced list, so the plan's original shorthand won't build.
+     *     // from a braced list.
      *     constexpr mmc3::callable_t<void, Entity*> table[] = {
-     *         GetCallable<UpdateGoomba>(), GetCallable<UpdateBoss>() };
+     *         GetCallable<UpdateWalker>(), GetCallable<UpdateFlyer>() };
      *
      *     Call(table[entity.type], &entity);   // runtime index, correct bank
      *
-     * `constexpr` so a table like that lands in ROM fully resolved, with the
-     * window/bank arithmetic folded away at compile time. That requires the
-     * tag's bank_layout<Tag>::section() to be constexpr, which is the
-     * preferred shape anyway (see ::bank_layout).
+     * `constexpr` so such a table lands in ROM fully resolved. That needs the
+     * tag's bank_layout<Tag>::section() to be constexpr, the preferred shape
+     * anyway (see ::bank_layout).
      */
     template <auto Fn>
     static constexpr auto GetCallable() ->
@@ -649,26 +584,21 @@ public:
      * @brief Runs @p block with TWO banks mapped at once -- one per window.
      *
      * For a module whose code and data live in different banks and must be
-     * reachable simultaneously: an audio engine walking song data, a
-     * decompressor reading a banked stream. MMC3 has exactly two switchable
-     * windows, so two is the hard maximum, and the two tags must target
-     * DIFFERENT windows -- a same-window pair would have the second switch
-     * immediately displace the first. Enforced below wherever both layouts
-     * expose a constexpr section().
+     * mapped together -- an audio engine walking song data, a decompressor
+     * reading a banked stream. Two is the hard maximum, and the tags must target
+     * DIFFERENT windows or the second switch displaces the first. Enforced
+     * wherever both layouts expose a constexpr section().
      *
      *     mmc3::CallPairedBlock<code_tag, data_tag>([]{ engine_update(); });
      *
-     * Implemented as two nested ::CallInBlock calls, so both banks are
-     * restored in reverse order on the way out, and both trampolines sit in
-     * the fixed bank. Roughly twice a single farcall's overhead -- negligible
-     * against anything worth banking in the first place.
+     * Two nested ::CallInBlock calls, so both banks restore in reverse order and
+     * both trampolines sit in the fixed bank. Roughly twice one farcall.
      *
-     * WHAT THE BLOCK MAY TOUCH: while both windows are switched, NOTHING of
-     * the ordinary program at $8000-$BFFF is mapped. The block may call into
-     * the two banks and into ::FIXED code, and may touch RAM freely, but must
-     * not call ordinary resident functions. Interrupts remain live throughout
-     * -- which is safe only because the vector handlers are themselves pinned
-     * to the fixed bank (see interrupts.hpp's ::NMI).
+     * WHAT THE BLOCK MAY TOUCH: with both windows switched, nothing of the
+     * ordinary program at $8000-$BFFF is mapped. The block may call the two
+     * banks and ::FIXED code and touch RAM freely, but not ordinary resident
+     * functions. Interrupts stay live, safe only because the vector handlers are
+     * themselves pinned to the fixed bank.
      */
     template <typename CodeTag, typename DataTag, typename Block>
     static FIXED auto CallPairedBlock(Block &&block) -> decltype(block());
@@ -718,28 +648,17 @@ private:
          */
         template <typename TReturn, u8 Index, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInWindow(Register<Index> &reg, u8 bank, TFunc fn) {
-            // DELIBERATELY NOT ::SHADOW, and this is a measured decision, not a
-            // style one. tech::shadow_scope is a real object: a tuple of
-            // REFERENCES to the registers, a tuple of saved copies, and a bool
-            // loop guard. All of it has to stay live across fn(), and 4 bytes of
-            // live state is more than llvm-mos will keep in registers -- so the
-            // thunk allocated a soft-stack frame, which then cost a frame-pointer
-            // adjust in and out plus four __rc20-23 pushes and pulls to free up
-            // the pointer registers to address it. Measured on demo.nes: 116 of
-            // the thunk's ~171 cycles were that frame; the bank switch itself is
-            // 35.
+            // DELIBERATELY NOT ::SHADOW, and measured rather than stylistic. A
+            // shadow scope keeps more live state across fn() than llvm-mos will
+            // hold in registers, so the thunk allocates a soft-stack frame and
+            // pays a frame-pointer adjust plus four register pushes and pulls
+            // either side -- most of the thunk's cost, against a bank switch of
+            // 35 cycles.
             //
-            // Nothing here needs a general scope. The register is a global whose
-            // address is a link-time constant, so the reference in shadow_scope
-            // is 2 bytes spent re-deriving something the linker already knows,
-            // and there is exactly one register, so the loop guard guards
-            // nothing. Saving the one byte by hand leaves live state small enough
-            // to sit on the hardware stack.
-            //
-            // The restore must still happen after fn() returns and must go
-            // through set() (shadow AND hardware), which is what the explicit
-            // non-void branch below preserves -- Register::operator=(u8) is the
-            // same write shadow_scope's destructor performed.
+            // Nothing here needs a general scope: one register, at a link-time
+            // constant address. Saving the byte by hand keeps live state small
+            // enough for the hardware stack. The restore still happens after
+            // fn() and still goes through set(), i.e. shadow and hardware.
             const u8 saved = reg.get();
             SwitchBank(reg, bank);
             if constexpr (__is_same(TReturn, void)) {
@@ -762,21 +681,15 @@ private:
          * bank_layout<Tag>::section() hand-encodes an explicit bank in
          * rom_address's high bits.
          *
-         * ONLY windowIndex 0 or 1 are valid ($8000 or $A000) -- MMC3 exposes no
-         * register for $C000-$DFFF (this file's header comment), so a
-         * bank_layout<Tag>::section() whose address falls at $C000 or above is
-         * a caller error, not something this module can route correctly; it is
-         * NOT range-checked here (matching vrc1_detail::CallInSection, which
-         * also trusts its caller's hand-entered addresses) and falls through to
-         * window1Control's case, silently mis-banking. Verify any hand-entered
-         * section() address stays below $C000 before relying on it, the same
-         * way vrc1.ld's own ASSERTs cross-check its hand-entered bank numbers.
+         * ONLY windowIndex 0 or 1 are valid: no register reaches $C000-$DFFF, so
+         * a section() address at $C000 or above is a caller error. It is NOT
+         * range-checked -- it falls through to window1Control and silently
+         * mis-banks -- so verify hand-entered addresses stay below $C000, the
+         * way a linker ASSERT cross-checks hand-entered bank numbers.
          *
-         * There is no CallInWindows2 equivalent (VRC1's oversized-domain,
-         * Phase 4 case): MMC3's total register-controlled PRG space is only 16
-         * KiB across these two windows, half of VRC1's 24 KiB across three, so
-         * a domain spanning both windows at once is unsupported here -- add it
-         * the same way vrc1.hpp's CallInWindows2 does if a real need arises.
+         * No CallInWindows2 equivalent: only 16 KiB is register-controlled here,
+         * so a domain spanning both windows is unsupported. Add it the way
+         * vrc1.hpp does if a real need arises.
          */
         template <typename TReturn, typename TFunc>
         [[gnu::noinline]] static FIXED TReturn CallInSection(const section_t &section, TFunc fn) {
@@ -834,18 +747,17 @@ constexpr auto mmc3::GetCallable() ->
 #ifdef TARGET_NES
     using L = typename bank_of<Fn>::layout;
     const section_t s = L::section();
-    // Identical derivation to Detail::CallInSection, done ONCE here instead of
-    // on every call -- including the same bank+1 bias, where a zero high half
-    // means "nothing encoded" and the window index doubles as the bank.
+    // Detail::CallInSection's derivation, done once here instead of per call,
+    // including the bank+1 bias (a zero high half means nothing was encoded, and
+    // the window index doubles as the bank).
     const u16 vma = static_cast<u16>(s.rom_address);
     const u8 window = static_cast<u8>((vma - Detail::kWindowBase) / Detail::kWindowSize);
     const u8 encodedBank = static_cast<u8>(s.rom_address >> 16);
     return { Fn, window, static_cast<u8>(encodedBank != 0 ? encodedBank - 1 : window) };
 #else
     // Off-NES there are no banks and bank_layout<Tag> is typically not even
-    // specialized (the demo guards its specializations with TARGET_NES), so
-    // resolving anything here would be both meaningless and a compile error.
-    // The window/bank fields go unread -- Call() below ignores them off-NES.
+    // specialized, so resolving here would be a compile error. Call() below
+    // ignores these fields off-NES.
     return { Fn, 0, 0 };
 #endif
 }
@@ -853,11 +765,9 @@ constexpr auto mmc3::GetCallable() ->
 template <typename Ret, typename... Args, typename... Actual>
 FIXED Ret mmc3::Call(const callable_t<Ret, Args...> &c, Actual &&...args) {
 #ifdef TARGET_NES
-    // window1Control and window2Control are DIFFERENT TYPES (Register<6> vs
-    // Register<7>), so a runtime window choice cannot be a variable -- it has
-    // to be a branch between two instantiations. Same two-way shape
-    // Detail::CallInSection ends in, without the arithmetic that precedes it
-    // there.
+    // window1Control and window2Control are different types (Register<6> vs
+    // Register<7>), so a runtime window choice has to be a branch between
+    // instantiations, not a variable.
     auto invoke = [&]() -> Ret { return c.fn(static_cast<Actual &&>(args)...); };
     if (c.window == 1) return Detail::CallInWindow<Ret>(window2Control, c.bank, invoke);
     return Detail::CallInWindow<Ret>(window1Control, c.bank, invoke);
@@ -940,35 +850,25 @@ FIXED auto mmc3::CallPairedBlock(Block &&block) -> decltype(block()) {
  * @brief Registers an ALREADY-DECLARED function with mmc3::bank_of<>, so
  *        mmc3::Call/mmc3::CallBlock can resolve its bank.
  *
- * The namespace-friendly counterpart to ::MMC3_BANKED. That macro declares
- * the function itself, which means it can only ever produce a bare,
- * unqualified name -- it cannot express `title::main`, since the declaration
- * it emits would have to be written inside the namespace while the
- * bank_of<> specialization it also emits must be at global scope. This macro
- * splits those apart: place the function with a segment keyword where it is
- * defined (inside its namespace, in the ordinary way), then bind it here, at
- * global scope, by qualified name:
+ * The namespace-friendly counterpart to ::MMC3_BANKED, which declares the
+ * function itself and so can only produce an unqualified name: its declaration
+ * would have to sit inside the namespace while the bank_of<> specialization
+ * must be at global scope. This macro splits the two -- place the function with
+ * a segment keyword where it is defined, then bind it here by qualified name:
  *
- *     namespace title {
- *         TITLE void main() { ... }     // placement: demo/src/banks.hpp
- *     }
- *     MMC3_BIND(title::main, bank001);  // binding: global scope
+ *     namespace ui { UI_BANK void Draw() { ... } }   // placement
+ *     MMC3_BIND(ui::Draw, ui_bank);                  // binding, global scope
+ *     mmc3::Call<ui::Draw>();                        // call site
  *
- *     mmc3::Call<title::main>();        // call site
+ * @p fn is a qualified name, not an address; @p tag the bank tag minus its
+ * `_tag` suffix. The function must not be overloaded, since `&fn` has to
+ * resolve without a cast -- use ::MMC3_BANKED if it is.
  *
- * @p fn is a qualified function name (NOT an address -- the & is added
- * here), @p tag the bank tag, minus its `_tag` suffix, exactly as
- * ::MMC3_BANKED takes it. The function must not be overloaded: `&fn` has to
- * resolve to one address without a cast to disambiguate it. Use
- * ::MMC3_BANKED instead if it is.
- *
- * PLACEMENT AND BINDING ARE INDEPENDENT, and nothing checks that they agree
- * -- binding a function to a tag whose bank_layout names a different bank
- * than the section keyword actually placed it in produces a call that banks
- * in the wrong 8 KiB and executes garbage. Keep the keyword and the tag
- * defined next to each other (see demo/src/banks.hpp, where each keyword
- * sits directly above the tag naming the same section) so the two can only
- * drift on purpose.
+ * PLACEMENT AND BINDING ARE INDEPENDENT and nothing checks they agree: binding
+ * to a tag whose bank_layout names a different bank than the section keyword
+ * placed it in banks in the wrong 8 KiB and executes garbage. Define the
+ * keyword and its tag next to each other so the two can only drift on
+ * purpose.
  */
 #define MMC3_BIND(fn, tag)                     \
     template <> struct mmc3::bank_of<&fn> {    \

@@ -3,15 +3,11 @@ using namespace br0::intsh;
 #include <platform-nes/input.hpp>
 #include <platform-nes/technology.hpp>
 
-// Where this module's code goes -- optional, same shape and same tradeoff as
-// video.cpp's. One 40-byte function, so placing it buys little on its own; the
-// option exists so that every module producing code has one, rather than
-// video being a special case.
-#ifdef PLATFORM_NES_INPUT_SECTION
-#define INPUT_BANK MODULE_PLACEMENT(PLATFORM_NES_INPUT_SECTION)
-#else
-#define INPUT_BANK
-#endif
+// NO PLACEMENT KNOB, deliberately. This module is one ~40-byte function, so
+// there is nothing worth moving out of a bank, and out-of-lining it would cost
+// argument marshalling plus jsr/rts on a call a game makes every frame. ::AI
+// below pins it into its callers instead, which also keeps it reachable from
+// whatever bank the caller happens to be in.
 
 // Scratch bytes for the shift-register read below. Named with C linkage so the
 // inline asm can address them directly by symbol instead of through a runtime
@@ -39,7 +35,7 @@ __attribute__((used)) u8 pollScratch2;
 // replaces a fully-unrolled loop that did a load+shift+and+load+or+store
 // (through *port1/*port2 each iteration) with a tight 8-cycle loop body that
 // does the accumulation with a single RMW rotate per controller.
-INPUT_BANK void input::PollControllers(u8* port1, u8* port2) {
+AI void input::PollControllers(u8* port1, u8* port2) {
     IO_PORT1 = 1;
     IO_PORT1 = 0;
 
