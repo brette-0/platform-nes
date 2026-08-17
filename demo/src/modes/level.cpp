@@ -43,7 +43,10 @@ namespace level {
 
     static void CoinVramReset() { CoinVramLen = 0; }
 
-    void CoinVramPush(const u16 address, const u8 value) {
+    // ACTORS: sole caller is PushCoinVram (player.cpp), now in the actors bank --
+    // CoinVram/CoinVramLen stay put (RAM, not bank-sensitive); only the code that
+    // writes them needs to be reachable. See banks.hpp's ::actor_tag comment.
+    ACTORS void CoinVramPush(const u16 address, const u8 value) {
         if (CoinVramLen + 3 > kCoinVramCap) return;        // full: drop (next frame retries)
         CoinVram[CoinVramLen++] = static_cast<u8>(address >> 8);
         CoinVram[CoinVramLen++] = static_cast<u8>(address & 0xFF);
@@ -134,7 +137,15 @@ namespace level {
         mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
         mmc3::SetMirroring(false);
 
-        if (!LoadLevel(0)) {
+        // LoadLevel is ::LEVEL_CODE (banks.hpp's ::level_code_tag), and this runs
+        // from EnterLevelSetup, which is ::COLD -- COLD can only reach FIXED,
+        // resident, and its own bank, not a different bank-0 domain, so this needs
+        // an explicit farcall rather than a plain call. Same pattern as Player::Reset's
+        // wrap below, just naming level_code_tag instead of actor_tag.
+        const bool levelLoaded = mmc3::CallInBlock<level_code_tag>([] {
+            return LoadLevel(0);
+        });
+        if (!levelLoaded) {
             irq::reset();    // spin reset on NES, exit on SDL3
         }
 
@@ -192,13 +203,26 @@ namespace level {
             audio::TrackPlay(0);
         });
 
-        ColMapSeed(0, { TileData }, { DynLengths, DynData, 0 });
+        // ColMapSeed is ::LEVEL_CODE too -- same reason and pattern as LoadLevel's
+        // wrap above.
+        mmc3::CallInBlock<level_code_tag>([] {
+            ColMapSeed(0, { TileData }, { DynLengths, DynData, 0 });
+        });
 
-        player1.Reset();
-
+        // Player::Reset is ::ACTORS-tagged now (banks.hpp's ::actor_tag), and this
+        // runs from EnterLevelSetup, which is ::COLD -- COLD code can only reach
+        // FIXED, resident, and its own bank, not a different bank-5 domain, so this
+        // needs an explicit farcall rather than a plain call.
+        // CallInBlock<actor_tag>, not CallBlock<UpdateActors>: this block has nothing
+        // to do with UpdateActors -- it only needs the SAME bank, so name the tag
+        // directly rather than borrow an unrelated function's bank_of<> registration
+        // as a roundabout way to say so.
+        mmc3::CallInBlock<actor_tag>([] {
+            player1.Reset();
 #ifdef PLAYER2_SUPPORTED
-        player2.Reset();
+            player2.Reset();
 #endif
+        });
         oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
         ppu::EnableRendering(ppu::ctrl::SPRITE_SIZE | ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
@@ -206,7 +230,11 @@ namespace level {
         apu::DisableDMCIRQ();
     }
 
-    void main() {
+    // LEVEL_CODE: paired with banks.hpp's ::level_data_tag (window 2, the
+    // static plane + dynamic-plane ROM source). Entered by ::EnterLevelBanks
+    // (main.cpp, before this is called) and held for the whole level session
+    // -- not farcall-reachable, see ::level_code_tag's own comment.
+    LEVEL_CODE void main() {
         InColdBank(EnterLevelSetup);
         irq::EnableInterrupts();
         // ReSharper disable once CppDFAEndlessLoop
@@ -216,12 +244,11 @@ namespace level {
                 paused = !paused;
             }
 
-            ppu::SetColorPriority(0x40);   // green band:        player1.Update
-            player1.Update();
-#ifdef PLAYER2_SUPPORTED
-            ppu::SetColorPriority(0x60);   // red+green band:    player2.Update
-            player2.Update();
-#endif
+            // Both players (and future NPCs) update behind ONE farcall into the
+            // actors bank -- see level.hpp's UpdateActors comment and banks.hpp's
+            // ::actor_tag -- rather than one window switch per actor.
+            ppu::SetColorPriority(0x40);   // green band:        UpdateActors
+            mmc3::Call<level::UpdateActors>();
             ppu::SetColorPriority(0x80);   // blue band:         ColMapTrack (slides override internally)
 
             ColMapTrack(cameraX >> 4);

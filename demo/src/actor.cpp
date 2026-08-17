@@ -2,9 +2,15 @@
 
 #include "modes/level/levels.hpp"
 #include "modes/level/collision_map.hpp"
+#include "banks.hpp"   // ACTORS
 
 static void TranslateWorldSpace(vec2<u16>& worldSpace, vec2<i8> delta);
 
+// ACTORS: Actor is global-namespace, so without this it would fall into
+// prg_rom_switchable (resident) by default instead of the actor bank -- see
+// banks.hpp's ::actor_tag comment. TranslateWorldSpace stays untagged: it's
+// static/file-local, so it just follows whichever TU-section Move ends up in.
+ACTORS
 void Actor::Move(const vec2<i8> delta /* sub px */) {
     TranslateWorldSpace(worldSpace, delta);
 
@@ -43,9 +49,13 @@ static void TranslateWorldSpace(vec2<u16>& worldSpace, const vec2<i8> delta) {
     worldSpace.y += delta.y;
 }
 
-void Actor::Start() {this->start(this);}
-void Actor::Update() {this->update(this);}
+ACTORS void Actor::Start() {this->start(this);}
+ACTORS void Actor::Update() {this->update(this);}
 
+// NOT ::ACTORS: called from EnterLevelSetup (level.cpp), which is ::COLD --
+// COLD code can only reach FIXED, resident ($C000-$DFFF), and its own bank,
+// not a different bank-5-window-1 domain like actors. Left in the default
+// (resident) placement, which both COLD and ACTORS can already reach.
 oam::oam_t AdjustSpriteY(const Actor* self, const u16) {
     return static_cast<oam::oam_t>(self->screen.y);
 }

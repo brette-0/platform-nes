@@ -2,6 +2,7 @@
 
 #include "levels.hpp"                  // levelHeight, kHudRows
 #include "../../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
+#include "../../banks.hpp"             // FIXED, LEVEL_CODE
 
 #include <array>
 
@@ -57,35 +58,35 @@ namespace {
     // per-frame travel (<= ~1 cell).  It is seeded once at level load and never reset
     // or rebuilt -- "does not die" -- so the cost of reaching a collected coin is the
     // tiny AABB-local delta from this anchor, NOT a walk from the window edge that grows
-    // with how far the player sits inside the window.  colPlayerDyn is the cursor whose
-    // offset (Run()) directly indexes DynData to blank a coin; colPlayerStat is its
-    // lockstep static partner, read only to reveal the metatile under a removed coin.
-    // colPlayerCell is the column-major linear cell index (col*levelHeight + row) the
-    // pair currently sits on -- the delta reference for the per-frame re-anchor.
-    colmap_cold Cursor        colPlayerStat;
-    colmap_cold DynamicCursor colPlayerDyn;
-    colmap_cold u16           colPlayerCell;
-    colmap_cold u16           colPlayerColR;   // rightmost column of last AABB, for early-exit guard
-    colmap_cold u8            colPlayerRowB;   // bottom row of last AABB, for early-exit guard
-    // Set true only once a scan of the CURRENT (unchanged) AABB has come back
-    // empty. The early-exit guard below may only skip a stationary-AABB scan
-    // when this is true -- otherwise a coin left behind by the one-coin-per-call
-    // cap (see CollectCoins) would never get a second look before the player
-    // moves on to the next cell, and would be silently skipped ("phase through").
-    // Cleared whenever the AABB moves to new cells (unverified) or a coin was
-    // just collected (there may be another one still sitting in the same AABB).
-    colmap_cold bool          colPlayerDry;
-
-    // Independent anchor for player 2.  Same invariants as the P1 set; keeping
-    // them separate means each player tracks their own AABB with a tiny per-frame
-    // step rather than bouncing the shared cursor across the inter-player distance
-    // every frame.
-    colmap_cold Cursor        colPlayer2Stat;
-    colmap_cold DynamicCursor colPlayer2Dyn;
-    colmap_cold u16           colPlayer2Cell;
-    colmap_cold u16           colPlayer2ColR;
-    colmap_cold u8            colPlayer2RowB;
-    colmap_cold bool          colPlayer2Dry;
+    // with how far the player sits inside the window.  dyn is the cursor whose offset
+    // (Run()) directly indexes DynData to blank a coin; stat is its lockstep static
+    // partner, read only to reveal the metatile under a removed coin.  cell is the
+    // column-major linear cell index (col*levelHeight + row) the pair currently sits
+    // on -- the delta reference for the per-frame re-anchor.  colR/rowB are the last
+    // AABB's edges, for the early-exit guard.  dry is set true only once a scan of the
+    // CURRENT (unchanged) AABB has come back empty -- the early-exit guard may only skip
+    // a stationary-AABB scan when this is true, otherwise a coin left behind by the
+    // one-coin-per-call cap (see CollectCoinsImpl) would never get a second look before
+    // the player moves on, and would be silently skipped ("phase through"). Cleared
+    // whenever the AABB moves to new cells (unverified) or a coin was just collected
+    // (there may be another one still sitting in the same AABB).
+    //
+    // One struct, two instances (P1/P2) rather than two independently-named variable
+    // sets: CollectCoins/CollectCoins2 used to be ~2.3 KiB apiece of near-identical
+    // logic differing only in which variable set they touched -- see CollectCoinsImpl.
+    struct CollectorAnchor {
+        Cursor        stat;
+        DynamicCursor dyn;
+        u16           cell;
+        u16           colR;
+        u8            rowB;
+        bool          dry;
+    };
+    colmap_cold CollectorAnchor colPlayerAnchor;
+    // Independent anchor for player 2. Same invariants as the P1 anchor; keeping them
+    // separate means each player tracks their own AABB with a tiny per-frame step
+    // rather than bouncing a shared cursor across the inter-player distance every frame.
+    colmap_cold CollectorAnchor colPlayer2Anchor;
 }
 
 // Stamp one column's composite metatiles into ring slot `slot`.  `stat`/`dyn` are
@@ -98,7 +99,10 @@ namespace {
 // a couple of times per frame on column entry so a JSR is free here.
 // unroll(disable): -O3 unrolled the 14-row loop; the rolled form is much smaller
 // and the per-iter overhead is negligible next to the dyn-cursor RLE work.
-__attribute__((noinline))
+// LEVEL_CODE: paired with banks.hpp's ::level_data_tag (window 2) -- `stat`
+// reads the static plane, `dyn` reads the dynamic plane's ROM-resident
+// lengths, both out of that window. See banks.hpp's ::level_code_tag.
+__attribute__((noinline)) LEVEL_CODE
 void ColMapStamp(const u8 slot, Cursor stat, DynamicCursor dyn) {
     u8* col = ViewMap + kSlotOffset[slot];
 
@@ -121,23 +125,26 @@ void ColMapStamp(const u8 slot, Cursor stat, DynamicCursor dyn) {
 // row 0).  Origin starts at 0 so column (leftCol+i) lands in slot i; between columns
 // the master cursors cross one column (Move(levelHeight)) so each ColMapStamp copy
 // begins on its own row-0 cell.
+// LEVEL_CODE: called from EnterLevelSetup (::COLD) at level load, wrapped in an
+// explicit mmc3::CallInBlock<level_code_tag> there since COLD can't reach this
+// bank by a plain call -- see that call site's own comment in level.cpp.
+// noinline: now called from exactly ONE site (that same wrapping lambda), so
+// without it LTO inlines the whole body -- including its ColMapStamp calls --
+// into the lambda, which is compiled as part of the FIXED trampoline. Same
+// failure mode as LoadLevel's own noinline; see its comment.
+__attribute__((noinline)) LEVEL_CODE
 void ColMapSeed(const u16 leftCol, Cursor stat, DynamicCursor dyn) {
     ColMapBaseCol = leftCol;
     ColMapOrigin  = 0;
     colLeftStat   = stat;          // leftmost held column (base), row 0
     colLeftDyn    = dyn;
-    colPlayerStat = stat;          // collector anchor: parked on (leftCol, row 0) now;
-    colPlayerDyn  = dyn;           //   the first CollectCoins re-anchors it to the player
-    colPlayerCell = static_cast<u16>(leftCol) * levelHeight;
-    colPlayerColR = leftCol;
-    colPlayerRowB = 0;
-    colPlayerDry  = false;         // unverified: first call for this AABB must scan
-    colPlayer2Stat = stat;         // P2 anchor seeded identically; diverges as P2 moves
-    colPlayer2Dyn  = dyn;
-    colPlayer2Cell = static_cast<u16>(leftCol) * levelHeight;
-    colPlayer2ColR = leftCol;
-    colPlayer2RowB = 0;
-    colPlayer2Dry  = false;
+    colPlayerAnchor.stat = stat;   // collector anchor: parked on (leftCol, row 0) now;
+    colPlayerAnchor.dyn  = dyn;    //   the first CollectCoins re-anchors it to the player
+    colPlayerAnchor.cell = static_cast<u16>(leftCol) * levelHeight;
+    colPlayerAnchor.colR = leftCol;
+    colPlayerAnchor.rowB = 0;
+    colPlayerAnchor.dry  = false;  // unverified: first call for this AABB must scan
+    colPlayer2Anchor = colPlayerAnchor;   // P2 anchor seeded identically; diverges as P2 moves
     const auto width = ColMapWidth();
     for (u8 i = 0; i < width; i++) {
         if (i == width - 1) {          // rightmost held, row 0
@@ -187,7 +194,9 @@ static void AdvancePairBackward(Cursor& s, DynamicCursor& d) {
 // edge cursor pairs the same direction, preserving their [base, base+width-1] invariant.
 // In steady scroll the camera moves <= 1 column/frame, so a call does 0 or 1 slides.
 // noinline: keep this driver's frame out of the giant PlayerUpdate ZP frame.
-__attribute__((noinline))
+// LEVEL_CODE: called only from level::main()'s own loop. See banks.hpp's
+// ::level_code_tag.
+__attribute__((noinline)) LEVEL_CODE
 void ColMapTrack(const u16 camLeftCol) {
     i16 desired = static_cast<i16>(camLeftCol) - 4;
     if (desired < 0) desired = 0;
@@ -220,6 +229,8 @@ void ColMapTrack(const u16 camLeftCol) {
 // Slide the window one column right: the slot that held the dropped leftmost column
 // (ColMapOrigin) is reused for the admitted rightmost column (base+width).  Stamp the
 // new column there, then advance base + rotate origin forward one slot.
+// LEVEL_CODE: called only from ColMapTrack.
+LEVEL_CODE
 void ColMapSlideRight(const Cursor &newRightStat, DynamicCursor newRightDyn) {
     ColMapStamp(ColMapOrigin, newRightStat, newRightDyn);
     ColMapBaseCol++;
@@ -229,6 +240,8 @@ void ColMapSlideRight(const Cursor &newRightStat, DynamicCursor newRightDyn) {
 // Mirror: drop the rightmost column, admit (base-1) on the left.  The freed slot is
 // one before the current origin (where the old rightmost lived); rotate origin back
 // onto it, drop base, and stamp the new leftmost column into it.
+// LEVEL_CODE: called only from ColMapTrack.
+LEVEL_CODE
 void ColMapSlideLeft(const Cursor &newLeftStat, DynamicCursor newLeftDyn) {
     ColMapBaseCol--;
     if (ColMapOrigin == 0) ColMapOrigin = ColMapWidth() - 1;
@@ -240,6 +253,11 @@ void ColMapSlideLeft(const Cursor &newLeftStat, DynamicCursor newLeftDyn) {
 // or nullptr when the column is outside the held window.  Identical slot math to
 // Blocked's inner resolve (subtract base, one non-pow2 wrap); shared so the render
 // path reads the SAME decompressed column the window already produced.
+// FIXED: sole callers are BuildNextColumn/BuildPrevColumn (levels.cpp), which are
+// now ::ACTORS -- grouped with its sibling Blocked (same static ViewMap/ColMapBaseCol/
+// ColMapOrigin state, already FIXED) rather than moved into the actors bank itself,
+// so both the actor-bank and the level-domain callers can reach it as an ordinary call.
+FIXED
 const u8* ColMapColumn(const u16 col) {
     const u16 d = col - ColMapBaseCol;
     if (d >= ColMapWidth()) return nullptr;       // outside window = air (caller skips)
@@ -255,6 +273,15 @@ const u8* ColMapColumn(const u16 col) {
 // variable shift.  `collectBlocks` picks the audience: the player (true) bonks on coins
 // (Collect) as well as walls (Solid); enemies (false) only stop on Solid, passing coins.
 // Columns outside the held window read as air, so the sweep needs no X region clamp.
+// noinline: called 4x from Player::Update (grounded check + 3x in ProcessMovement) plus
+// from Actor::Move; LTO was duplicating the whole body into every call site instead of
+// emitting one JSR target, which is both wasted PRG and unmeasurable -- see this repo's
+// actor-bank-isolation discussion. Same rationale as ColMapStamp/ColMapTrack above.
+// FIXED: measures 402 bytes standalone -- pulled out of prg_rom_level and into the
+// always-mapped fixed bank as a down payment on giving actor/player code (the caller)
+// an exclusive bank of its own later; costs nothing today since FIXED is already mapped
+// whenever level code runs.
+__attribute__((noinline)) FIXED
 bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, const bool collectBlocks) {
     const u8 w = dimensions.x; const u8 h = dimensions.y;
     i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
@@ -290,7 +317,7 @@ bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, const bool c
 // cost of reaching a coin's run no longer grows with depth into the level: instead of
 // walking from the window's left edge (delta = (col-base)*levelHeight + row, which is
 // large when the player sits deep inside the window), we keep a PERSISTENT collector
-// pair (colPlayerDyn/colPlayerStat) parked on the player.  Once per call we re-anchor
+// pair (anchor.dyn/anchor.stat) parked on the player.  Once per call we re-anchor
 // it to the AABB's top-left cell (colL, rowTop) with a single Move by the player's
 // per-frame travel (<= ~1 cell).  From that anchor we copy ONE probe pair and walk it
 // MONOTONICALLY through the AABB cells in column-major order -- Move(1) down a column,
@@ -321,13 +348,21 @@ bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, const bool c
 // walking through one cell, not only when standing still. If a coin was left
 // behind in the AABB when the cap kicked in, the position-only guard would
 // skip re-scanning it for all of those frames and the player would cross out
-// of the AABB with it still uncollected ("phase through"). colPlayerDry (see
+// of the AABB with it still uncollected ("phase through"). anchor.dry (see
 // below) closes that gap: the guard may only skip a same-position scan once
 // this cell has actually been VERIFIED empty, not merely because the position
 // didn't change -- so a stationary-relative-to-cell AABB keeps getting
 // re-scanned, once per frame, for as long as it still has a coin in it.
-u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
-                CoinPick* out, const u8 maxOut) {
+//
+// Shared body for CollectCoins/CollectCoins2 below: the two used to be independent
+// ~2.3 KiB copies of this exact logic, differing only in which CollectorAnchor they
+// touched. `anchor` is the one piece of per-player state; everything else is common.
+// noinline: called once per frame per player from Player::Update; kept out-of-line for
+// the same reason as Blocked above -- see that function's comment.
+// FIXED: see Blocked's comment.
+__attribute__((noinline)) FIXED
+static u8 CollectCoinsImpl(CollectorAnchor& anchor, const u16 px, const u16 py,
+                            const vec2<u8> dimensions, CoinPick* out, const u8 maxOut) {
     const u8 w = dimensions.x; const u8 h = dimensions.y;
     i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
     i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
@@ -341,35 +376,35 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
     // Re-anchor the persistent collector pair onto the AABB top-left cell EVERY frame.  This is
     // the whole point of the persistent cursor: step is the player's travel since LAST frame
     // (<= ~1 cell walking, 14 on a column crossing), so this is a tiny RLE nudge.  It must stay
-    // unconditional -- gating it behind "a coin is present" lets colPlayerCell freeze across dry
+    // unconditional -- gating it behind "a coin is present" lets anchor.cell freeze across dry
     // frames, and the next collection then pays the WHOLE accumulated drift in a single Move
     // (the player walks ~5 columns under a gap in the coins, then eats 70 steps at once -- the
     // exact one-frame spike that gating produced).  Cheap every frame >> occasional huge spike.
     const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
-    const i16 step      = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayerCell);
+    const i16 step      = static_cast<i16>(anchorCell) - static_cast<i16>(anchor.cell);
     const u8   rowB     = static_cast<u8>(rowBot);
-    const bool sameColR = (colR == colPlayerColR);
-    const bool sameRowB = (rowB == colPlayerRowB);
-    colPlayerCell = anchorCell;
-    colPlayerColR = colR;
-    colPlayerRowB = rowB;
+    const bool sameColR = (colR == anchor.colR);
+    const bool sameRowB = (rowB == anchor.rowB);
+    anchor.cell = anchorCell;
+    anchor.colR = colR;
+    anchor.rowB = rowB;
     // Same cells as last frame AND that AABB was already verified empty → skip the walk.
     // Guard all four AABB edges: step covers colL+rowTop; colR and rowB change independently
-    // when px%16 or py%16 crosses 0↔1 without the top-left anchor moving. colPlayerDry is
+    // when px%16 or py%16 crosses 0↔1 without the top-left anchor moving. anchor.dry is
     // the piece that keeps this safe under the one-coin-per-call cap: a coin left behind in
     // this same AABB clears it (see below), so a stationary AABB keeps getting re-scanned
     // every frame until it's actually drained, instead of stopping after the first pickup
     // and leaving the rest to "phase through" uncollected once the player moves on.
-    if (step == 0 && sameColR && sameRowB && colPlayerDry) return 0;
+    if (step == 0 && sameColR && sameRowB && anchor.dry) return 0;
     // After level load step is bounded to ±(levelHeight+1) ≤ 15; use the i8 path
     // (single-byte loop counter on 6502) except on the first call after ColMapSeed
     // where the player may be far from the seed point.
     if (step >= -128 && step <= 127) {
-        colPlayerDyn.Move(static_cast<i8>(step));
-        colPlayerStat.Move(static_cast<i8>(step));
+        anchor.dyn.Move(static_cast<i8>(step));
+        anchor.stat.Move(static_cast<i8>(step));
     } else {
-        colPlayerDyn.Seek(step);
-        colPlayerStat.Seek(step);
+        anchor.dyn.Seek(step);
+        anchor.stat.Seek(step);
     }
 
     // ViewMap pre-scan: a cheap gate before the cursor probe walk.  ViewMap is composite
@@ -391,7 +426,7 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
                     anyCoin = true;
             }
         }
-        if (!anyCoin) { colPlayerDry = true; return 0; }   // verified empty: safe to skip next time
+        if (!anyCoin) { anchor.dry = true; return 0; }   // verified empty: safe to skip next time
     }
 
     // ONE probe pair copied off the persistent anchor, walked monotonically column-major
@@ -399,9 +434,9 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
     // bare *pd.dp write /ps.Fetch() -- no per-coin re-walk from the anchor (that quadratic
     // re-walk was the cost).  When a column is outside the window we still step the probe
     // across it (no read) to keep it aligned to the cells. Stops at the FIRST coin found --
-    // see the one-coin-per-call note above CollectCoins.
-    DynamicCursor pd   = colPlayerDyn;
-    Cursor        ps   = colPlayerStat;
+    // see the one-coin-per-call note above.
+    DynamicCursor pd   = anchor.dyn;
+    Cursor        ps   = anchor.stat;
     const i16     rows = rowBot - rowTop;       // 0-based row span of the AABB
     u8 n = 0;
     for (u16 c = colL; ; c++) {
@@ -425,7 +460,7 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
                 colp[r] = reveal;               // window now shows the static cell
                 if (n < maxOut) out[n] = { c, static_cast<u8>(r), reveal };
                 n++;
-                break;   // one coin per call -- see the comment above CollectCoins
+                break;   // one coin per call -- see the comment above
             }
             if (r != rowBot) { pd.Move(1); ps.Move(1); }   // step down to the next row
         }
@@ -437,88 +472,22 @@ u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
     // another one -- keep re-scanning next frame even if the player doesn't move.
     // n==0 here would mean anyCoin lied (shouldn't happen); treat as verified-empty
     // either way so a stuck AABB can't spin forever re-scanning something that isn't there.
-    colPlayerDry = (n == 0);
+    anchor.dry = (n == 0);
     return n;
 }
 
-// Player 2 coin collection.  Identical logic to CollectCoins but uses the
-// independent colPlayer2* anchor so P1 and P2 each pay a tiny per-frame step
-// rather than bouncing the shared cursor across the inter-player gap every frame.
+// Thin wrappers selecting which player's persistent anchor to use -- see
+// CollectCoinsImpl's own comment for why the body lives there and not here.
+FIXED
+u8 CollectCoins(const u16 px, const u16 py, const vec2<u8> dimensions,
+                CoinPick* out, const u8 maxOut) {
+    return CollectCoinsImpl(colPlayerAnchor, px, py, dimensions, out, maxOut);
+}
+
+FIXED
 u8 CollectCoins2(const u16 px, const u16 py, const vec2<u8> dimensions,
                  CoinPick* out, const u8 maxOut) {
-    const u8 w = dimensions.x; const u8 h = dimensions.y;
-    i16 rowTop = static_cast<i16>(py >> 4) - kHudRows;
-    i16 rowBot = static_cast<i16>((py + h - 1) >> 4) - kHudRows;
-    if (rowBot < 0 || rowTop >= levelHeight) return 0;
-    if (rowTop < 0)            rowTop = 0;
-    if (rowBot >= levelHeight) rowBot = levelHeight - 1;
-
-    const u16 colL = px >> 4;
-    const u16 colR = (px + w - 1) >> 4;
-
-    const u16 anchorCell = static_cast<u16>(colL) * levelHeight + static_cast<u16>(rowTop);
-    const i16 step       = static_cast<i16>(anchorCell) - static_cast<i16>(colPlayer2Cell);
-    const u8   rowB      = static_cast<u8>(rowBot);
-    const bool sameColR  = (colR == colPlayer2ColR);
-    const bool sameRowB  = (rowB == colPlayer2RowB);
-    colPlayer2Cell = anchorCell;
-    colPlayer2ColR = colR;
-    colPlayer2RowB = rowB;
-    if (step == 0 && sameColR && sameRowB && colPlayer2Dry) return 0;
-    if (step >= -128 && step <= 127) {
-        colPlayer2Dyn.Move(static_cast<i8>(step));
-        colPlayer2Stat.Move(static_cast<i8>(step));
-    } else {
-        colPlayer2Dyn.Seek(step);
-        colPlayer2Stat.Seek(step);
-    }
-
-    {
-        bool anyCoin = false;
-        for (u16 c = colL; !anyCoin && c <= colR; c++) {
-            const u16 d = c - ColMapBaseCol;
-            if (d >= ColMapWidth()) continue;
-            u8 slot = ColMapOrigin + static_cast<u8>(d);
-            if (slot >= ColMapWidth()) slot -= ColMapWidth();
-            const u8* colp = ViewMap + kSlotOffset[slot];
-            for (i16 r = rowTop; !anyCoin && r <= rowBot; r++) {
-                if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect)
-                    anyCoin = true;
-            }
-        }
-        if (!anyCoin) { colPlayer2Dry = true; return 0; }
-    }
-
-    DynamicCursor pd   = colPlayer2Dyn;
-    Cursor        ps   = colPlayer2Stat;
-    const i16     rows = rowBot - rowTop;
-    u8 n = 0;
-    for (u16 c = colL; ; c++) {
-        const u16  d     = c - ColMapBaseCol;
-        const bool inWin = d < ColMapWidth();
-        u8* colp = nullptr;
-        if (inWin) {
-            u8 slot = ColMapOrigin + static_cast<u8>(d);
-            if (slot >= ColMapWidth()) slot -= ColMapWidth();
-            colp = ViewMap + kSlotOffset[slot];
-        }
-        for (i16 r = rowTop; r <= rowBot; r++) {
-            if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
-                *pd.dp = 0;   // see the comment on the equivalent line in CollectCoins
-                const u8 reveal = ps.Fetch();
-                colp[r] = reveal;
-                if (n < maxOut) out[n] = { c, static_cast<u8>(r), reveal };
-                n++;
-                break;   // one coin per call -- see the comment above CollectCoins
-            }
-            if (r != rowBot) { pd.Move(1); ps.Move(1); }
-        }
-        if (n || c == colR) break;
-        pd.Move(levelHeight - rows);
-        ps.Move(levelHeight - rows);
-    }
-    colPlayer2Dry = (n == 0);
-    return n;
+    return CollectCoinsImpl(colPlayer2Anchor, px, py, dimensions, out, maxOut);
 }
 
 }   // namespace level

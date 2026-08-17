@@ -6,6 +6,7 @@
 #include "collision_map.hpp"
 #include "levels.hpp"
 #include "../level.hpp"
+#include "../../banks.hpp"   // ACTORS
 
 using namespace demo;
 using enum level::eLevelStreamCommands;
@@ -14,21 +15,28 @@ namespace level {
 
 // ---------------------------------------------------------------------------
 // Per-player accessors -- resolved from `this` rather than a free ActorToPlayer.
+//
+// ACTORS: these are `static` (internal linkage) but still level::-namespaced,
+// so without an explicit tag they'd be swept into prg_rom_level by that
+// domain's own `_ZN5level*` wildcard -- a bank that isn't mapped while ACTORS
+// is switched in. Every function below is private to this TU and reachable
+// only from the Player::Update/Reset call tree (now ACTORS), so they all move
+// together. See banks.hpp's ::actor_tag comment.
 // ---------------------------------------------------------------------------
 
-static u8 PlayerPort(const Player* p)     { return p == &player1 ? port1     : port2;     }
-static u8 PlayerLastPort(const Player* p) { return p == &player1 ? lastPort1 : lastPort2; }
+ACTORS static u8 PlayerPort(const Player* p)     { return p == &player1 ? port1     : port2;     }
+ACTORS static u8 PlayerLastPort(const Player* p) { return p == &player1 ? lastPort1 : lastPort2; }
 
 // Direct OAM writes replace OAMFromProvider's per-sprite function-pointer calls
 // (2 indirect JSRs + loop overhead) with 2 plain stores each. Mary is two
 // hardware 8x16 columns (see msMary in metasprites.cpp), so each is 16px
 // tall already -- no per-row Y split needed, just the left/right X offset.
-static void PlayerRefreshY(const Player* p) {
+ACTORS static void PlayerRefreshY(const Player* p) {
     oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
     const oam::oam_t sy = p->actor.screen.y;
     s[0].y = sy;         s[1].y = sy;
 }
-static void PlayerRefreshX(const Player* p) {
+ACTORS static void PlayerRefreshX(const Player* p) {
     oam::sprite_t* s = OAMBuffer + (p == &player1 ? 1 : 1 + kMarySprites);
     const oam::oam_t sx = p->actor.screen.x;
     s[0].x = sx;         s[1].x = sx + 8u;
@@ -38,9 +46,9 @@ static void PlayerRefreshX(const Player* p) {
 // Collision helpers
 // ---------------------------------------------------------------------------
 
-static u16 ActorTX(const Actor* self) { return self->worldSpace.x >> 3; }
+ACTORS static u16 ActorTX(const Actor* self) { return self->worldSpace.x >> 3; }
 
-static bool IsBlocked(const Actor* self, const u16 wx, const u16 wy) {
+ACTORS static bool IsBlocked(const Actor* self, const u16 wx, const u16 wy) {
     return level::Blocked(wx, wy, self->GetSize(), /*collectBlocks=*/false);
 }
 
@@ -49,7 +57,7 @@ static bool IsBlocked(const Actor* self, const u16 wx, const u16 wy) {
 // PushCoinVram translates a picked cell into VRAM writes queued for NMI drain.
 // ---------------------------------------------------------------------------
 
-static void PushCoinVram(const CoinPick& pick) {
+ACTORS static void PushCoinVram(const CoinPick& pick) {
     const u8  m  = pick.reveal;
     const u16 tx = static_cast<u16>(pick.col) << 1;
     const u16 ty = static_cast<u16>(2 + (pick.row << 1));
@@ -73,7 +81,7 @@ static void PushCoinVram(const CoinPick& pick) {
 // CollectCoins/CollectCoins2 remove at most one coin per call (the "one pickup
 // per frame" technique -- see the comment above CollectCoins in
 // collision_map.cpp), so picks only ever needs room for one.
-static void CollectCoinsFor(const Actor* self, const Player* p) {
+ACTORS static void CollectCoinsFor(const Actor* self, const Player* p) {
     CoinPick picks[1];
     const u8 n = (p == &player1)
         ? CollectCoins( ActorTX(self), self->screen.y, self->GetSize(), picks, 1)
@@ -85,7 +93,7 @@ static void CollectCoinsFor(const Actor* self, const Player* p) {
 // Movement -- shared between P1 (drives scroll) and P2 (world-canonical X).
 // ---------------------------------------------------------------------------
 
-static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u16 tx) {
+ACTORS static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u16 tx) {
     Actor* self = &p->actor;
 
     // ReSharper disable once CppVariableCanBeMadeConstexpr
@@ -206,10 +214,12 @@ static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u16 tx) {
 
 // ---------------------------------------------------------------------------
 // Player::Update / Player::Reset
-// Called directly from SpriteZeroHandler; actor.update / actor.start are stubs.
+// ::ACTORS-tagged: both now live in the actors bank (bank 5, window 1) along
+// with Actor's own methods, reached only through ::InActorBank/UpdateActors,
+// never by an ordinary call -- see banks.hpp's ::actor_tag comment.
 // ---------------------------------------------------------------------------
 
-void Player::Update() {
+ACTORS void Player::Update() {
     if (paused) return;
     Actor* self = &actor;
 
@@ -305,12 +315,23 @@ void Player::Update() {
     CollectCoinsFor(self, this);
 }
 
-void Player::Reset() {
+ACTORS void Player::Reset() {
     actor.gravity   = 0;
     actor.moveForce = vec2<i8>{0, 0};
     xForce   = 0;
     yForce   = 0;
     runTimer = 0;
+}
+
+// Single per-frame entry point into the actors bank: updates the whole roster
+// (both players today, NPC dispatch through Actor::start/update hooks later)
+// behind ONE window switch instead of one per actor -- see level.hpp's own
+// comment and banks.hpp's ::actor_tag. Called only via ::InActorBank.
+ACTORS void UpdateActors() {
+    player1.Update();
+#ifdef PLAYER2_SUPPORTED
+    player2.Update();
+#endif
 }
 
 }   // namespace level

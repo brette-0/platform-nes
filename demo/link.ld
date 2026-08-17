@@ -22,8 +22,10 @@
  */
 
 /* This demo's own ROM size -- NOT an MMC3 fact, purely this project's own
- * choice, which is exactly why it doesn't live in mmc3-helper.ld. 32 KiB
- * (4 banks), unchanged from this demo's original pre-BANKED_CALL VRC1 size.
+ * choice, which is exactly why it doesn't live in mmc3-helper.ld. 128 KiB
+ * (16 banks), doubled from the prior 64 KiB to give prg_rom_spare room for
+ * upcoming domains (e.g. a level-data bank) without displacing anything
+ * already claimed.
  *
  * This is now a free knob: any power of 2 from 32 up to 512 KiB (MMC3's own
  * hardware maximum -- 6-bit bank registers) links correctly with no other
@@ -44,15 +46,17 @@
  *   24 KiB): the extra banks are reachable only through MMC3_BANKED()
  *   domains (plus __mmc3_reserved_banks, see mmc3-helper.ld). A c_readonly
  *   overflow is not fixed by bumping this number alone. */
-PROVIDE(__prg_rom_size = 64);
+PROVIDE(__prg_rom_size = 128);
 PROVIDE(__chr_rom_size = 8);
 
-/* Five banked domains, claiming banks the resident image doesn't use: level
- * (0-1), audio (2), audio_data (3), and cold (4) -- one bank pulled out of
- * what would otherwise be prg_rom_spare (see banks.hpp's ::cold_tag). MUST be
- * set before `INCLUDE mmc3-helper.ld`: it is what shortens prg_rom_spare, and
- * PROVIDE() only takes its first-encountered value. */
-PROVIDE(__mmc3_reserved_banks = 5);
+/* Seven banked domains, claiming banks the resident image doesn't use: level
+ * code (0), level data (1), audio (2), audio_data (3), cold (4), actors (5),
+ * and level's dynamic-plane source (6) -- each pulled out of what would
+ * otherwise be prg_rom_spare (see banks.hpp's ::cold_tag / ::actor_tag /
+ * ::level_dynamic_tag). MUST be set before `INCLUDE mmc3-helper.ld`: it is
+ * what shortens prg_rom_spare, and PROVIDE() only takes its
+ * first-encountered value. */
+PROVIDE(__mmc3_reserved_banks = 7);
 
 /* ONE resident window ($C000-$DFFF, the hardwired second-to-last bank), not
  * the default three. Both switchable windows are handed to the level domain
@@ -67,72 +71,65 @@ PROVIDE(__mmc3_reserved_banks = 5);
  * level's is simply gone whenever level is running. */
 PROVIDE(__mmc3_resident_windows = 1);
 
-/* THE LEVEL DOMAIN: 16 KiB spanning banks 0 AND 1, mapped at $8000-$BFFF
- * through BOTH switchable windows at once. ORIGIN encodes bank 0 / $8000 as
- * usual; the second 8 KiB is bank 1 at $A000 by simple adjacency, exactly the
- * way the resident image's own windows relate. Entered by switching R6=0 and
- * R7=1 once on mode entry (main.cpp), NOT by farcall -- mmc3::CallInSection
- * switches one register and cannot express this. See banks.hpp's level_tag.
- *
- * DECLARED AND CLAIMED BEFORE `INCLUDE mmc3-helper.ld`, and that ordering is
- * load-bearing: the INCLUDE drags in nes.ld's own `*(.text .text.*)` and
- * `*(.rodata .rodata.*)` catch-alls, and ld applies placement rules in the
- * order they appear across the whole script. A level rule written after the
- * INCLUDE matches nothing at all -- every level section has already been
- * claimed by the resident region -- and the only symptom is that region
- * overflowing, which reads like "the game got bigger", not like a rule that
- * silently did nothing. */
-MEMORY {
-  prg_rom_level : ORIGIN = 0x00018000, LENGTH = 0x4000  /* banks 0+1 */
-}
-SECTIONS {
-  /* CODE ONLY -- level's .rodata is deliberately left resident. Both together
-   * come to 16,882 bytes and overflow this 16 KiB domain by 498; code alone is
-   * 15,059 and fits with ~1.3 KiB to spare. Leaving the tables in the $C000
-   * window costs nothing at runtime (that window is hardwired, so banked level
-   * code reads them directly, no farcall) and spends resident space this
-   * configuration has going spare. If level's code grows past the domain, the
-   * next move is a data bank for these tables, not a bigger domain. */
-  .prg_rom_level : {
-    *(.text._ZN5level*)
-    *(.prg_rom_level .prg_rom_level.*)
-  } >prg_rom_level
-}
-__space_origin_prg_rom_level = ORIGIN(prg_rom_level);
-__space_length_prg_rom_level = LENGTH(prg_rom_level);
+/* Level's code (main(), ColMapSeed/Track/Stamp/SlideLeft/Right, and
+ * everything else level::-namespaced) has NO special placement rule any
+ * more, and therefore needs none of the "declare before INCLUDE" ordering
+ * the old combined level domain required: that requirement existed only
+ * because a plain namespace-mangled wildcard (`*(.text._ZN5level*)`)
+ * competes with nes.ld's own generic `*(.text .text.*)` catch-all for the
+ * SAME kind of section name, and ld resolves that race by declaration order.
+ * ::LEVEL_CODE/::LEVEL_DATA/::ACTORS/::COLD/::FIXED all route through
+ * CREATE_SEGMENT_KEYWORD instead, which gives each piece of code or data its
+ * own uniquely-named section (`.prg_rom_level_code` etc.) that no generic
+ * wildcard can ever match -- so those rules live in the ordinary post-INCLUDE
+ * block below, same as audio/cold/actors. Level's own code isn't untagged any
+ * more (::LEVEL_CODE covers it), but anything that stays untagged still falls
+ * through to the resident catch-all exactly as before. */
 
 INCLUDE mmc3-helper.ld
 
 /* ------------------------------------------------------------------------
- * BANKED DOMAINS -- banks 0-3, 8 KiB each, all reached through window 1
- * ($8000-$9FFF, register R6).
+ * BANKED DOMAINS -- banks 0-5, 8 KiB each. Most reach through window 1
+ * ($8000-$9FFF, R6); two (audio data, level's dynamic plane) are pinned to
+ * window 2 ($A000-$BFFF, R7) because each has to be mappable AT THE SAME
+ * TIME as a specific window-1 partner -- see their own comments below.
  *
- * ORIGIN is ((bank + 1) * 0x10000) + 0x8000, and the +1 is load-bearing
- * TWICE over -- see mmc3.hpp's section_t ENCODING comment for the full
- * account, but in short: (a) the C++ side treats a zero high half as "no
- * bank encoded", so an unbiased bank 0 would be indistinguishable from
- * unset, and (b) an unbiased bank 0 region would sit at ORIGIN 0x8000,
+ * ORIGIN is ((bank + 1) * 0x10000) + (0x8000 or 0xA000), and the +1 is
+ * load-bearing TWICE over -- see mmc3.hpp's section_t ENCODING comment for
+ * the full account, but in short: (a) the C++ side treats a zero high half
+ * as "no bank encoded", so an unbiased bank 0 would be indistinguishable
+ * from unset, and (b) an unbiased bank 0 region would sit at ORIGIN 0x8000,
  * overlapping this project's own .text, which ld.lld rejects outright
  * ("section .text virtual address range overlaps with .prg_rom_001" --
  * confirmed against a real link, not assumed). The high bits never reach the
  * emitted 6502 code: a JSR operand has 16 bits, so every one of these
- * truncates back to a plain $8000 call.
+ * truncates back to a plain $8000/$A000 call.
  *
  * A domain's REAL bank number is its file offset / 0x2000, which is decided
  * entirely by the FULL() order in the OUTPUT_FORMAT block at the bottom of
  * this file -- NOT by these ORIGINs, and NOT by the numbers in their names.
- * The two are kept in agreement by hand here (001 is FULL()'d first, so it
- * is bank 0, so its ORIGIN encodes 0+1), exactly the arithmetic that shipped
- * a real crash in the VRC1 rollout when it was got wrong -- see
+ * The two are kept in agreement by hand here (level_code is FULL()'d first,
+ * so it is bank 0, so its ORIGIN encodes 0+1), exactly the arithmetic that
+ * shipped a real crash in the VRC1 rollout when it was got wrong -- see
  * BANKED_CALL_THEORY.txt's "CRITICAL POST-PHASE-4 FIX". Change one, change
  * all three: the FULL() order, the ORIGIN here, and the section() in
  * demo/src/banks.hpp.
- *
- * All four use window 1 rather than spreading across R6/R7 because nothing
- * in this demo yet needs two different domains banked in simultaneously; a
- * domain that does would encode 0xA000 instead and be reached through R7.
  * ------------------------------------------------------------------------ */
 MEMORY {
+  /* THE LEVEL CODE BANK: bank 0, window 1 ($8000, R6). Level's own code --
+   * ::LEVEL_CODE-tagged in levels.cpp/collision_map.cpp -- reads the static
+   * plane and the dynamic plane's ROM source directly out of window 2, so it
+   * stays mapped for the whole level session rather than being farcalled per
+   * read. See banks.hpp's ::level_code_tag. */
+  prg_rom_level_code : ORIGIN = 0x00018000, LENGTH = 0x2000  /* bank 0, window 1 */
+  /* THE LEVEL DATA BANK: bank 1, window 2 ($A000, R7). The static plane
+   * (TileData_1_1) and the dynamic plane's ROM source (DynData_1_1,
+   * DynLengths_1_1) -- ::LEVEL_DATA-tagged -- must be mappable at the SAME
+   * TIME as prg_rom_level_code, since that code reads both directly; that's
+   * the window-2 placement, same simultaneous-mapping constraint as audio's
+   * code/data split below. Both are entered together, once, by banks.hpp's
+   * ::EnterLevelBanks and held for the whole level -- see ::level_data_tag. */
+  prg_rom_level_data : ORIGIN = 0x0002a000, LENGTH = 0x2000  /* bank 1, window 2 */
   /* THE AUDIO CODE BANK: FamiStudio's engine and platform-nes's audio module,
    * and nothing else. Their adjacency is a hard contract -- src/nes/audio.cpp
    * does no bank switching, it just calls the engine, which is only valid
@@ -160,37 +157,57 @@ MEMORY {
    * the two tags differ here. */
   /* THE COLD BANK: bank 4, window 1 ($8000, R6). Home for level code that
    * only ever runs once (level's own one-time setup, currently) -- reached by
-   * an ordinary mmc3::CallInBlock<cold_tag>, not a permanent switch like
-   * level's own domain, since nothing here needs to stay mapped once the call
-   * returns. See banks.hpp's ::cold_tag. */
+   * an ordinary mmc3::CallInBlock<cold_tag>, not a permanent switch like the
+   * level-data domains above, since nothing here needs to stay mapped once
+   * the call returns. See banks.hpp's ::cold_tag. */
   prg_rom_cold : ORIGIN = 0x00058000, LENGTH = 0x2000  /* bank 4, window 1 */
+  /* THE ACTORS BANK: bank 5, window 1 ($8000, R6). Actor's own methods
+   * (Move/Start/Update) and Player's (Update/Reset) -- ::ACTORS-tagged in
+   * actor.cpp/player.cpp. Unlike prg_rom_cold this is called every frame, not
+   * once: level::main() reaches it through mmc3::Call<level::UpdateActors>,
+   * so the whole roster updates behind one window switch instead of paying
+   * one per actor. See banks.hpp's ::actor_tag for the size/placement
+   * rationale. */
+  prg_rom_actors : ORIGIN = 0x00068000, LENGTH = 0x2000  /* bank 5, window 1 */
+  /* THE LEVEL DYNAMIC-SOURCE BANK: bank 6, window 2 ($A000, R7). DynData_1_1
+   * -- ::LEVEL_DYNAMIC-tagged -- read ONCE at load, through an explicit
+   * mmc3::CallInBlock<level_dynamic_tag> (LoadLevel, levels.cpp), NOT
+   * permanently pinned like prg_rom_level_data. See banks.hpp's
+   * ::level_dynamic_tag. */
+  prg_rom_level_dynamic : ORIGIN = 0x0007a000, LENGTH = 0x2000  /* bank 6, window 2 */
 }
 
 /* Published for the build-time space report -- see mmc3-helper.ld's own
  * __space_* block for why an empty bank needs these to be visible at all. */
+__space_origin_prg_rom_level_code = ORIGIN(prg_rom_level_code);
+__space_length_prg_rom_level_code = LENGTH(prg_rom_level_code);
+__space_origin_prg_rom_level_data = ORIGIN(prg_rom_level_data);
+__space_length_prg_rom_level_data = LENGTH(prg_rom_level_data);
 __space_origin_prg_rom_audio = ORIGIN(prg_rom_audio);
 __space_length_prg_rom_audio = LENGTH(prg_rom_audio);
 __space_origin_prg_rom_audio_data = ORIGIN(prg_rom_audio_data);
 __space_length_prg_rom_audio_data = LENGTH(prg_rom_audio_data);
 __space_origin_prg_rom_cold = ORIGIN(prg_rom_cold);
 __space_length_prg_rom_cold = LENGTH(prg_rom_cold);
+__space_origin_prg_rom_actors = ORIGIN(prg_rom_actors);
+__space_length_prg_rom_actors = LENGTH(prg_rom_actors);
+__space_origin_prg_rom_level_dynamic = ORIGIN(prg_rom_level_dynamic);
+__space_length_prg_rom_level_dynamic = LENGTH(prg_rom_level_dynamic);
 
 SECTIONS {
-  /* Level's own placement rule is NOT here -- it is above `INCLUDE
-   * mmc3-helper.ld`, which is the only position where it works. See its own
-   * comment there.
-   *
-   * Level's interrupt path needs no rule at all: nmi_handler, irq_handler and
+  /* Level's interrupt path needs no rule at all: nmi_handler, irq_handler and
    * ApplyHudSplit are tagged ::FIXED in level.cpp, so they land in
-   * .prg_rom_fixed and mmc3-helper.ld's existing rule takes them. That is also
-   * what keeps them clear of the level wildcard, which would otherwise have
-   * claimed them by name before anything down here could run. */
+   * .prg_rom_fixed and mmc3-helper.ld's existing rule takes them. */
+  .prg_rom_level_code : { *(.prg_rom_level_code .prg_rom_level_code.*) } >prg_rom_level_code
+  .prg_rom_level_data : { *(.prg_rom_level_data .prg_rom_level_data.*) } >prg_rom_level_data
   .prg_rom_audio : { *(.prg_rom_audio .prg_rom_audio.*) } >prg_rom_audio
   .prg_rom_audio_data : {
     *(.prg_rom_music .prg_rom_music.*)
     *(.prg_rom_sfx .prg_rom_sfx.*)
   } >prg_rom_audio_data
   .prg_rom_cold : { *(.prg_rom_cold .prg_rom_cold.*) } >prg_rom_cold
+  .prg_rom_actors : { *(.prg_rom_actors .prg_rom_actors.*) } >prg_rom_actors
+  .prg_rom_level_dynamic : { *(.prg_rom_level_dynamic .prg_rom_level_dynamic.*) } >prg_rom_level_dynamic
 }
 
 /* Moves the C writable arena (.data/.bss/heap, and the dynamic soft stack
@@ -243,25 +260,29 @@ ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
  *
  * Order is the whole layout contract:
  * - The banked domains come FIRST, and THIS ORDER IS WHAT ASSIGNS THEIR BANK
- *   NUMBERS: level -> banks 0-1, audio -> bank 2, audio_data -> bank 3,
- *   cold -> bank 4, since a bank is just file offset / 0x2000. Their MEMORY
- *   ORIGINs above and their section()s in demo/src/banks.hpp both hard-code
- *   those same numbers; reordering these lines silently re-banks every
- *   domain and nothing will warn you.
+ *   NUMBERS: level_code -> bank 0, level_data -> bank 1, audio -> bank 2,
+ *   audio_data -> bank 3, cold -> bank 4, actors -> bank 5,
+ *   level_dynamic -> bank 6, since a bank is just file offset / 0x2000.
+ *   Their MEMORY ORIGINs above and their section()s in demo/src/banks.hpp
+ *   both hard-code those same numbers; reordering these lines silently
+ *   re-banks every domain and nothing will warn you.
  * - prg_rom_spare is the zero padding that makes the file exactly
- *   __prg_rom_size. __mmc3_reserved_banks = 5 hands all five leftover banks
- *   to the domains above, leaving prg_rom_spare whatever remains -- 1 bank at
- *   this file's current __prg_rom_size -- and it is the only thing that grows
- *   if __prg_rom_size does without new domains to match.
+ *   __prg_rom_size. __mmc3_reserved_banks = 7 hands all seven leftover banks
+ *   to the domains above, leaving prg_rom_spare whatever remains, and it is
+ *   the only thing that grows if __prg_rom_size does without new domains to
+ *   match.
  * - prg_rom_switchable then prg_rom_fixed occupy the top banks, in that
  *   order: real MMC3 hardware always shows the true last bank at $E000, and
  *   the second-to-last at $C000 -- which is prg_rom_switchable's own third
  *   window, by construction, at any ROM size. */
 OUTPUT_FORMAT {
-  FULL(prg_rom_level)
+  FULL(prg_rom_level_code)
+  FULL(prg_rom_level_data)
   FULL(prg_rom_audio)
   FULL(prg_rom_audio_data)
   FULL(prg_rom_cold)
+  FULL(prg_rom_actors)
+  FULL(prg_rom_level_dynamic)
   FULL(prg_rom_spare)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)

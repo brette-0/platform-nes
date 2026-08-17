@@ -45,6 +45,12 @@ namespace level {
     // Pushing is done by the player logic; draining is done by the NMI.
     void CoinVramPush(u16 address, u8 value);
 
+    // Updates the whole actor roster (both players today, NPCs later) in one call.
+    // ::ACTORS-tagged (player.cpp) -- reached via ::InActorBank, never called
+    // directly, so a single farcall covers the whole roster instead of one per
+    // actor. See banks.hpp's ::actor_tag.
+    void UpdateActors();
+
     // Runs the level-playing mode: bank setup, level load, and the gameplay
     // loop. Called from the top-level mode dispatch while gameMode == Level.
     void main();
