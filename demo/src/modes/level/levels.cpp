@@ -74,27 +74,19 @@ namespace level {
     // viewport_tx() itself is constexpr-yet-runtime.
     static constexpr u8 prev_parity_fix() { return (video::viewport_tx() >> 1) & 1u; }
 
-    // LEVEL_DATA: per-level ROM source tables read CONTINUOUSLY -- the static
-    // plane and DynLengths -- into banks.hpp's ::level_data_tag instead of the
-    // generic resident catch-all. Level data has no reason to compete with
-    // everything else's rodata for one shared 8 KiB, and it's the one thing
-    // guaranteed to grow with every new level authored.
-    LEVEL_DATA
-    const u8 TileData_1_1[] = {
+    // LEVEL_DATA: static plane + DynLengths, read CONTINUOUSLY -- see
+    // banks.hpp's ::level_data_tag.
+    LEVEL_DATA const u8 TileData_1_1[] = {
         #include "../../../tiled/include/1-1_st"
     };
 
-    // LEVEL_DYNAMIC, not LEVEL_DATA: read ONCE, at load (LoadDynamicLayer
-    // copies it into RAM), never again on any per-frame path -- see
-    // banks.hpp's ::level_dynamic_tag for why that earns it a separate,
-    // farcalled-not-pinned bank instead of permanent window-2 residency.
-    LEVEL_DYNAMIC
-    const u8 DynData_1_1[] = {
+    // LEVEL_DYNAMIC, not LEVEL_DATA: read ONCE at load -- see
+    // banks.hpp's ::level_dynamic_tag.
+    LEVEL_DYNAMIC const u8 DynData_1_1[] = {
         #include "../../../tiled/include/1-1_dt"
     };
 
-    LEVEL_DATA
-    const u8 DynLengths_1_1[] = {
+    LEVEL_DATA const u8 DynLengths_1_1[] = {
         #include "../../../tiled/include/1-1_dl"
     };
 
@@ -103,27 +95,17 @@ namespace level {
          DynData_1_1, DynLengths_1_1, sizeof(DynLengths_1_1)}
     };
 
-    // LEVEL_CODE: level's own code, permanently paired in window 1 with the
-    // static plane / dynamic-plane source it reads out of window 2 -- see
-    // banks.hpp's ::level_code_tag.
-    // noinline: this is now called from exactly ONE site (level.cpp's
-    // CallInBlock<level_code_tag> wrap), so without it LTO inlines the whole
-    // body into that lambda -- which is itself compiled as part of the FIXED
-    // trampoline -- landing LoadLevel (and everything it transitively calls,
-    // e.g. LoadDynamicLayer) in FIXED instead of LEVEL_CODE. Same failure
-    // mode as EnterLevelSetup's own noinline, confirmed the same way: FIXED
-    // overflowed until this was added.
-    __attribute__((noinline)) LEVEL_CODE
-    bool LoadLevel(const u16 n) {
+    // LEVEL_CODE, paired in window 1 with ::level_data_tag -- see banks.hpp.
+    // NI: sole call site is level.cpp's CallInBlock<level_code_tag>, so
+    // without it LTO inlines this into the FIXED trampoline instead of
+    // LEVEL_CODE -- same failure mode as EnterLevelSetup's own NI.
+    NI LEVEL_CODE bool LoadLevel(const u16 n) {
         // TileData holds the active level's STATIC PLANE (walls/ground).
         TileData = Levels[n].TileData;
         nColumns = Levels[n].nColumns;
-        // DynData_1_1 lives in ::level_dynamic_tag, a DIFFERENT window-2 bank than
-        // the one already mapped here (::level_data_tag, the static plane +
-        // DynLengths). This temporarily swaps window 2 to reach it, runs the
-        // ROM->RAM copy, and restores window 2 to ::level_data_tag on return --
-        // see banks.hpp's ::level_dynamic_tag comment for why DynData doesn't
-        // share the permanently-pinned bank.
+        // DynData_1_1 lives in a different window-2 bank (::level_dynamic_tag)
+        // than the one mapped here (::level_data_tag). Swap window 2, copy,
+        // restore -- see ::level_dynamic_tag.
         mmc3::CallInBlock<level_dynamic_tag>([n] {
             LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
         });
@@ -212,8 +194,7 @@ namespace level {
 
     // ACTORS: sole caller is ProcessMovement (player.cpp), now in the actors
     // bank -- see banks.hpp's ::actor_tag comment.
-    ACTORS
-    void BuildNextColumn(u8* buf, const u16 worldCol) {
+    ACTORS void BuildNextColumn(u8* buf, const u16 worldCol) {
         attr_column++;
         const u8 mask = attr_column & 1 ? 0x33 : 0x00;
         for (auto & j : AttributeBuffer) j &= mask;
@@ -240,8 +221,7 @@ namespace level {
     }
 
     // ACTORS: see BuildNextColumn's comment.
-    ACTORS
-    void BuildPrevColumn(u8* buf, const u16 worldCol) {
+    ACTORS void BuildPrevColumn(u8* buf, const u16 worldCol) {
         attr_column++;
         const u8 ap = (attr_column + prev_parity_fix()) & 1;   // odd-width parity fix
         const u8 mask = ap ? 0xCC : 0x00;

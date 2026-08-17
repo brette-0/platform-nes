@@ -46,9 +46,8 @@ namespace level {
     void CoinVramPush(u16 address, u8 value);
 
     // Updates the whole actor roster (both players today, NPCs later) in one call.
-    // ::ACTORS-tagged (player.cpp) -- reached via ::InActorBank, never called
-    // directly, so a single farcall covers the whole roster instead of one per
-    // actor. See banks.hpp's ::actor_tag.
+    // ::ACTORS-tagged (player.cpp) -- reached via mmc3::Call<UpdateActors>, never
+    // called directly. See banks.hpp's ::actor_tag.
     void UpdateActors();
 
     // Runs the level-playing mode: bank setup, level load, and the gameplay

@@ -6,23 +6,19 @@
 
 static void TranslateWorldSpace(vec2<u16>& worldSpace, vec2<i8> delta);
 
-// ACTORS: Actor is global-namespace, so without this it would fall into
-// prg_rom_switchable (resident) by default instead of the actor bank -- see
-// banks.hpp's ::actor_tag comment. TranslateWorldSpace stays untagged: it's
-// static/file-local, so it just follows whichever TU-section Move ends up in.
-ACTORS
-void Actor::Move(const vec2<i8> delta /* sub px */) {
+// ACTORS: Actor is global-namespace, so without this it would fall into the
+// resident bank by default instead of the actor bank. TranslateWorldSpace
+// stays untagged -- static/file-local, follows whichever section Move lands in.
+ACTORS void Actor::Move(const vec2<i8> delta /* sub px */) {
     TranslateWorldSpace(worldSpace, delta);
 
     const bool inField = !(worldSpace.y & 0x8000)
                        && (worldSpace.y >> 7) < static_cast<u16>(level::levelHeight);
 
     if (inField) {
-        // Block test against the shared composite-metatile window.  Enemies pass
-        // collectBlocks=false: coins (Collect class) are walked through, only walls
-        // (Solid) stop them.  No per-actor RLE walk -- Blocked reads the camera-centred
-        // window resolved once per scroll.  World-pixel inputs; the HUD strip is removed
-        // internally.
+        // Block test against the shared composite-metatile window. Enemies pass
+        // collectBlocks=false: coins are walked through, only walls stop them.
+        // World-pixel inputs; the HUD strip is removed internally.
         const bool solid = level::Blocked(worldSpace.x >> 3, worldSpace.y >> 3,
                                                 GetSize(), /*collectBlocks=*/false);
         (void)solid;   // TODO: collision response

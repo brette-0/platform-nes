@@ -9,6 +9,7 @@
  * - ::PEEK / ::POKE / ::SPACESHIP — portable memory and compare ops.
  * - ::atomic — maps to `volatile` on NES and `_Atomic` elsewhere.
  * - ::AI — force a function to be copied into every caller.
+ * - ::NI — force a function to never be inlined into its caller(s).
  * - ::MINSIZE — Clang-only size-optimisation hint (silently dropped
  *   under GCC).
  * - ::CHARMAP, ::STRING, ::STRING_NT — define per-project character maps and
@@ -39,6 +40,18 @@ using namespace br0::intsh;
  *          in every caller.
  */
 #define AI __attribute__((always_inline))
+
+/**
+ * @brief Force a function to NEVER be inlined into its caller(s).
+ *
+ * For when placement, not speed, is the point: a banked function reached
+ * through a single call site inside a farcall trampoline (compiled as part
+ * of ::fixed) is a prime LTO inlining target -- it'll happily relocate the
+ * whole body out of its intended bank. ::NI pins a real JSR target instead.
+ *
+ * @warning Does not compose with `always_inline` -- don't take both ::NI and ::AI.
+ */
+#define NI __attribute__((noinline))
 
 
 #ifdef TARGET_NES

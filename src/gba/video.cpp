@@ -411,7 +411,7 @@ namespace video {
 // placement entirely. Keeping it a standalone IWRAM function (called once/frame
 // from ROM via a veneer) anchors the whole hot path in fast RAM. The libgba calls
 // it makes (VBlankIntrWait, dmaCopy) and nmi() stay in ROM, reached via veneers.
-IWRAM_CODE __attribute__((noinline)) void WaitForPresent() {
+IWRAM_CODE NI void WaitForPresent() {
     const bool bg  = ppu::PPUMASK & ppu::mask::BG;
     const bool spr = ppu::PPUMASK & ppu::mask::SPRITE;
 

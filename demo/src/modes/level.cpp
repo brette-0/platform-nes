@@ -63,11 +63,10 @@ namespace level {
 
     i8 lastDeltaScroll;
 
-    // World-pixel boundary of the most recently streamed column (always a multiple
-    // of 16).  Doubles as the scroll hysteresis marker: a new column is only built
-    // once the camera has travelled a full 16px column past it, so jitter or a
-    // direction reversal near a boundary can't rapidly toggle BuildNext/BuildPrev
-    // and drift the edge cursors.  Read by the NMI to place the nametable write.
+    // World-pixel boundary of the most recently streamed column (multiple of 16).
+    // Doubles as scroll hysteresis: a new column builds only once the camera
+    // passes a full 16px column beyond it, so jitter can't rapidly toggle
+    // BuildNext/BuildPrev. Read by the NMI to place the nametable write.
     atomic u16 lastXWorldSpace;
 
     // Right edge's absolute metatile offset from the level start. Tracked so the
@@ -94,41 +93,18 @@ namespace level {
 #endif
     static i16 ClampRow(u16 y);
 
-    // NOT pinned to the fixed bank, deliberately. This was ::FIXED while it
-    // opened with SwitchBank(window1Control/window2Control, ...) -- code that
-    // switches a PRG window must not be able to unmap itself mid-execution
-    // (interrupts.hpp's RESET macro comment has the same hazard). Boot now
-    // establishes R6/R7 (mmc3.cpp's ::_reset, via mmc3-helper.ld's
-    // __mmc3_boot_bank_window1/2), so those two calls are gone and only the
-    // SwitchCHRBank calls below remain -- R0-R5 move PPU pattern-table
-    // windows and cannot touch PRG mapping, so there is nothing left to
-    // protect against.
+    // ::COLD, not ::FIXED: boot now establishes R6/R7 before this runs, so no
+    // remaining call here can unmap itself mid-execution. Farcalled into the
+    // COLD bank (banks.hpp's ::cold_tag) since it's one-time level-entry
+    // setup, not worth permanently occupying the level domain's tight 16 KiB.
+    // Safe to call from inside level's own domain: the CallInBlock trampoline
+    // is ::FIXED, and only window 1 moves -- window 2 (ColMapStamp et al.)
+    // stays mapped throughout.
     //
-    // Untagged, so the mangled-name rule in demo/link.ld sweeps it into the
-    // level domain along with the rest of this namespace. Reached by a plain
-    // call from main.cpp's dispatcher, which maps both of level's banks first
-    // (EnterLevelBanks) -- not by a farcall, which can only switch one window
-    // and would leave half the domain missing.
-    // Everything level entry needs done exactly once -- never again for the
-    // rest of the level's lifetime -- lives here instead of inline in ::main,
-    // so it can be farcalled into the COLD bank (banks.hpp's ::cold_tag)
-    // instead of permanently occupying the level domain's own tight 16 KiB.
-    //
-    // Safe to call from inside level's own domain (window1 = bank 0) even
-    // though this runs in a DIFFERENT bank (bank 4, also window 1): the
-    // farcall trampoline is ::FIXED, so it survives window 1 changing under
-    // it, and window 2 (level's bank 1, holding ColMapStamp et al.) is never
-    // touched by this call -- only window 1 moves. Ordinary in-domain calls
-    // this makes into level's own bank 1 (ColMapSeed -> ColMapStamp) resolve
-    // exactly as they did when inlined into ::main, because window 2 never
-    // stops showing that bank while this runs.
-    //
-    // noinline: this is the ONLY call site, so without it LTO inlines the
-    // whole body straight into CallInBlock's ::FIXED trampoline instead of
-    // leaving it in ::COLD's own section -- defeating the point (confirmed
-    // empirically: prg_rom_cold measured 0 bytes used and prg_rom_fixed
-    // ballooned by ~5.2 KiB before this attribute was added).
-    static COLD __attribute__((noinline)) void EnterLevelSetup() {
+    // NI: the only call site, so without it LTO inlines the whole body into
+    // the FIXED trampoline instead of ::COLD (confirmed empirically:
+    // prg_rom_cold measured 0 bytes, prg_rom_fixed ballooned ~5.2 KiB).
+    static COLD NI void EnterLevelSetup() {
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
         mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
@@ -137,11 +113,9 @@ namespace level {
         mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
         mmc3::SetMirroring(false);
 
-        // LoadLevel is ::LEVEL_CODE (banks.hpp's ::level_code_tag), and this runs
-        // from EnterLevelSetup, which is ::COLD -- COLD can only reach FIXED,
-        // resident, and its own bank, not a different bank-0 domain, so this needs
-        // an explicit farcall rather than a plain call. Same pattern as Player::Reset's
-        // wrap below, just naming level_code_tag instead of actor_tag.
+        // LoadLevel is ::LEVEL_CODE; ::COLD can't reach a different bank-0
+        // domain by a plain call, so this needs an explicit farcall -- same
+        // pattern as Player::Reset's wrap below, naming level_code_tag.
         const bool levelLoaded = mmc3::CallInBlock<level_code_tag>([] {
             return LoadLevel(0);
         });
@@ -194,10 +168,8 @@ namespace level {
 
         ppu::SetScroll(0, 0);
 
-        // Long-called into the audio banks: the module and engine share one
-        // (banks.hpp's audio_tag), the songs and SFX are in another. Both are
-        // mapped for the duration; inside, the module calls the engine
-        // directly and the engine reads its data directly.
+        // Farcalled: module+engine share one bank, songs+SFX another, both
+        // mapped for the duration -- see banks.hpp's ::audio_tag.
         InAudioBanks([] {
             audio::Init(REGION);
             audio::TrackPlay(0);
@@ -209,14 +181,10 @@ namespace level {
             ColMapSeed(0, { TileData }, { DynLengths, DynData, 0 });
         });
 
-        // Player::Reset is ::ACTORS-tagged now (banks.hpp's ::actor_tag), and this
-        // runs from EnterLevelSetup, which is ::COLD -- COLD code can only reach
-        // FIXED, resident, and its own bank, not a different bank-5 domain, so this
-        // needs an explicit farcall rather than a plain call.
-        // CallInBlock<actor_tag>, not CallBlock<UpdateActors>: this block has nothing
-        // to do with UpdateActors -- it only needs the SAME bank, so name the tag
-        // directly rather than borrow an unrelated function's bank_of<> registration
-        // as a roundabout way to say so.
+        // Player::Reset is ::ACTORS; ::COLD can't reach a different bank-5
+        // domain by a plain call, so this needs an explicit farcall.
+        // CallInBlock<actor_tag>, not CallBlock<UpdateActors>: this block has
+        // nothing to do with UpdateActors, so name the tag directly.
         mmc3::CallInBlock<actor_tag>([] {
             player1.Reset();
 #ifdef PLAYER2_SUPPORTED
@@ -230,10 +198,8 @@ namespace level {
         apu::DisableDMCIRQ();
     }
 
-    // LEVEL_CODE: paired with banks.hpp's ::level_data_tag (window 2, the
-    // static plane + dynamic-plane ROM source). Entered by ::EnterLevelBanks
-    // (main.cpp, before this is called) and held for the whole level session
-    // -- not farcall-reachable, see ::level_code_tag's own comment.
+    // LEVEL_CODE: paired with ::level_data_tag (window 2). Entered by
+    // ::EnterLevelBanks and held for the whole session -- not farcall-reachable.
     LEVEL_CODE void main() {
         InColdBank(EnterLevelSetup);
         irq::EnableInterrupts();
@@ -244,9 +210,8 @@ namespace level {
                 paused = !paused;
             }
 
-            // Both players (and future NPCs) update behind ONE farcall into the
-            // actors bank -- see level.hpp's UpdateActors comment and banks.hpp's
-            // ::actor_tag -- rather than one window switch per actor.
+            // Both players (and future NPCs) update behind ONE farcall into
+            // the actors bank, not one window switch per actor.
             ppu::SetColorPriority(0x40);   // green band:        UpdateActors
             mmc3::Call<level::UpdateActors>();
             ppu::SetColorPriority(0x80);   // blue band:         ColMapTrack (slides override internally)
@@ -266,10 +231,9 @@ namespace level {
         }
     }
 
-    // ::FIXED, not banked. An interrupt fires with whatever banks happen to
-    // be mapped -- including the audio pair mid-farcall, when BOTH halves of
-    // level's domain are swapped out -- so anything a vector can reach has to
-    // live somewhere no register can displace. That is the fixed bank.
+    // ::FIXED, not banked: an interrupt fires with whatever banks happen to
+    // be mapped, so anything a vector can reach has to live somewhere no
+    // register can displace.
     FIXED void nmi_handler() {
         lastPort1 = port1; lastPort2 = port2;
         oam::RefreshSprites(OAMBuffer);

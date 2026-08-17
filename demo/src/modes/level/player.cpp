@@ -16,12 +16,9 @@ namespace level {
 // ---------------------------------------------------------------------------
 // Per-player accessors -- resolved from `this` rather than a free ActorToPlayer.
 //
-// ACTORS: these are `static` (internal linkage) but still level::-namespaced,
-// so without an explicit tag they'd be swept into prg_rom_level by that
-// domain's own `_ZN5level*` wildcard -- a bank that isn't mapped while ACTORS
-// is switched in. Every function below is private to this TU and reachable
-// only from the Player::Update/Reset call tree (now ACTORS), so they all move
-// together. See banks.hpp's ::actor_tag comment.
+// ACTORS: static but level::-namespaced, so without an explicit tag they'd
+// fall into the generic resident catch-all instead of the actors bank. All
+// private to this TU, reachable only from Player::Update/Reset (also ACTORS).
 // ---------------------------------------------------------------------------
 
 ACTORS static u8 PlayerPort(const Player* p)     { return p == &player1 ? port1     : port2;     }
@@ -213,10 +210,8 @@ ACTORS static void ProcessMovement(Player* p, const vec2<i8> moveForce, const u1
 }
 
 // ---------------------------------------------------------------------------
-// Player::Update / Player::Reset
-// ::ACTORS-tagged: both now live in the actors bank (bank 5, window 1) along
-// with Actor's own methods, reached only through ::InActorBank/UpdateActors,
-// never by an ordinary call -- see banks.hpp's ::actor_tag comment.
+// Player::Update / Player::Reset -- ::ACTORS, reached via
+// mmc3::Call<UpdateActors>/CallInBlock<actor_tag>, never by an ordinary call.
 // ---------------------------------------------------------------------------
 
 ACTORS void Player::Update() {
@@ -324,9 +319,7 @@ ACTORS void Player::Reset() {
 }
 
 // Single per-frame entry point into the actors bank: updates the whole roster
-// (both players today, NPC dispatch through Actor::start/update hooks later)
-// behind ONE window switch instead of one per actor -- see level.hpp's own
-// comment and banks.hpp's ::actor_tag. Called only via ::InActorBank.
+// behind ONE window switch instead of one per actor.
 ACTORS void UpdateActors() {
     player1.Update();
 #ifdef PLAYER2_SUPPORTED
