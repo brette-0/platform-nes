@@ -707,7 +707,50 @@ elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
     # OGC_PROFILER gate, so Release .dols carry neither the thread nor the draw.
     # PRIVATE: only the library's own TUs (profiler.cpp/video.cpp) consult it.
     target_compile_definitions(platform-nes PRIVATE $<$<CONFIG:Debug>:OGC_PROFILER>)
-    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+    # asnd: libogc's ASND audio library (src/ogc/audio.cpp), not pulled in by
+    # OGC_STANDARD_LIBRARIES (-logc -lm) on its own.
+    target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple asnd)
+
+    # The music is EMBEDDED in the .dol, not loaded from disk: a Homebrew
+    # Channel/loader .dol has no guaranteed content path the way a packaged
+    # Wii U title does, so this mirrors the Wii U backend's approach exactly
+    # (src/wiiu's own comment, above) -- encode the desktop WAV to a small
+    # Vorbis OGG and #embed it (src/ogc/audio.cpp decodes it with stb_vorbis
+    # at runtime, streaming into ASND voice buffers since libogc has no SDL
+    # audio device to hand a callback to). Unlike the Wii U path this does NOT
+    # force 48kHz: ASND_SetVoice() takes the source rate directly and mixes
+    # at whatever rate it's given, so the OGG stays at the WAV's native 44.1kHz.
+    find_program(FFMPEG ffmpeg REQUIRED)
+    FetchContent_Declare(
+            stb
+            GIT_REPOSITORY https://github.com/nothings/stb.git
+            GIT_TAG        master
+            GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(stb)
+    target_include_directories(platform-nes PRIVATE ${stb_SOURCE_DIR})
+
+    set(OGC_ASSET_DIR ${CMAKE_BINARY_DIR}/ogc-assets)
+    set(OGC_OGG ${OGC_ASSET_DIR}/pc_audio.ogg)
+    set(OGC_WAV ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
+    file(MAKE_DIRECTORY ${OGC_ASSET_DIR})
+    add_custom_command(
+            OUTPUT ${OGC_OGG}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${OGC_ASSET_DIR}
+            COMMAND ${FFMPEG} -y -loglevel error -i ${OGC_WAV}
+                    -ar 44100 -ac 2 -c:a libvorbis -q:a 4 ${OGC_OGG}
+            DEPENDS ${OGC_WAV}
+            COMMENT "Encoding GC/Wii audio: pc_audio.wav -> pc_audio.ogg (Vorbis, embedded)"
+            VERBATIM)
+    add_custom_target(ogc-assets DEPENDS ${OGC_OGG})
+    add_dependencies(platform-nes ogc-assets)
+    # audio.cpp resolves `#embed <pc_audio.ogg>` via --embed-dir (the canonical
+    # GCC mechanism; -I is not reliably searched for #embed). Scope both the
+    # search dir and the rebuild-on-change dependency to that one source.
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/src/ogc/audio.cpp
+            PROPERTIES
+                OBJECT_DEPENDS  ${OGC_OGG}
+                COMPILE_OPTIONS "--embed-dir=${OGC_ASSET_DIR}")
 
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
 
