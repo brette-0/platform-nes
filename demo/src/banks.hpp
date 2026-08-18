@@ -40,25 +40,6 @@ struct actor_tag {}; ///< .prg_rom_actors, bank 5, window 1. Actor + Player code
 /// can't be resolved through mmc3::bank_layout<>/mmc3::CallInBlock<> the way
 /// every tag above is -- those only ever produce one constexpr answer.
 
-#ifdef TARGET_NES
-/**
- * @brief LEVEL CODE: bank 0, window 1 ($8000, R6). 0x00018000 = (0+1)<<16 | 0x8000.
- *
- * Level's own code (::LEVEL_CODE-tagged): main(), LoadLevel,
- * ColMapSeed/Stamp/Track/SlideLeft/SlideRight. Reads window 2 directly while
- * it runs, but window 2's own content is a runtime choice (::LevelDataBank),
- * not a paired compile-time tag the way an earlier revision of this file had.
- *
- * FARCALLED IN: main.cpp enters level::main itself via
- * mmc3::CallInBlock<level_code_tag>, which holds window 1 here for the
- * session (main()'s own loop does not return in ordinary play). EnterLevelSetup
- * (::COLD) reaches LoadLevel/ColMapSeed via a second, nested
- * mmc3::CallInBlock<level_code_tag> -- see that call site in level.cpp.
- */
-template <> struct mmc3::bank_layout<level_code_tag> {
-    static constexpr mmc3::section_t section() { return { 0x00018000u, 0x2000u }; }
-};
-
 /**
  * @brief LEVEL DATA bank number for @p levelIndex's static, non-volatile
  *        content: the static plane (TileData) and DynLengths (dynamic-plane
@@ -71,9 +52,14 @@ template <> struct mmc3::bank_layout<level_code_tag> {
  * A RUNTIME VALUE, DELIBERATELY NOT A CONSTEXPR TAG: which physical bank
  * holds a given level's data depends on which level the player is actually
  * on. mmc3::bank_layout<>/mmc3::CallInBlock<> only ever resolve one fixed
- * answer, chosen at compile time -- fine for level_code_tag above (the CODE
+ * answer, chosen at compile time -- fine for level_code_tag below (the CODE
  * never changes per level) but wrong here. mmc3::SwitchBank(window2Control,
  * LevelDataBank(n)), a raw runtime bank switch, is what actually maps this.
+ *
+ * NOT gated behind TARGET_NES, unlike the mmc3::bank_layout<> specializations
+ * below: it's plain integer logic with nothing NES-specific in it, and
+ * levels.cpp calls it unconditionally, same as it calls mmc3::SwitchBank
+ * itself (portable via src/emu/mappers/mmc3.cpp off real hardware).
  *
  * Currently one level, one bank (bank 1, WINDOW 2 -- 0x0002a000 = (1+1)<<16 |
  * 0xA000 in demo/link.ld's own encoding), so @p levelIndex goes unused and
@@ -93,15 +79,35 @@ inline u8 LevelDataBank(const u16 levelIndex) {
  *        array -- untouched on any per-frame path afterward, unlike
  *        ::LevelDataBank's contents.
  *
- * Same runtime-value reasoning as ::LevelDataBank: a real bank switch
- * (mmc3::SwitchBank(window2Control, LevelDynamicBank(n))), not a compile-time
- * tag. Currently bank 6 (0x0007a000 = (6+1)<<16 | 0xA000), returned as a
- * literal until a real level select exists.
+ * Same runtime-value reasoning as ::LevelDataBank -- see that function's
+ * comment for why this is likewise NOT gated behind TARGET_NES. A real bank
+ * switch (mmc3::SwitchBank(window2Control, LevelDynamicBank(n))), not a
+ * compile-time tag. Currently bank 6 (0x0007a000 = (6+1)<<16 | 0xA000),
+ * returned as a literal until a real level select exists.
  */
 inline u8 LevelDynamicBank(const u16 levelIndex) {
     (void)levelIndex;
     return 6;
 }
+
+#ifdef TARGET_NES
+/**
+ * @brief LEVEL CODE: bank 0, window 1 ($8000, R6). 0x00018000 = (0+1)<<16 | 0x8000.
+ *
+ * Level's own code (::LEVEL_CODE-tagged): main(), LoadLevel,
+ * ColMapSeed/Stamp/Track/SlideLeft/SlideRight. Reads window 2 directly while
+ * it runs, but window 2's own content is a runtime choice (::LevelDataBank),
+ * not a paired compile-time tag the way an earlier revision of this file had.
+ *
+ * FARCALLED IN: main.cpp enters level::main itself via
+ * mmc3::CallInBlock<level_code_tag>, which holds window 1 here for the
+ * session (main()'s own loop does not return in ordinary play). EnterLevelSetup
+ * (::COLD) reaches LoadLevel/ColMapSeed via a second, nested
+ * mmc3::CallInBlock<level_code_tag> -- see that call site in level.cpp.
+ */
+template <> struct mmc3::bank_layout<level_code_tag> {
+    static constexpr mmc3::section_t section() { return { 0x00018000u, 0x2000u }; }
+};
 
 /**
  * @brief AUDIO CODE: bank 2, window 1 ($8000, R6). 0x00038000.

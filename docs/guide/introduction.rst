@@ -37,12 +37,6 @@ You need to set up ``devkitpro`` on your machine or in your CI. ``local.cmake`` 
 compiler variables and the compilation workflow will expect the correct variables to exist OS-level. On some IDEs this
 isn't trivial but you can likely find a way.
 
-Famistudio
-----------
-
-In the ``famistudio_config.s`` file ensure you have the correct configuration for what features you wish
-`famistudio`_ to use. Without this `famistudio`_ may produce incorrect outputs on your NES target.
-
 Audio
 ----------
 Every song that *should* exist in the NES target should be symmetrical for a WAV file for SDL3 targets. This can be
