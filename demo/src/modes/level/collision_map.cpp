@@ -76,8 +76,8 @@ namespace {
 // NI: reached from THREE sites; inlining duplicated the walk and blew up PRG.
 // unroll(disable): rolled form is smaller, per-iter cost is negligible next to
 // the dyn-cursor RLE work.
-// LEVEL_CODE, paired with ::level_data_tag (window 2) -- stat/dyn read out of
-// that window.
+// LEVEL_CODE, window 1 -- stat/dyn read out of window 2, whose bank is
+// LoadLevel's runtime choice (banks.hpp's ::LevelDataBank).
 NI LEVEL_CODE void ColMapStamp(const u8 slot, Cursor stat, DynamicCursor dyn) {
     u8* col = ViewMap + kSlotOffset[slot];
 

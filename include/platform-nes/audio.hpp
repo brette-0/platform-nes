@@ -187,12 +187,12 @@ void Init(u8 region = 0);
  * else is at that address -- silence, noise or a crash, with no diagnostic.
  *
  * THE MAPPER IS A TEMPLATE PARAMETER, not an include, which is what keeps this
- * in the portable header. Nothing here names a mapper or knows a bank exists:
- * @p Mapper supplies CallPairedBlock, the tags are the project's own bank map,
- * and off-NES the whole thing is the block itself. So callers spell audio the
- * same way on every backend:
+ * in the portable header. Nothing here names a mapper, a project's tag types,
+ * or knows a bank exists: @p Mapper supplies CallPairedBlock, @p CodeTag/
+ * @p DataTag are the project's own bank map, and off-NES the whole thing is
+ * the block itself:
  *
- *     InAudioBanks([] { audio::Update(); });   // one project-side alias
+ *     audio::InBanks<MyMapper, MyCodeTag, MyDataTag>([] { audio::Update(); });
  *
  * and that line compiles to a plain call on SDL3, GBA, Switch and the rest.
  */

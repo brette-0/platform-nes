@@ -72,9 +72,10 @@ MEMORY {
    * and dynamic-plane ROM source directly out of window 2, so it stays
    * mapped for the whole level session. See banks.hpp's ::level_code_tag. */
   prg_rom_level_code : ORIGIN = 0x00018000, LENGTH = 0x2000  /* bank 0, window 1 */
-  /* LEVEL DATA: bank 1, window 2. TileData_1_1 + DynLengths_1_1, must be
-   * mappable alongside prg_rom_level_code. Entered together by
-   * ::EnterLevelBanks, held for the whole level. See ::level_data_tag. */
+  /* LEVEL DATA: bank 1, window 2. TileData_1_1 + DynLengths_1_1. Not paired
+   * with prg_rom_level_code by a compile-time tag -- level::LoadLevel switches
+   * window 2 here with a runtime bank number (banks.hpp's ::LevelDataBank)
+   * and holds it for the whole level session. */
   prg_rom_level_data : ORIGIN = 0x0002a000, LENGTH = 0x2000  /* bank 1, window 2 */
   /* AUDIO CODE: FamiStudio's engine + platform-nes's audio module. Adjacency
    * is a hard contract -- audio.cpp calls the engine with no bank switching,
@@ -92,9 +93,9 @@ MEMORY {
    * frame via mmc3::Call<level::UpdateActors> so the whole roster updates
    * behind one switch. See ::actor_tag. */
   prg_rom_actors : ORIGIN = 0x00068000, LENGTH = 0x2000  /* bank 5, window 1 */
-  /* LEVEL DYNAMIC-SOURCE: bank 6, window 2. DynData_1_1, read once at load
-   * via mmc3::CallInBlock<level_dynamic_tag>, not permanently pinned like
-   * prg_rom_level_data. See ::level_dynamic_tag. */
+  /* LEVEL DYNAMIC-SOURCE: bank 6, window 2. DynData_1_1, read once at load via
+   * a raw mmc3::SwitchBank(window2Control, LevelDynamicBank(n)) in LoadLevel,
+   * not permanently pinned like prg_rom_level_data. See ::LevelDynamicBank. */
   prg_rom_level_dynamic : ORIGIN = 0x0007a000, LENGTH = 0x2000  /* bank 6, window 2 */
 }
 

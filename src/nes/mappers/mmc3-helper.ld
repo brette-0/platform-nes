@@ -113,13 +113,18 @@
  * comment right above the (now absent) REGION_ALIAS/__stack lines, further
  * down this file, for what a consuming project should write instead.
  *
- * No nes-no-pow2.ld-style fork of nes.ld exists here: that fork exists for
- * a VRC1-specific, already-hit need (a genuinely non-power-of-2 PRG-ROM
- * size); nothing about MMC3 needs the same relief, so this file INCLUDEs
- * the SDK's own nes.ld unmodified, power-of-2 ASSERT intact.
+ * This file INCLUDEs nes-no-pow2.ld, not the SDK's own nes.ld -- MMC3 needs
+ * the same relief VRC1 does. __mmc3_reserved_banks/__mmc3_resident_windows
+ * make a project's real total bank count (__mmc3_prg_rom_banks) an arbitrary
+ * sum, not a power of 2 by construction -- e.g. 3 resident + 5 reserved + 1
+ * fixed = 9 banks (72 KiB), which stock nes.ld's ASSERT would reject outright
+ * even though nothing about MMC3's hardware (R6/R7 are plain 6-bit bank
+ * numbers, same as VRC1's 4-bit ones) or this project's own NES2.0 header
+ * builder requires it. See nes-no-pow2.ld's own file comment for the full
+ * investigation of why the stock ASSERT is stricter than actually needed.
  */
 
-INCLUDE nes.ld
+INCLUDE nes-no-pow2.ld
 
 PROVIDE(__program_ram_size = 8);
 PROVIDE(__program_nvram_size = 0);
@@ -178,12 +183,12 @@ PROVIDE(__mmc3_reserved_banks = 0);
 /* MMC3's own PRG ceiling: R6/R7 are 6-bit bank numbers (bits 0-5 of the
  * value written to $8001; bits 6-7 are ignored by the chip), so 64 banks x
  * 8 KiB = 512 KiB is the most any register can reach. nes.ld's own
- * power-of-2 ASSERT (INCLUDEd above, deliberately unforked here -- see this
- * file's header comment) already constrains the shape; these two add the
- * mapper-specific floor and ceiling. The floor is not a fixed 32 KiB: it is
- * whatever the resident image itself needs (the windows below, plus the
- * fixed bank), so a project that drops to 2 resident windows can legally
- * build a 24 KiB... which power-of-2 then rounds up to 32 anyway. */
+ * power-of-2 ASSERT is gone (nes-no-pow2.ld, INCLUDEd above -- see this
+ * file's header comment), so these two add the mapper-specific floor and
+ * ceiling in its place. The floor is not a fixed 32 KiB: it is whatever the
+ * resident image itself needs (the windows below, plus the fixed bank), so a
+ * project that drops to 2 resident windows can legally build an exact 24 KiB
+ * ROM now -- it no longer gets rounded up to 32. */
 ASSERT(__prg_rom_size <= 512,
        "MMC3 addresses at most 512 KiB of PRG-ROM (R6/R7 are 6-bit bank numbers) -- __prg_rom_size is larger, so the top banks would be unreachable by any register write.")
 ASSERT(__prg_rom_size >= (__mmc3_resident_windows + __mmc3_reserved_banks + 1) * 8,

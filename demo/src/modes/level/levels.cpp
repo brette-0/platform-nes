@@ -75,13 +75,13 @@ namespace level {
     static constexpr u8 prev_parity_fix() { return (video::viewport_tx() >> 1) & 1u; }
 
     // LEVEL_DATA: static plane + DynLengths, read CONTINUOUSLY -- see
-    // banks.hpp's ::level_data_tag.
+    // banks.hpp's ::LevelDataBank.
     LEVEL_DATA const u8 TileData_1_1[] = {
         #include "../../../tiled/include/1-1_st"
     };
 
     // LEVEL_DYNAMIC, not LEVEL_DATA: read ONCE at load -- see
-    // banks.hpp's ::level_dynamic_tag.
+    // banks.hpp's ::LevelDynamicBank.
     LEVEL_DYNAMIC const u8 DynData_1_1[] = {
         #include "../../../tiled/include/1-1_dt"
     };
@@ -95,20 +95,30 @@ namespace level {
          DynData_1_1, DynLengths_1_1, sizeof(DynLengths_1_1)}
     };
 
-    // LEVEL_CODE, paired in window 1 with ::level_data_tag -- see banks.hpp.
-    // NI: sole call site is level.cpp's CallInBlock<level_code_tag>, so
-    // without it LTO inlines this into the FIXED trampoline instead of
-    // LEVEL_CODE -- same failure mode as EnterLevelSetup's own NI.
+    // LEVEL_CODE, in window 1 -- see banks.hpp. NI: sole call site is
+    // level.cpp's CallInBlock<level_code_tag>, so without it LTO inlines this
+    // into the FIXED trampoline instead of LEVEL_CODE -- same failure mode as
+    // EnterLevelSetup's own NI.
     NI LEVEL_CODE bool LoadLevel(const u16 n) {
         // TileData holds the active level's STATIC PLANE (walls/ground).
         TileData = Levels[n].TileData;
         nColumns = Levels[n].nColumns;
-        // DynData_1_1 lives in a different window-2 bank (::level_dynamic_tag)
-        // than the one mapped here (::level_data_tag). Swap window 2, copy,
-        // restore -- see ::level_dynamic_tag.
-        mmc3::CallInBlock<level_dynamic_tag>([n] {
-            LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
-        });
+
+        // Window 2's bank is a RUNTIME choice keyed by level index, not a
+        // compile-time tag -- see banks.hpp's ::LevelDynamicBank/
+        // ::LevelDataBank. RAW mmc3::SwitchBank, not mmc3::CallInBlock<Tag>:
+        // there is nothing meaningful to restore window 2 TO here. This is
+        // level entry, establishing window 2's content for the whole
+        // session, not a nested call handing control back to a caller that
+        // needs its own prior window 2 state preserved.
+        mmc3::SwitchBank(mmc3::window2Control, LevelDynamicBank(n));
+        LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
+
+        // Settle window 2 on the level's STATIC data for the rest of the
+        // session: TileData/DynLengths are read every frame via plain
+        // pointers, never through a farcall, so window 2 must stay here,
+        // untouched, until the level ends.
+        mmc3::SwitchBank(mmc3::window2Control, LevelDataBank(n));
         return true;
     }
 

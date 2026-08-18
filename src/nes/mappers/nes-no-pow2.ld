@@ -23,19 +23,21 @@
  *   ISN'T a power of 2), not a strict power of 2. The blanket power-of-2
  *   ASSERT is a defensive simplification protecting that one generator's
  *   simpler encoding path, not a real hardware or toolchain requirement.
- * - This project doesn't use ines-header.ld at all (see vrc1.ld's own file
- *   comment) -- header.hpp/nes2.hpp builds the NES2.0 header directly,
+ * - This project doesn't use ines-header.ld at all (see vrc1-helper.ld's own
+ *   file comment) -- header.hpp/nes2.hpp builds the NES2.0 header directly,
  *   already supporting the full exponent-multiplier form (odd part 1/3/5/7
  *   times a power of 2), which represents 40 KiB exactly, correctly.
- * - VRC1 hardware itself has no power-of-2 requirement either: its PRG
+ * - Neither mapper's hardware has a power-of-2 requirement: VRC1's PRG
  *   select registers are plain 4-bit bank numbers written directly (0-15);
- *   an unused value simply never gets written by correctly-functioning
- *   code, the same as on any non-power-of-2 ROM.
+ *   MMC3's R6/R7 are plain 6-bit bank numbers (0-63). Both simply never
+ *   write an unused value on a non-power-of-2 ROM, same as any other bank.
  *
  * Net: nothing this project actually uses depends on PRG-ROM being a power
- * of 2. Everything else below is unmodified from upstream nes.ld -- keep it
- * that way; re-diff against a fresh SDK install if llvm-mos updates this
- * file, rather than hand-merging changes blind.
+ * of 2, for either mapper -- both vrc1-helper.ld and mmc3-helper.ld INCLUDE
+ * this file instead of the SDK's own nes.ld. Everything else below is
+ * unmodified from upstream nes.ld -- keep it that way; re-diff against a
+ * fresh SDK install if llvm-mos updates this file, rather than hand-merging
+ * changes blind.
  */
 
 /* Provide imaginary (zero page) registers. */

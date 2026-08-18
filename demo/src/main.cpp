@@ -30,8 +30,11 @@ RESET {
     while (!quit) {
         switch (gameMode) {
             case eGameModes::Level:
-                EnterLevelBanks();
-                level::main();
+                // Farcalled, not a bare call after a manual bank pin: window 1
+                // holds level_code_tag for the session because main()'s own
+                // loop doesn't return in ordinary play, not because something
+                // pinned it in advance. See banks.hpp's ::level_code_tag.
+                mmc3::CallInBlock<level_code_tag>(level::main);
                 continue;
 
             case eGameModes::World:

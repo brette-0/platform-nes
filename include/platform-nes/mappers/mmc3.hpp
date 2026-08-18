@@ -129,7 +129,7 @@ private:
     /// ::Register::poke_only whenever chr0Control-chr5Control are written,
     /// off-NES only (see ::Register's own comment). Six entries, one per CHR
     /// register -- window1Control/window2Control (R6/R7) don't participate:
-    /// off-NES there's no bank-switched PRG concept (::Long/::Call/::CallBlock
+    /// off-NES there's no bank-switched PRG concept (::Long/::Call/::CallInBlock
     /// already degrade to plain calls there), so nothing ever reads a PRG
     /// entry back out.
     static u8 banks[6];
@@ -238,7 +238,7 @@ public:
          * (::NotifyCHRWrite) for CHR registers (Index 0-5) so ::GetTileLMA can
          * resolve tile fetches correctly; PRG registers (Index 6/7) are a
          * no-op off-NES, since off-NES there's no bank-switched PRG concept
-         * to track (::Long/::Call/::CallBlock already degrade to plain calls
+         * to track (::Long/::Call/::CallInBlock already degrade to plain calls
          * there).
          */
         void poke_only(const u8 v) const {
@@ -555,23 +555,18 @@ public:
     static FIXED Ret Call(const callable_t<Ret, Args...> &c, Actual &&...args);
 
     /**
-     * @brief Runs an arbitrary block under Fn's resolved window, instead of
-     *        calling Fn itself. Identical shape and behaviour to VRC1's
-     *        ::CallBlock.
-     */
-    template <auto Fn, typename Block>
-    static FIXED auto CallBlock(Block &&block) -> decltype(block());
-
-    /**
      * @brief Runs @p block with one bank mapped, selected by TAG rather than
      *        by a registered function.
      *
-     * The registry-free counterpart to ::CallBlock. ::Call and ::CallBlock
-     * key off a function that ::MMC3_BANKED / ::MMC3_BIND has bound to a
-     * tag; this keys off the tag directly, so nothing has to be bound at all.
-     * That matters for code this project does not own -- a third-party audio
-     * engine, hand-written assembly, a Rust or C module -- where there may be
-     * many entry symbols and binding each one buys nothing:
+     * ::Call keys off a function that ::MMC3_BANKED / ::MMC3_BIND has bound
+     * to a tag; this keys off the tag directly, so nothing has to be bound at
+     * all. That matters for code this project does not own -- a third-party
+     * audio engine, hand-written assembly, a Rust or C module -- where there
+     * may be many entry symbols and binding each one buys nothing. It also
+     * covers the case a separate ::CallBlock once did (running an arbitrary
+     * block under an already-bound function's window): pass that function's
+     * own tag here instead -- one entry point rather than two ways to reach
+     * the same bank:
      *
      *     mmc3::CallInBlock<bank002_tag>([]{ engine_update(); });
      *
@@ -776,17 +771,6 @@ FIXED Ret mmc3::Call(const callable_t<Ret, Args...> &c, Actual &&...args) {
 #endif
 }
 
-template <auto Fn, typename Block>
-FIXED auto mmc3::CallBlock(Block &&block) -> decltype(block()) {
-#ifdef TARGET_NES
-    using L = typename bank_of<Fn>::layout;
-    return Detail::CallInSection<decltype(block())>(
-        L::section(), std::forward<Block>(block));
-#else
-    return block();
-#endif
-}
-
 template <typename Tag, typename Block>
 FIXED auto mmc3::CallInBlock(Block &&block) -> decltype(block()) {
 #ifdef TARGET_NES
@@ -825,8 +809,7 @@ FIXED auto mmc3::CallPairedBlock(Block &&block) -> decltype(block()) {
 
 /**
  * @brief Declares a tagged, out-of-line C++ function and registers it with
- *        mmc3::bank_of<>, so mmc3::Call/mmc3::CallBlock can resolve its
- *        bank later.
+ *        mmc3::bank_of<>, so mmc3::Call can resolve its bank later.
  *
  * Same VRC1_BANKED -> VRC1_BANKED_IMPL macro-expansion-order reasoning as
  * VRC1's ::VRC1_BANKED (see its own comment): forces section_name/tag to
@@ -848,7 +831,7 @@ FIXED auto mmc3::CallPairedBlock(Block &&block) -> decltype(block()) {
 
 /**
  * @brief Registers an ALREADY-DECLARED function with mmc3::bank_of<>, so
- *        mmc3::Call/mmc3::CallBlock can resolve its bank.
+ *        mmc3::Call can resolve its bank.
  *
  * The namespace-friendly counterpart to ::MMC3_BANKED, which declares the
  * function itself and so can only produce an unqualified name: its declaration

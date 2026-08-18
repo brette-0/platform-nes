@@ -169,10 +169,16 @@ namespace level {
         ppu::SetScroll(0, 0);
 
         // Farcalled: module+engine share one bank, songs+SFX another, both
-        // mapped for the duration -- see banks.hpp's ::audio_tag.
-        InAudioBanks([] {
-            audio::Init(REGION);
-            audio::TrackPlay(0);
+        // mapped for the duration -- see banks.hpp's ::audio_tag. Nested
+        // CallInBlock, not CallPairedBlock: the engine walks audio_data_tag
+        // while running, so it must still be mapped when audio_tag's block
+        // runs -- entering audio_data_tag from inside audio_tag's own block
+        // is what guarantees that ordering.
+        mmc3::CallInBlock<audio_tag>([] {
+            mmc3::CallInBlock<audio_data_tag>([] {
+                audio::Init(REGION);
+                audio::TrackPlay(0);
+            });
         });
 
         // ColMapSeed is ::LEVEL_CODE too -- same reason and pattern as LoadLevel's
@@ -182,9 +188,9 @@ namespace level {
         });
 
         // Player::Reset is ::ACTORS; ::COLD can't reach a different bank-5
-        // domain by a plain call, so this needs an explicit farcall.
-        // CallInBlock<actor_tag>, not CallBlock<UpdateActors>: this block has
-        // nothing to do with UpdateActors, so name the tag directly.
+        // domain by a plain call, so this needs an explicit farcall. This
+        // block has nothing to do with UpdateActors, so name the tag
+        // directly rather than routing through an unrelated bound function.
         mmc3::CallInBlock<actor_tag>([] {
             player1.Reset();
 #ifdef PLAYER2_SUPPORTED
@@ -198,8 +204,10 @@ namespace level {
         apu::DisableDMCIRQ();
     }
 
-    // LEVEL_CODE: paired with ::level_data_tag (window 2). Entered by
-    // ::EnterLevelBanks and held for the whole session -- not farcall-reachable.
+    // LEVEL_CODE: farcalled in by main.cpp's mmc3::CallInBlock<level_code_tag>,
+    // which then holds window 1 for the session -- this loop doesn't return in
+    // ordinary play. Window 2's own content is chosen at runtime by level
+    // index; see banks.hpp's ::LevelDataBank / level::LoadLevel.
     LEVEL_CODE void main() {
         InColdBank(EnterLevelSetup);
         irq::EnableInterrupts();
@@ -219,7 +227,9 @@ namespace level {
             ColMapTrack(cameraX >> 4);
 
             ppu::SetColorPriority(0x20);   // red band:          Update
-            InAudioBanks([] { audio::Update(); });
+            mmc3::CallInBlock<audio_tag>([] {
+                mmc3::CallInBlock<audio_data_tag>([] { audio::Update(); });
+            });
             ppu::SetColorPriority(0);
 
             video::WaitForPresent();

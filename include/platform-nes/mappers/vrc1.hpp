@@ -99,9 +99,14 @@ public:
      * @brief Calls @p fn with one of VRC1's three switchable windows temporarily
      *        re-banked, then restores whatever was banked there before returning.
      *
-     * @p window is 0, 1 or 2, defaulting to 0. Lives in the fixed bank so it is
-     * reachable regardless of what is banked elsewhere. @p fn may be any
-     * callable whose `fn()` converts to @p TReturn.
+     * @p window is 0, 1 or 2 -- REQUIRED, no default. Which window holds the
+     * target code changes which physical bank ends up mapped, so a caller
+     * that gets this wrong silently jumps into the wrong bank's content
+     * rather than failing to compile; a default here would let that mistake
+     * happen by omission instead of by an explicit (and reviewable) choice.
+     * Lives in the fixed bank so it is reachable regardless of what is
+     * banked elsewhere. @p fn may be any callable whose `fn()` converts to
+     * @p TReturn.
      *
      * @note Writes the window's boot-time default bank, so with one bank per
      *       window this reasserts what is already mapped. Multi-bank content
@@ -110,13 +115,13 @@ public:
      * @tparam TReturn Result type of the call; not deducible from @p fn, so
      *                 specify it explicitly at the call site, e.g. `Long<int>(...)`.
      * @param fn     Callable to invoke once the selected window is banked in.
-     * @param window Which window to switch: 0, 1, or 2 (default 0); ignored off-NES.
+     * @param window Which window to switch: 0, 1, or 2; ignored off-NES.
      *
      * @note Off-NES the window registers do not exist, so this collapses to a
      *       plain `return fn();` rather than binding an undefined extern.
      */
     template <typename TReturn, typename TFunc>
-    static FIXED TReturn Long(TFunc fn, u8 window = 0);
+    static FIXED TReturn Long(TFunc fn, u8 window);
 
     /*
      * CHR bankswitching. VRC1 has two independent 4 KiB CHR windows -- PPU

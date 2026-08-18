@@ -29,25 +29,30 @@
 /// @{
 struct audio_tag      {}; ///< .prg_rom_audio, bank 2, window 1. Engine + pnes audio module.
 struct audio_data_tag {}; ///< .prg_rom_audio_data, bank 3, WINDOW 2. Songs + SFX.
-struct level_code_tag    {}; ///< .prg_rom_level_code, bank 0, window 1. Level's own code. See ::EnterLevelBanks.
-struct level_data_tag    {}; ///< .prg_rom_level_data, bank 1, WINDOW 2. Static plane + DynLengths, pinned for the session.
-struct level_dynamic_tag {}; ///< .prg_rom_level_dynamic, bank 6, WINDOW 2. DynData ROM source, farcalled once at load.
+struct level_code_tag {}; ///< .prg_rom_level_code, bank 0, window 1. Level's own code -- see main.cpp's CallInBlock<level_code_tag>.
 struct cold_tag  {}; ///< .prg_rom_cold, bank 4, window 1. Code that runs once and never again.
 struct actor_tag {}; ///< .prg_rom_actors, bank 5, window 1. Actor + Player code.
 /// @}
+///
+/// WINDOW 2 (level data) has NO tag here -- see ::LevelDataBank /
+/// ::LevelDynamicBank, just below the tags above. Which physical bank it
+/// should hold depends on which level is loaded, a runtime value, so it
+/// can't be resolved through mmc3::bank_layout<>/mmc3::CallInBlock<> the way
+/// every tag above is -- those only ever produce one constexpr answer.
 
 #ifdef TARGET_NES
 /**
  * @brief LEVEL CODE: bank 0, window 1 ($8000, R6). 0x00018000 = (0+1)<<16 | 0x8000.
  *
  * Level's own code (::LEVEL_CODE-tagged): main(), LoadLevel,
- * ColMapSeed/Stamp/Track/SlideLeft/SlideRight. Paired with ::level_data_tag
- * (window 2), which this code reads directly while it runs.
+ * ColMapSeed/Stamp/Track/SlideLeft/SlideRight. Reads window 2 directly while
+ * it runs, but window 2's own content is a runtime choice (::LevelDataBank),
+ * not a paired compile-time tag the way an earlier revision of this file had.
  *
- * NOT REACHABLE BY FARCALL: a farcall only switches one window, so it would
- * map this at $8000 and leave $A000 (::level_data_tag) stale. Entered by
- * ::EnterLevelBanks() once, on mode entry, alongside ::level_data_tag.
- * EnterLevelSetup (::COLD) reaches LoadLevel/ColMapSeed once via an explicit
+ * FARCALLED IN: main.cpp enters level::main itself via
+ * mmc3::CallInBlock<level_code_tag>, which holds window 1 here for the
+ * session (main()'s own loop does not return in ordinary play). EnterLevelSetup
+ * (::COLD) reaches LoadLevel/ColMapSeed via a second, nested
  * mmc3::CallInBlock<level_code_tag> -- see that call site in level.cpp.
  */
 template <> struct mmc3::bank_layout<level_code_tag> {
@@ -55,38 +60,48 @@ template <> struct mmc3::bank_layout<level_code_tag> {
 };
 
 /**
- * @brief LEVEL DATA: bank 1, WINDOW 2 ($A000, R7). 0x0002a000 = (1+1)<<16 | 0xA000.
+ * @brief LEVEL DATA bank number for @p levelIndex's static, non-volatile
+ *        content: the static plane (TileData) and DynLengths (dynamic-plane
+ *        run lengths -- DynamicCursor streams these from ROM every step,
+ *        never copies to RAM). Both read CONTINUOUSLY, every frame, via
+ *        plain pointers -- never through a farcall -- so once level::LoadLevel
+ *        switches window 2 here, it MUST stay untouched for the rest of the
+ *        level session.
  *
- * The two ROM tables read CONTINUOUSLY: the static plane (TileData_1_1) and
- * DynLengths_1_1 (dynamic-plane run lengths -- DynamicCursor streams these
- * from ROM every step, never copies to RAM).
+ * A RUNTIME VALUE, DELIBERATELY NOT A CONSTEXPR TAG: which physical bank
+ * holds a given level's data depends on which level the player is actually
+ * on. mmc3::bank_layout<>/mmc3::CallInBlock<> only ever resolve one fixed
+ * answer, chosen at compile time -- fine for level_code_tag above (the CODE
+ * never changes per level) but wrong here. mmc3::SwitchBank(window2Control,
+ * LevelDataBank(n)), a raw runtime bank switch, is what actually maps this.
  *
- * DynData_1_1 (run CONTENT) is deliberately NOT here -- see
- * ::level_dynamic_tag; it's read once at load, not worth permanent residency.
- *
- * WINDOW 2 is forced: must be mappable alongside ::level_code_tag (window 1)
- * since that code reads this directly. Entered together by
- * ::EnterLevelBanks() for the whole level session.
+ * Currently one level, one bank (bank 1, WINDOW 2 -- 0x0002a000 = (1+1)<<16 |
+ * 0xA000 in demo/link.ld's own encoding), so @p levelIndex goes unused and
+ * this is a literal. A real level select would index a per-level bank table
+ * here instead of returning a constant -- the signature already takes the
+ * index it would need.
  */
-template <> struct mmc3::bank_layout<level_data_tag> {
-    static constexpr mmc3::section_t section() { return { 0x0002a000u, 0x2000u }; }
-};
+inline u8 LevelDataBank(const u16 levelIndex) {
+    (void)levelIndex;
+    return 1;
+}
 
 /**
- * @brief LEVEL DYNAMIC-SOURCE: bank 6, WINDOW 2 ($A000, R7). 0x0007a000 = (6+1)<<16 | 0xA000.
+ * @brief LEVEL DYNAMIC-SOURCE bank number for @p levelIndex's dynamic-plane
+ *        run CONTENT (DynData ROM source). Read ONCE per level, by
+ *        level::LoadDynamicLayer, which copies it into the RAM DynData[]
+ *        array -- untouched on any per-frame path afterward, unlike
+ *        ::LevelDataBank's contents.
  *
- * DynData_1_1 (dynamic-plane run CONTENT). Read once per level by
- * LoadDynamicLayer, which copies it into the RAM DynData[] array; untouched
- * on any per-frame path.
- *
- * REACHABLE BY FARCALL, unlike ::level_data_tag: LoadLevel (::LEVEL_CODE)
- * wraps the LoadDynamicLayer call in mmc3::CallInBlock<level_dynamic_tag>,
- * which swaps window 2 away from ::level_data_tag, copies, and restores it --
- * the static plane is unmapped only for that one copy.
+ * Same runtime-value reasoning as ::LevelDataBank: a real bank switch
+ * (mmc3::SwitchBank(window2Control, LevelDynamicBank(n))), not a compile-time
+ * tag. Currently bank 6 (0x0007a000 = (6+1)<<16 | 0xA000), returned as a
+ * literal until a real level select exists.
  */
-template <> struct mmc3::bank_layout<level_dynamic_tag> {
-    static constexpr mmc3::section_t section() { return { 0x0007a000u, 0x2000u }; }
-};
+inline u8 LevelDynamicBank(const u16 levelIndex) {
+    (void)levelIndex;
+    return 6;
+}
 
 /**
  * @brief AUDIO CODE: bank 2, window 1 ($8000, R6). 0x00038000.
@@ -119,7 +134,8 @@ template <> struct mmc3::bank_layout<audio_data_tag> {
  * Code that runs once, ever -- level's one-time entry setup, currently.
  * REACHABLE BY FARCALL (one window): mmc3::CallInBlock<cold_tag> (see
  * ::InColdBank) switches, runs, restores -- safe even from inside level's
- * own domain, same as ::InAudioBanks.
+ * own domain, same as the nested mmc3::CallInBlock<audio_tag>/
+ * <audio_data_tag> pair at both call sites in level.cpp.
  */
 template <> struct mmc3::bank_layout<cold_tag> {
     static constexpr mmc3::section_t section() { return { 0x00058000u, 0x2000u }; }
@@ -167,7 +183,7 @@ template <> struct mmc3::bank_layout<actor_tag> {
 
 /**
  * @brief Pins a variable into the level's DATA bank (.prg_rom_level_data) --
- *        see ::level_data_tag.
+ *        see ::LevelDataBank.
  *
  * TileData_1_1 and DynLengths_1_1 only -- not DynData_1_1 (see
  * ::LEVEL_DYNAMIC). Data only, read as plain ROM pointers. Expands to
@@ -177,18 +193,18 @@ template <> struct mmc3::bank_layout<actor_tag> {
 
 /**
  * @brief Pins a variable into the level's DYNAMIC-SOURCE bank
- *        (.prg_rom_level_dynamic) -- see ::level_dynamic_tag.
+ *        (.prg_rom_level_dynamic) -- see ::LevelDynamicBank.
  *
- * DynData_1_1 only, reached via mmc3::CallInBlock<level_dynamic_tag>
- * (LoadLevel, levels.cpp) rather than permanent mapping. Expands to nothing
- * off-NES.
+ * DynData_1_1 only, reached via a raw mmc3::SwitchBank(window2Control,
+ * LevelDynamicBank(n)) in LoadLevel (levels.cpp), not permanent mapping.
+ * Expands to nothing off-NES.
  */
 #define LEVEL_DYNAMIC CREATE_SEGMENT_KEYWORD(".prg_rom_level_dynamic")
 
 /**
  * @brief Runs @p block once, in the COLD bank, restoring window 1 after.
  *
- * Off-NES collapses to a plain call -- same shape as ::InAudioBanks.
+ * Off-NES collapses to a plain call, same as mmc3::CallInBlock itself.
  */
 template <typename Block>
 decltype(auto) InColdBank(Block &&block) {
@@ -219,28 +235,3 @@ decltype(auto) InColdBank(Block &&block) {
  * See that call site's comment in level.cpp.
  */
 MMC3_BIND(level::UpdateActors, actor);
-
-/**
- * @brief This project's two audio banks, bound into audio::InBanks.
- *
- * The library owns the requirement (code+data mapped together, in different
- * windows); this just supplies which banks. Off-NES collapses to a plain call.
- */
-template <typename Block>
-decltype(auto) InAudioBanks(Block &&block) {
-    return audio::InBanks<mmc3, audio_tag, audio_data_tag>(
-        static_cast<Block &&>(block));
-}
-
-/**
- * @brief Pins level_code_tag (window 1) and level_data_tag (window 2) for
- *        the whole level session. Never farcalled: level code reads both
- *        planes directly, with no call boundary to hang a farcall off.
- *        Called once, on mode entry (main.cpp).
- */
-inline void EnterLevelBanks() {
-#ifdef TARGET_NES
-    mmc3::SwitchBank(mmc3::window1Control, 0);
-    mmc3::SwitchBank(mmc3::window2Control, 1);
-#endif
-}
