@@ -18,12 +18,18 @@ using namespace br0::intsh;
 
 
 /*
- * The NES backend's own code is PLACED BY THE CONSUMING PROJECT, into the same
+ * THE NES BACKEND IS A PROJECT CHOICE, NOT A LIB ONE: platform-nes ships no
+ * audio driver of its own. These are plain prototypes -- a real definition
+ * arrives when the project's chosen backend source file is compiled into the
+ * build (src/nes/audio/famistudio.cpp on NES, this platform's own audio.cpp
+ * elsewhere), the ordinary way any declared-but-not-yet-defined function
+ * works. Nothing here needs to know which one, or whether it exists yet.
+ *
+ * FamiStudio's backend is PLACED BY THE CONSUMING PROJECT, into the same
  * PRG-ROM bank as the audio engine it drives -- that adjacency is what lets
- * src/nes/audio.cpp reach the engine with plain calls and contain no bank
- * switching at all. The knob is PLATFORM_NES_AUDIO_SECTION and the keyword is
- * ::AUDIO_BANK; both live in src/nes/audio.cpp, since nothing that merely
- * CALLS this API needs either. See that file's header comment.
+ * it reach the engine with plain calls and contain no bank switching at all.
+ * The knob is PLATFORM_NES_AUDIO_SECTION. Nothing that merely CALLS this API
+ * needs to know that either -- see famistudio.cpp's own header comment.
  */
 
 namespace audio {
@@ -123,6 +129,19 @@ extern const u8* tracks;
 extern const u8* sfx;
 /**
  * @brief Binds a FamiStudio music bank for the NES build.
+ *
+ * Expands to a plain global definition with NO placement of its own -- this
+ * header owns no memory. Prefix the invocation with whatever placement
+ * keyword the project's mapper defines (e.g. mmc3.hpp's ::CARTMEM/::SYSMEM),
+ * so the project decides where these two bytes live, same as it decides for
+ * everything else it defines:
+ *
+ *     CARTMEM TRACKS(_music_data);
+ *
+ * With no prefix at all, the pointer falls through to whatever the linker
+ * script's default rule catches -- a project choice made in its own link.ld,
+ * never a default this header picks for you.
+ *
  * @param ptr Symbol or address of the FamiStudio music export.
  */
 #define TRACKS(ptr)                     \
@@ -130,10 +149,15 @@ extern const u8* sfx;
 
 /**
  * @brief Binds a FamiStudio SFX bank for the NES build.
+ *
+ * Same placement contract as ::TRACKS -- prefix with a placement keyword:
+ *
+ *     CARTMEM SFX(_sounds);
+ *
  * @param ptr Symbol or address of the FamiStudio SFX export.
  */
 #define SFX(ptr)                        \
-    const u8* sfx = (const u8*)(ptr);
+    const u8* sfx = (const u8*)(ptr)
 
 #endif
 

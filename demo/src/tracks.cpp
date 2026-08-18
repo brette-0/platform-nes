@@ -1,4 +1,5 @@
 ﻿#include <platform-nes/audio.hpp>
+#include <platform-nes/mappers/mmc3.hpp>
 #include <intsh>
 using namespace br0::intsh;
 
@@ -17,6 +18,8 @@ extern const u8 _sounds[];
 }
 #endif
 
-TRACKS(_music_data_mega_man_2);
-SFX(_sounds);
+// Two bytes each -- this project's own choice to keep them beside the rest
+// of its writable state in PRG-RAM, not a default audio.hpp picked for us.
+CARTMEM TRACKS(_music_data_mega_man_2);
+CARTMEM SFX(_sounds);
 #endif

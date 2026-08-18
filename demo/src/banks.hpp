@@ -107,8 +107,8 @@ inline u8 LevelDynamicBank(const u16 levelIndex) {
  * @brief AUDIO CODE: bank 2, window 1 ($8000, R6). 0x00038000.
  *
  * FamiStudio's engine and platform-nes's audio module -- sharing a bank is
- * the contract: src/nes/audio.cpp calls famistudio_update() with a plain
- * call, valid only because the engine is always mapped alongside it.
+ * the contract: src/nes/audio/famistudio.cpp calls famistudio_update() with
+ * a plain call, valid only because the engine is always mapped alongside it.
  * PLATFORM_NES_AUDIO_SECTION / FAMISTUDIO_CA65_CODE_SEGMENT put them here.
  * Song/SFX data is NOT here -- see ::audio_data_tag.
  */

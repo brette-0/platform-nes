@@ -8,7 +8,7 @@
  * THE WHOLE POINT: the audio backend must land in the SAME PRG-ROM bank as
  * the engine it drives. A project already controls where the engine goes
  * (its FamiStudio config's FAMISTUDIO_CA65_CODE_SEGMENT, and the ca65 wrappers
- * around any exported data); this is the matching knob for the module, so the
+ * around any exported data); this is the matching knob for this module, so the
  * two can be put side by side.
  *
  * Once they are neighbours, THIS MODULE CONTAINS NO BANK-SWITCHING AT ALL.
@@ -19,7 +19,9 @@
  *
  * DELIBERATELY NOT NAMED AFTER FAMISTUDIO. A replacement engine written in
  * C, C++, Rust or hand-written assembly binds to the same arrangement by
- * placing itself in the same section, with no change here.
+ * placing itself in the same section, with no change to audio.hpp -- its
+ * functions are plain prototypes, satisfied by whichever backend source
+ * file the project compiles in.
  *
  * COMPULSORY, not defaulted. There is no "unbanked" fallback value: a
  * default would silently place this module wherever the library guessed,

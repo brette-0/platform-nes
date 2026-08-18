@@ -171,27 +171,30 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     set(CMAKE_CXX_FLAGS "-T ${TOPLEVEL_LD} -L${CMAKE_SOURCE_DIR}/src/nes/mappers -Wno-unused-command-line-argument")
 
     # ------------------------------------------------------------------
-    # Where the audio module is placed. src/nes/audio.cpp tags every one of
-    # its functions ::AUDIO_BANK (audio.hpp), which expands to a section
-    # attribute naming PLATFORM_NES_AUDIO_SECTION. That section MUST be the
-    # same PRG-ROM bank the audio engine itself is assembled into -- see
+    # Where the FamiStudio audio backend is placed. THIS BACKEND IS A PROJECT
+    # CHOICE, NOT A LIB ONE -- audio.hpp declares plain prototypes with no
+    # definition, and src/nes/audio/famistudio.cpp is the one .cpp that opts a
+    # project into FamiStudio specifically by defining them. It tags every one
+    # of its functions ::AUDIO_BANK, which expands to a section attribute
+    # naming PLATFORM_NES_AUDIO_SECTION. That section MUST be the same PRG-ROM
+    # bank the audio engine itself is assembled into -- see
     # demo/famistudio_config.s's FAMISTUDIO_CA65_CODE_SEGMENT, which is the
-    # matching knob on the ca65 side. Placed together, audio.cpp reaches the
-    # engine with plain calls and contains no bank switching at all; a caller
-    # long-calls audio::Update() and both arrive mapped.
+    # matching knob on the ca65 side. Placed together, famistudio.cpp reaches
+    # the engine with plain calls and contains no bank switching at all; a
+    # caller long-calls audio::Update() and both arrive mapped.
     #
     # NO DEFAULT, deliberately: a guessed section would place this module in
     # whichever bank the library assumed and produce a wrong-bank call with no
-    # diagnostic. Unset is an #error in audio.hpp, the same "no silent
-    # fallback" stance TOPLEVEL_LD above takes.
+    # diagnostic. Unset is an #error in famistudio.cpp itself, the same "no
+    # silent fallback" stance TOPLEVEL_LD above takes.
     # ------------------------------------------------------------------
     if(NOT PLATFORM_NES_AUDIO_SECTION)
         message(FATAL_ERROR
                 "PLATFORM_NES_AUDIO_SECTION is not set. It names the ELF section "
-                "src/nes/audio.cpp is placed into, and must be the bank the audio "
-                "engine is assembled into. See local.cmake.example.")
+                "src/nes/audio/famistudio.cpp is placed into, and must be the bank "
+                "the audio engine is assembled into. See local.cmake.example.")
     endif()
-    set_source_files_properties(${CMAKE_SOURCE_DIR}/src/nes/audio.cpp
+    set_source_files_properties(${CMAKE_SOURCE_DIR}/src/nes/audio/famistudio.cpp
             PROPERTIES COMPILE_DEFINITIONS
             "PLATFORM_NES_AUDIO_SECTION=\"${PLATFORM_NES_AUDIO_SECTION}\"")
 
@@ -316,7 +319,7 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # directly-edited file" -- this used to be a CMake-generated string
     # instead, which is what that entry flags as the thing to fix). CMake's
     # own job here is reduced to READING values back out of that real file
-    # (regex-extracted, never written) so audio.cpp's #if FAMISTUDIO_CFG_*
+    # (regex-extracted, never written) so famistudio.cpp's #if FAMISTUDIO_CFG_*
     # checks stay in sync with whatever this file actually says -- editing
     # the .s file is what changes the engine's real configuration; these
     # extracted CMake variables can never drift from it because they're read
@@ -372,9 +375,9 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
     # ------------------------------------------------------------------
     # PLATFORM_NES_AUDIO_SECTION -> ca65 segment name.
     #
-    # audio.cpp's ::AUDIO_BANK and FamiStudio's FAMISTUDIO_CA65_CODE_SEGMENT
+    # famistudio.cpp's ::AUDIO_BANK and FamiStudio's FAMISTUDIO_CA65_CODE_SEGMENT
     # must name the SAME bank -- that shared placement is the entire reason
-    # audio.cpp can plain-call famistudio_update() and carry no bank
+    # famistudio.cpp can plain-call famistudio_update() and carry no bank
     # switching. Two hand-written literals could drift apart silently and
     # produce a cross-bank call with no diagnostic, so there is only one:
     # local.cmake's readable ".prg_rom_audio", which link.ld and banks.hpp
@@ -523,12 +526,12 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             FAMISTUDIO_CFG_SFX_SUPPORT=${FAMISTUDIO_CFG_SFX_SUPPORT}
             FAMISTUDIO_CFG_SFX_STREAMS=${FAMISTUDIO_CFG_SFX_STREAMS}
             FAMISTUDIO_USE_VOLUME_TRACK=${FAMISTUDIO_USE_VOLUME_TRACK}
-            # No FAMISTUDIO_SEGMENT here: audio.cpp used to need the engine's
+            # No FAMISTUDIO_SEGMENT here: famistudio.cpp used to need the engine's
             # segment name for a BANKED_EXTERN tag, and no longer does
             # anything with it -- it reaches the engine with a plain call now
             # that the two share a bank by construction (see the encoder
             # above). PLATFORM_NES_AUDIO_SECTION is the only placement value
-            # the C++ side still takes, and it goes to audio.cpp alone.
+            # the C++ side still takes, and it goes to famistudio.cpp alone.
     )
     target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
 
