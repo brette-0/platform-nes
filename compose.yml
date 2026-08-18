@@ -318,30 +318,3 @@ services:
         cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
         cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
         echo "Built: cmake-build-ci-$$PRESET/demo.nds"
-
-  # Game Boy Advance (devkitARM + libgba). Unlike the DS, devkitPro ships NO GBA
-  # CMake toolchain (only the make gba_rules), so the gba-release preset points
-  # CMAKE_TOOLCHAIN_FILE at this repo's own cmake/GBA.cmake (which pulls in the
-  # base image's devkitARM.cmake and the repo-local Platform/NintendoGBA.cmake).
-  # Same Model B mapping as the DS, cropped to the GBA's 240x160 (30x20) window:
-  # NES PPU -> BG tilemap + hardware OBJ + per-scanline HBlank scroll table.
-  build-gba:
-    build:
-      context: docker
-      dockerfile: Dockerfile.gba
-    image: platform-nes-gba:latest
-    user: "${UID:-0}:${GID:-0}"
-    working_dir: /tmp/platform-nes
-    volumes:
-      - .:/tmp/platform-nes
-    environment:
-      PRESET: ${PRESET:-gba-release}
-      HOME: /tmp
-    command:
-      - bash
-      - -c
-      - |
-        set -euo pipefail
-        cmake --preset "$$PRESET" -B "cmake-build-ci-$$PRESET"
-        cmake --build "cmake-build-ci-$$PRESET" -j"$$(nproc)"
-        echo "Built: cmake-build-ci-$$PRESET/demo.gba"

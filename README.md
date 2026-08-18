@@ -24,7 +24,7 @@ Which will demonstrate how you can easily begin using this project.
 >   1. SDL3
 >      1. libusb (linux only)
 > 
-> **3ds/dsi/ds/gba/wiiu/3ds/switch**
+> **3ds/dsi/ds/wiiu/3ds/switch**
 >   1. devKitPro 
 
 

@@ -7,7 +7,7 @@ set -uo pipefail
 HERE="$(dirname "${BASH_SOURCE[0]}")"
 
 rc=0
-for t in nes linux win mac web ctr gc wii switch wiiu nds dsi gba; do
+for t in nes linux win mac web ctr gc wii switch wiiu nds dsi; do
     echo "==================== ${t} ===================="
     if ! "${HERE}/build.sh" "$t" "$@"; then
         echo "!! ${t} build failed or preset unavailable on this host" >&2

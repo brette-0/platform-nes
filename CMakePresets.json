@@ -288,28 +288,6 @@
       "inherits": "dsi-release",
       "displayName": "Nintendo DSi (Debug)",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
-    },
-    {
-      "name": "gba-release",
-      "inherits": "_base",
-      "displayName": "Game Boy Advance (Release)",
-      "description": "Game Boy Advance .gba via the devkitARM toolchain. Requires devkitPro installed with gba-dev (libgba + gbafix + gba-pkg-config) and the DEVKITPRO env var set (e.g. /opt/devkitpro). Uses devkitPro's official GBA.cmake toolchain (CMAKE_SYSTEM_NAME=NintendoGBA -> its Platform/NintendoGBA.cmake: armv4t flags, -lgba, and the gba_create_rom() helper), exactly like the DS preset uses NDS.cmake. Same family as the DS backend: the NES PPU is mapped onto the GBA's native 2D hardware (CHR -> char VRAM, nametable -> BG tilemap, OAM shadow -> hardware OBJ, raster band timeline -> a per-scanline HBlank scroll table). The 240x160 panel shows a window onto the full 256x240 NES world -- the first target narrower than the NES -- and the NES game is never altered for the GBA.",
-      "cacheVariables": {
-        "TARGET_PLATFORM": "gba",
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_TOOLCHAIN_FILE": "$env{DEVKITPRO}/cmake/GBA.cmake"
-      },
-      "condition": {
-        "type": "notEquals",
-        "lhs": "$env{DEVKITPRO}",
-        "rhs": ""
-      }
-    },
-    {
-      "name": "gba-debug",
-      "inherits": "gba-release",
-      "displayName": "Game Boy Advance (Debug)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     }
   ]
 }

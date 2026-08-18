@@ -15,7 +15,6 @@
 #       docker compose run --rm build-switch   # == the `switch` job
 #       docker compose run --rm build-nds      # == the `nds` job
 #       docker compose run --rm build-dsi      # == the `dsi` job
-#       docker compose run --rm build-gba      # == the `gba` job
 #       docker compose run --rm build-linux    # == the `linux` job's compile
 #
 #   To run the workflow itself locally, use act (https://github.com/nektos/act),
@@ -30,7 +29,6 @@
 #       act -j switch
 #       act -j nds
 #       act -j dsi
-#       act -j gba
 #       act -j linux
 #
 #   act cannot emulate GitHub's macOS/Windows runners, so the `mac` and `win`
@@ -286,28 +284,6 @@ jobs:
         with:
           name: demo-dsi
           path: cmake-build-ci-dsi-release/demo.nds
-          if-no-files-found: error
-
-  gba:
-    name: Game Boy Advance (.gba)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Cache build tree
-        uses: actions/cache@v5
-        with:
-          path: cmake-build-ci-gba-release
-          key: gba-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.gba') }}
-          restore-keys: gba-
-
-      - name: Build demo.gba
-        run: docker compose run --rm --build build-gba
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: demo-gba
-          path: cmake-build-ci-gba-release/demo.gba
           if-no-files-found: error
 
   wiiu:
