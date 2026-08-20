@@ -10,3 +10,7 @@ extern const u8 BGColours[16];
 
 // Mary sprite palette: 3 colours following the shared backdrop entry.
 extern const u8 maryColors[3];
+
+
+// title screen colours
+extern const u8 titleScreenColours[16];

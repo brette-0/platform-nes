@@ -1,6 +1,7 @@
 #include "title.hpp"
 #include "../main.hpp"
 #include "../banks.hpp"
+#include "../graphics/colours.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
 
 namespace title {
@@ -9,13 +10,17 @@ namespace title {
         pIRQ = irq_handler;
         pNMI = nmi_handler;
         irq::EnableInterrupts();
-        // BG only, deliberately: sprites don't need to be on for the A12
-        // edges below (the PPU's idle sprite fetch happens every scanline
-        // regardless of the sprite mask bit), and title never touches PPU
-        // OAM -- no clear, no ::oam::RefreshSprites, unlike
-        // EnterLevelSetup's explicit clear before ITS EnableRendering call.
-        // Enabling sprites here would just display whatever garbage
-        // happens to be sitting in the PPU's OAM at power-on.
+
+        // Blank nametable/attribute data -- invisible regardless of timing
+        // since rendering's still off, so the PPU isn't fetching it yet.
+        // The BG palette write moved to nmi_handler (below): palette RAM is
+        // live the instant it's written, even with rendering off (see
+        // level.cpp's own EnterLevelSetup comment on this), so NMI -- which
+        // only ever runs during vblank -- is the one place a palette write
+        // is guaranteed safe by construction, not just safe-by-accident of
+        // nothing else being on screen yet.
+        ppu::Flush(0, 0);
+
         ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG | ppu::mask::BG_L);
         mmc3::ScheduleScanlineIRQ(0, {0, 0});
         while (gameMode == eGameModes::Title) {}
@@ -24,7 +29,7 @@ namespace title {
     }
 
     void nmi_handler() {
-
+        ppu::pal::WriteFromBuffer(ppu::BG_0, SIZED_OBJ(titleScreenColours));
     }
 
     void irq_handler() {
