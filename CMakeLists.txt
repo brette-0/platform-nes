@@ -1224,6 +1224,136 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
                 VERBATIM)
 
     # ----------------------------------------------------------------------
+    # Sony PSP target (pspsdk/pspdev), via the pspdev.cmake toolchain.
+    #
+    # Like the Switch/Wii U backends, the PSP presents the shared software PPU
+    # (src/emu): emu::GenerateFrame rasterises one widescreen ARGB frame and the
+    # CPU nearest-neighbour scale-blits it straight into VRAM through its
+    # uncached alias -- no GU (the PSP's GE/3D pipeline) at all, the same
+    # "skip the heavier GPU API for a first pass" call the Switch backend made
+    # against deko3d. See src/psp/video.cpp for the framebuffer/scaling details.
+    #
+    # Unlike every devkitPro target above, this is NOT a devkitPro toolchain:
+    # pspdev is its own separate SDK (psp-gcc/psp-g++, PSPDEV env var), and
+    # pspdev.cmake sets CMAKE_SYSTEM_NAME to plain "Generic" rather than
+    # anything PSP-specific -- so, uniquely among the console branches here,
+    # TARGET_PSP is NOT derived from CMAKE_SYSTEM_NAME and must be set
+    # explicitly below, same as the desktop branches do for their platforms.
+    # The toolchain file (via presets, $env{PSPDEV}/psp/share/pspdev.cmake)
+    # pulls in CreatePBP.cmake, whose create_pbp_file() helper packs the linked
+    # ELF into the single-file EBOOT.PBP homebrew format used below.
+    # ----------------------------------------------------------------------
+    elseif(TARGET_PLATFORM STREQUAL "psp")
+        project(platform-nes CXX)
+
+        FetchContent_MakeAvailable(intsh tuple)
+
+        # The PSP backend presents the shared software PPU (src/emu): the
+        # emulator and all the nametable/OAM/palette write functions are
+        # platform-agnostic and compiled here alongside the raw-VRAM video/
+        # present, the pspctrl input, and the pspaudio streaming audio.
+        file(GLOB PSP_SOURCES CONFIGURE_DEPENDS src/psp/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
+        add_library(platform-nes STATIC ${PSP_SOURCES})
+        target_include_directories(platform-nes PUBLIC
+                ${CMAKE_SOURCE_DIR}/include
+                ${CMAKE_SOURCE_DIR}/include/umbrella
+        )
+        # TARGET_PSP is the group the engine headers gate on (emulated PPU,
+        # widescreen ~16:9 viewport shared with TARGET_NX/TARGET_WIIU, no SDL
+        # headers). See this branch's own header comment for why this can't be
+        # derived from CMAKE_SYSTEM_NAME the way the devkitPro branches' defines
+        # effectively are.
+        target_compile_definitions(platform-nes PUBLIC TARGET_PSP)
+        # Alternative nametable wiring (see the TARGET_NES branch's own comment,
+        # near the top of this file): a fact about which board a build is
+        # modeling, not something exclusive to the NES target itself.
+        if(DEFINED ALTERNATIVE_NAMETABLE)
+            target_compile_definitions(platform-nes PUBLIC "ALTERNATIVE_NAMETABLE=${ALTERNATIVE_NAMETABLE}")
+        endif()
+        target_link_libraries(platform-nes PUBLIC br0::intsh br0::tuple)
+
+        # The PSP Fat/Slim's 32-64MB of RAM can't hold the 47MB desktop
+        # pc_audio.wav decoded to raw PCM, so this follows the GameCube/Wii U
+        # shape: transcode to a small Vorbis OGG at build time and #embed it
+        # (src/psp/audio.cpp decodes it with stb_vorbis, streaming from a
+        # dedicated thread). Encoded straight to this backend's playback rate
+        # (44.1kHz, the PSP DAC's fixed rate) so no runtime resampling is needed.
+        find_program(FFMPEG ffmpeg REQUIRED)
+        FetchContent_Declare(
+                stb
+                GIT_REPOSITORY https://github.com/nothings/stb.git
+                GIT_TAG        master
+                GIT_SHALLOW    TRUE
+        )
+        FetchContent_MakeAvailable(stb)
+        target_include_directories(platform-nes PRIVATE ${stb_SOURCE_DIR})
+
+        set(PSP_ASSET_DIR ${CMAKE_BINARY_DIR}/psp-assets)
+        set(PSP_OGG ${PSP_ASSET_DIR}/pc_audio.ogg)
+        set(PSP_WAV ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
+        file(MAKE_DIRECTORY ${PSP_ASSET_DIR})
+        add_custom_command(
+                OUTPUT ${PSP_OGG}
+                COMMAND ${CMAKE_COMMAND} -E make_directory ${PSP_ASSET_DIR}
+                COMMAND ${FFMPEG} -y -loglevel error -i ${PSP_WAV}
+                        -ar 44100 -ac 2 -c:a libvorbis -q:a 4 ${PSP_OGG}
+                DEPENDS ${PSP_WAV}
+                COMMENT "Encoding PSP audio: pc_audio.wav -> pc_audio.ogg (Vorbis, embedded)"
+                VERBATIM)
+        add_custom_target(psp-assets DEPENDS ${PSP_OGG})
+        add_dependencies(platform-nes psp-assets)
+        # audio.cpp resolves `#embed <pc_audio.ogg>` via --embed-dir (the
+        # canonical GCC mechanism; -I is not reliably searched for #embed).
+        # Scope both the search dir and the rebuild-on-change dependency to
+        # that one source.
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/src/psp/audio.cpp
+                PROPERTIES
+                    OBJECT_DEPENDS  ${PSP_OGG}
+                    COMPILE_OPTIONS "--embed-dir=${PSP_ASSET_DIR}")
+
+        file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
+
+        # metatiles.cpp #embeds the demo/chr art; declare it as a dependency so
+        # editing the art retriggers a recompile.
+        file(GLOB DEMO_CHR_FILES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/demo/chr/*)
+        set_source_files_properties(${CMAKE_SOURCE_DIR}/demo/src/graphics/metatiles.cpp
+                PROPERTIES OBJECT_DEPENDS "${DEMO_CHR_FILES}")
+
+        add_executable(demo ${DEMO_SOURCES})
+        # pspdev's own crt0/linking wants the raw ELF extension for
+        # create_pbp_file()/psp-fixup-imports below, not a bare "demo".
+        set_target_properties(demo PROPERTIES SUFFIX ".elf")
+        target_link_libraries(demo PRIVATE platform-nes pspdisplay pspctrl pspaudio pspge psppower)
+
+        # CHR art is pulled in with #embed (C23); keep the Clang-only silencer
+        # for parity with the other branches (no-op under psp-g++/GCC).
+        target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
+
+        # Enable LTO for release-type configs, mirroring the other branches.
+        include(CheckIPOSupported)
+        check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+        if(_ipo_ok)
+            foreach(_cfg Release MinSizeRel RelWithDebInfo)
+                string(TOUPPER ${_cfg} _CFG)
+                set_property(TARGET demo platform-nes
+                        PROPERTY INTERPROCEDURAL_OPTIMIZATION_${_CFG} ON)
+            endforeach()
+        else()
+            message(STATUS "IPO/LTO not supported by this toolchain: ${_ipo_err}")
+        endif()
+
+        # Pack the linked ELF into a single-file EBOOT.PBP homebrew image
+        # (create_pbp_file comes from pspdev.cmake's bundled CreatePBP.cmake).
+        # No ICON_PATH/BACKGROUND_PATH/PREVIEW_PATH art is supplied yet -- the
+        # PSP menu falls back to its default icon without them, same as an
+        # unset SMDH banner on the 3DS branch would.
+        create_pbp_file(
+                TARGET      demo
+                TITLE       "platform-nes demo"
+                VERSION     "1.00"
+        )
+
+    # ----------------------------------------------------------------------
     # Nintendo DS / DSi target (devkitARM + libnds), via the NDS.cmake toolchain.
     #
     # Unlike every other emulated-PPU backend (SDL/OGC/CTR/NX/WIIU), the DS does

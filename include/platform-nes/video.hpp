@@ -27,15 +27,17 @@ using namespace br0::intsh;
 #include "technology.hpp"
 
 // The SDL desktop backend pulls in SDL3's display-mode types here. The libogc
-// (GameCube/Wii), 3DS (citro2d), Switch (libnx framebuffer), Wii U and Nintendo
-// DS backends are emulated-PPU builds like SDL but present through console
-// graphics, so they must NOT see any SDL3 headers. (The Wii U backend DOES use
-// SDL -- but SDL2, from the devkitPro Wii U portlib -- which it includes itself
-// in src/wiiu; it must not pull in SDL3. The DS and GBA backends drive the
-// libnds/libgba 2D hardware directly, with no SDL at all.) All are "non-NES", so
+// (GameCube/Wii), 3DS (citro2d), Switch (libnx framebuffer), Wii U, PSP and
+// Nintendo DS backends are emulated-PPU builds like SDL but present through
+// console graphics, so they must NOT see any SDL3 headers. (The Wii U backend
+// DOES use SDL -- but SDL2, from the devkitPro Wii U portlib -- which it
+// includes itself in src/wiiu; it must not pull in SDL3. The PSP backend writes
+// straight into VRAM with no GU/SDL at all -- see src/psp/video.cpp. The DS and
+// GBA backends drive the libnds/libgba 2D hardware directly, with no SDL at
+// all.) All are "non-NES", so
 // the SDL3-only includes/globals are gated on
-// (!TARGET_NES && !OGC && !CTR && !NX && !WIIU && !NDS && !GBA).
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
+// (!TARGET_NES && !OGC && !CTR && !NX && !WIIU && !PSP && !NDS && !GBA).
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_PSP) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
 #include <SDL3/SDL_video.h>
 #endif
 
@@ -595,7 +597,7 @@ namespace ppu {
     void InitCartVRAM();
 #endif
 }
-#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
+#if !defined(TARGET_NES) && !defined(TARGET_OGC) && !defined(TARGET_CTR) && !defined(TARGET_NX) && !defined(TARGET_WIIU) && !defined(TARGET_PSP) && !defined(TARGET_NDS) && !defined(TARGET_GBA)
 /** @brief Current desktop display mode (window + refresh info). SDL backend only. */
 extern const SDL_DisplayMode* mode;
 /** @brief Integer upscaling factor applied to the NES virtual framebuffer. SDL backend only. */
@@ -715,6 +717,42 @@ namespace video {
     /** @brief Viewport width in pixels (tiles * 8). */
     constexpr u16 viewport_px() { return viewport_tx() << 3; }
     /** @brief Viewport height in pixels (tiles * 8). */
+    constexpr u16 viewport_py() { return viewport_ty() << 3; }
+#elif defined(TARGET_PSP)
+    // The PSP's panel is a fixed 480x272. Width matches it EXACTLY (480 is a
+    // clean 60 tiles): unlike the Switch/Wii U branch above, this is not scaled
+    // to fit, so the backend (src/psp/video.cpp) renders straight into VRAM at
+    // native resolution with no horizontal scale step at all -- a non-integer
+    // scale (the first cut of this backend tried stretching the 416x240
+    // Switch/Wii U viewport up to 480x272) unavoidably duplicates a different,
+    // uneven set of source rows/columns every frame, since neither axis is an
+    // integer ratio between those two sizes; that is warping, not a clean
+    // stretch, and every destination pixel being exactly one source pixel is
+    // the only way to guarantee there is none.
+    //
+    // Height CANNOT similarly follow the panel to 272px (34 tiles): the shared
+    // core's vertical walk (emu::GenerateFrame in src/emu/ppu.cpp) wraps at
+    // world_h = ppu::nametableRows * 240 -- 240px for every board except
+    // MMC3 four-screen. Unlike the horizontal axis (nt_cols dynamically widens
+    // world_w for any viewport up to 512px wide), there is no equivalent
+    // vertical extension: a viewport taller than that wrap boundary walks back
+    // into row 0 of the nametable partway down the screen, which reads as the
+    // image mirroring/tearing near the bottom -- not a rendering bug, a
+    // request for pixels the nametable doesn't have. This is exactly why every
+    // OTHER backend, without exception, keeps its viewport at or under the
+    // NES's native 30 tiles; the PSP branch has to as well. The result is a
+    // clean 480x240 render letterboxed inside 480x272 (16px black bars top and
+    // bottom, filled once at init -- see src/psp/video.cpp) rather than either
+    // scaling into distortion or rendering into a boundary the core doesn't
+    // support crossing. 60 is a multiple of 4 tiles, keeping the 32px attribute
+    // regions aligned (matching the SDL path's `& ~3u`).
+    /** @brief Viewport width in tiles (PSP: 60, exact panel width). */
+    constexpr u16 viewport_tx() { return 60; }
+    /** @brief Viewport height in tiles (PSP: 30, NES-native -- panel is letterboxed, not scaled). */
+    constexpr u16 viewport_ty() { return 30; }
+    /** @brief Viewport width in pixels (tiles * 8 = 480). */
+    constexpr u16 viewport_px() { return viewport_tx() << 3; }
+    /** @brief Viewport height in pixels (tiles * 8 = 240, panel is 272 -- see viewport_ty()'s comment). */
     constexpr u16 viewport_py() { return viewport_ty() << 3; }
 #elif defined(LANDSCAPE)
     /** @brief Viewport width in tiles — flexible on landscape, derived from window width (runtime). */
