@@ -158,6 +158,24 @@ namespace level {
         oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::x, SpriteX2, kMarySprites);
 #endif
 
+        // Palette RAM is a special case, unlike the nametable/attribute
+        // writes below: the PPU reads the backdrop-color entry ($3F00 and
+        // its mirrors) live, every pixel clock, EVEN WITH RENDERING OFF --
+        // disabling rendering stops the PPU from fetching nametable/
+        // attribute/pattern data (so those writes really are invisible
+        // until rendering comes back on), but it does not stop the raster
+        // scan itself. A palette write landing mid-frame is visible
+        // immediately, as a horizontal band starting at whatever scanline
+        // happened to be current -- and by this point (CHR switches, the
+        // LoadLevel farcall, ::Flush's own long clear loop) we're well
+        // past the entry wait above, arbitrarily far into whatever frame
+        // is currently scanning. Fresh sync immediately before the write
+        // that actually needs it, not just once at entry.
+        video::WaitForPresent();
+#if TARGET_NES
+        nmi_done = false;
+        while (!nmi_done) {}
+#endif
         ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
         ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
         ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
