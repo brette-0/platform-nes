@@ -4,6 +4,7 @@
 #include <platform-nes/mappers/mmc3.hpp>
 
 #include "../banks.hpp"
+#include "../main.hpp"
 
 #include "../graphics/colours.hpp"
 #include "../graphics/strings.hpp"
@@ -105,6 +106,24 @@ namespace level {
     // the FIXED trampoline instead of ::COLD (confirmed empirically:
     // prg_rom_cold measured 0 bytes, prg_rom_fixed ballooned ~5.2 KiB).
     static COLD NI void EnterLevelSetup() {
+        pNMI = nmi_handler;
+        pIRQ = irq_handler;
+
+        // Wait for one real NMI before touching any hardware state: NMI
+        // generation is already running by this point (title leaves
+        // PPUCTRL's GEN_NMI bit set -- it only clears PPUMASK on exit), and
+        // pNMI now points at nmi_handler (just above), so this is safe the
+        // instant it's reached. Portable primitive, not a raw NES register
+        // poll: ::WaitForPresent is the cross-platform half (a no-op stub
+        // on NES specifically -- see its own TODO), nmi_done is NES's own
+        // concrete wait, same pattern main()'s per-frame loop already uses
+        // below.
+        video::WaitForPresent();
+#if TARGET_NES
+        nmi_done = false;
+        while (!nmi_done) {}
+#endif
+
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
         mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
@@ -198,6 +217,23 @@ namespace level {
 #endif
         });
         oam::RefreshSprites(OAMBuffer);   /* seed the first frame's sprite snapshot */
+
+        // Wait for a fresh VBlank before flipping PPUMASK on: everything
+        // above ran as ordinary sequential code with nothing synced to the
+        // PPU's frame boundary, so without this the write lands wherever
+        // in the current scanline execution happens to reach here --
+        // rendering can pop on mid-frame, a visible one-frame tear. Same
+        // portable nmi_done wait as the top of this function (and the
+        // per-frame loop below) -- safe here specifically because NMI
+        // generation is already running (inherited from title, which never
+        // clears it) and pNMI has pointed at nmi_handler since this
+        // function's own first line, not because ::EnableRendering has run
+        // yet (it hasn't -- that's the next line).
+        video::WaitForPresent();
+#if TARGET_NES
+        nmi_done = false;
+        while (!nmi_done) {}
+#endif
         ppu::EnableRendering(ppu::ctrl::SPRITE_SIZE | ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
         apu::DisableFrameIRQ();

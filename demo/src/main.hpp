@@ -7,7 +7,7 @@ enum class eGameModes : u8 {
     Level,  // gameplay, platforming in level
 };
 
-extern eGameModes gameMode;
+extern atomic eGameModes gameMode;
 
 // Mode-dispatched NMI/IRQ entry points: main.cpp's nmiTrampoline/irqTrampoline
 // (the only functions actually pinned to the hardware vectors) call through

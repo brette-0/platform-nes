@@ -1,20 +1,27 @@
 #include "title.hpp"
 #include "../main.hpp"
+#include "../banks.hpp"
+#include "platform-nes/mappers/mmc3.hpp"
 
 namespace title {
-    // Not banked. Called directly from main.cpp's RESET loop.
-    void main() {
-        gameMode = eGameModes::World;
+
+    TITLE NI void main() {
+        pIRQ = irq_handler;
+        pNMI = nmi_handler;
+        irq::EnableInterrupts();
+        ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG | ppu::mask::SPRITE | ppu::mask::BG_L | ppu::mask::SPRITE_L);
+        mmc3::ScheduleScanlineIRQ(0, {0, 0});
+        while (gameMode == eGameModes::Title) {}
+        ppu::PPUMASK = 0;
+        irq::DisableInterrupts();
     }
 
-    // Run from the NMI/IRQ vectors, at a moment nothing controls which bank
-    // is mapped -- so if these ever grow a body, they need ::FIXED, the way
-    // level's handlers do.
     void nmi_handler() {
 
     }
 
     void irq_handler() {
-
+        mmc3::AcknowledgeScanlineIRQ();
+        gameMode   = eGameModes::Level;
     }
 }

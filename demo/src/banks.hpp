@@ -31,6 +31,7 @@ struct audio_tag      {}; ///< .prg_rom_audio, bank 2, window 1. Engine + pnes a
 struct audio_data_tag {}; ///< .prg_rom_audio_data, bank 3, WINDOW 2. Songs + SFX.
 struct level_code_tag {}; ///< .prg_rom_level_code, bank 0, window 1. Level's own code -- see main.cpp's CallInBlock<level_code_tag>.
 struct cold_tag  {}; ///< .prg_rom_cold, bank 4, window 1. Code that runs once and never again.
+struct title_tag {}; ///< .prg_rom_cold, bank 4, window 1. SAME bank as cold_tag (title's own one-shot setup, never concurrent with level's) -- kept a distinct tag so main.cpp's CallInBlock<title_tag> reads as title's own call, not a reference to level's setup.
 struct actor_tag {}; ///< .prg_rom_actors, bank 5, window 1. Actor + Player code.
 /// @}
 ///
@@ -148,6 +149,23 @@ template <> struct mmc3::bank_layout<cold_tag> {
 };
 
 /**
+ * @brief TITLE: same physical bank as ::cold_tag (bank 4, window 1 -- $8000,
+ *        R6). 0x00058000.
+ *
+ * A distinct tag, not a reuse of ::cold_tag directly, purely so call sites
+ * (main.cpp's mmc3::CallInBlock<title_tag>) read as title's own farcall
+ * rather than an unrelated reference to level's setup. Genuinely the same
+ * bank on purpose: title's setup and EnterLevelSetup are both one-shot,
+ * never run concurrently, and title.cpp's title::main is still ::COLD (the
+ * same section() as EnterLevelSetup) -- only the farcall's tag differs, not
+ * the physical placement. Keep this section() in lockstep with ::cold_tag's
+ * above if that one ever moves.
+ */
+template <> struct mmc3::bank_layout<title_tag> {
+    static constexpr mmc3::section_t section() { return { 0x00058000u, 0x2000u }; }
+};
+
+/**
  * @brief ACTORS: bank 5, window 1 ($8000, R6). 0x00068000.
  *
  * Actor's own methods (Move/Start/Update) and Player's (Update/Reset),
@@ -176,6 +194,19 @@ template <> struct mmc3::bank_layout<actor_tag> {
  * wrong 8 KiB. Expands to nothing off-NES.
  */
 #define COLD CREATE_SEGMENT_KEYWORD(".prg_rom_cold")
+
+/**
+ * @brief Pins a function into the SAME section as ::COLD (.prg_rom_cold) --
+ *        a distinct keyword purely so title's own one-shot setup reads as
+ *        title's, not as a reference to level's. See ::title_tag.
+ *
+ * Genuinely the same section, not a separate bank: title's setup and
+ * EnterLevelSetup are both one-shot and never run concurrently, so they
+ * share the physical 8 KiB rather than each claiming their own. Keep this
+ * in lockstep with ::COLD above if that one's target section ever changes.
+ * Expands to nothing off-NES.
+ */
+#define TITLE CREATE_SEGMENT_KEYWORD(".prg_rom_cold")
 
 /**
  * @brief Pins a function into the level's CODE bank (.prg_rom_level_code) --

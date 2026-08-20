@@ -1,4 +1,5 @@
 #include <platform-nes>
+#include <platform-nes/apu.hpp>
 #include "header.hpp"
 #include "main.hpp"
 
@@ -10,7 +11,7 @@
 // Spelled out, not `auto`: main.hpp declares this extern with an explicit type,
 // and GCC rejects a redeclaration that swaps that for a placeholder. Clang
 // allows it, so `auto` here builds on NES and breaks every devkitPro target.
-eGameModes gameMode = eGameModes::Level;
+atomic auto gameMode = eGameModes::Title;
 
 void (*pNMI)();
 void (*pIRQ)();
@@ -24,8 +25,18 @@ IRQ(FIXED) {
 }
 
 RESET {
-    pNMI = level::nmi_handler;  // rig trampoline
-    pIRQ = level::irq_handler;
+    // Boot-time fact, not a per-mode one: the APU frame-sequencer/DMC IRQs
+    // default ENABLED at power-on, and every mode's own irq_handler only
+    // acks whatever IT expects (title's acks the MMC3 mapper IRQ, level's
+    // acks it too for the HUD split) -- neither touches $4015/$4017. A
+    // spurious APU-sourced IRQ landing before this runs once would never
+    // get silenced at its actual source, staying asserted and re-firing
+    // the instant RTI clears the I flag -- an unbreakable back-to-back IRQ
+    // storm the moment any mode calls irq::EnableInterrupts(). Done once,
+    // here, before any mode gets a chance to enable interrupts at all,
+    // rather than duplicated in every mode that does.
+    apu::DisableFrameIRQ();
+    apu::DisableDMCIRQ();
 
     while (!quit) {
         switch (gameMode) {
@@ -42,7 +53,11 @@ RESET {
                 continue;
 
             case eGameModes::Title:
-                title::main();
+                // Farcalled: title::main is now ::COLD (banks.hpp's
+                // ::title_tag -- same physical bank as ::cold_tag, distinct
+                // tag purely so this reads as title's own call), not
+                // resident -- see title.cpp's own comment.
+                mmc3::CallInBlock<title_tag>(title::main);
         }
     }
 }
