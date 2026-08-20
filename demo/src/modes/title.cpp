@@ -9,6 +9,13 @@ namespace title {
     TITLE NI void main() {
         pIRQ = irq_handler;
         pNMI = nmi_handler;
+
+        u8 port1, port2;
+
+        while (~(port1 | port2) & input::START) {
+            input::PollControllers(&port1, &port2);
+        }
+
         irq::EnableInterrupts();
 
         // Blank nametable/attribute data -- invisible regardless of timing
