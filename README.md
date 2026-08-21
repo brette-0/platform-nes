@@ -35,21 +35,23 @@ Which will demonstrate how you can easily begin using this project.
 - 3ds
 - Wii U
 - Switch
+- DSi/NDS
+- Gamecube
+- GBA*
+- PSP*
 - Windows
 - Mac
 - Linux
 - Web Assembly
 
+>  *performance issues have been found on GBA and PSP  
+
 ## Supported Cartridges
 - NROM
 - VRC1
-
+- MMC3
 
 ## Planned Updates:
-
-### 8x16 Sprites
-
-At this point in time, only `8x8` sprites are implemented and non-NES targets do not contain an `8x16` emulation.
 
 ## Other Controller Types
 
@@ -60,10 +62,9 @@ At this point the only supported controllers are NTSC NES Controllers.
 It's eventually planned to support cartridges that have the ability to save memory to either batter backed SRAM, EEPROM
 or in the case of more modern targets save files with paths managed by the developer.
 
-### Character ROM Bank Switching
+### Online Multiplayer
 
-Currently, the pattern tables are not modified post-reset where they are fetched from `rodata`, in the future 
-Character ROM Bank switching technology will be supported.
+A simple means to support online over LAN or direct IP server connection!
 
 ## Minimum Spec (Windows/Mac/Linux/Web)
 
