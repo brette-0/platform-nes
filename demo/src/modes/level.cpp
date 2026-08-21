@@ -31,8 +31,11 @@ namespace level {
     u8 lastPort2;
 
     constexpr u8 kHudSplitRow   = 16;
-    constexpr u8 kHudSplitMMC3  = 16 - 2;   // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
-    constexpr u8 kHUDSplitDelay = 62;
+    constexpr u8 kHudSplitMMC3  = 16 - (
+            REGION ? 4 : 3
+    );
+        // NOTE:: if we are stuffed for cpu time, lower this and hand-write ASM
+    constexpr u8 kHUDSplitDelay = REGION ? 90 : 0;
 
     // Forward-declared so irq_handler can call it directly once the MMC3
     // scanline IRQ fires below the HUD (see kHudSplitLatch / irq_handler).
