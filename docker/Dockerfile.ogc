@@ -17,7 +17,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # The base image is Ubuntu-based; add the host-side build tools the project
 # needs that aren't part of the devkit toolchain itself. (Ninja is the preset
-# generator; git/wget/ca-certificates support FetchContent of intsh/tuple.)
+# generator; git/wget/ca-certificates support FetchContent of intsh/tuple;
+# ffmpeg re-encodes the desktop WAV to the OGG the OGC audio backend embeds,
+# same as Dockerfile.switch/.wiiu/.web.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ninja-build \
         git \
@@ -25,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         xz-utils \
         file \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # The intsh/tuple dependencies declare a CMake 4.2 floor (and CMakePresets.json
