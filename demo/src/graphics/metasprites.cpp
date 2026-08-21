@@ -14,11 +14,11 @@
 #define MS_SPLIT(base) { .tile = static_cast<oam::oam_t>((base) | 1) }, \
                        { .tile = static_cast<oam::oam_t>(((base) + 2) | 1) }
 
-const oam::sprite_t msMary[0x02] = {
+LEVEL_GRAPHICS const oam::sprite_t msMary[0x02] = {
     MS_SPLIT(chrPlayerStanding_tile),  // small mary normal
 };
 
-const oam::sprite_t msMary2[0x02] = {
+LEVEL_GRAPHICS const oam::sprite_t msMary2[0x02] = {
     { .tile = static_cast<oam::oam_t>(chrPlayerStanding_tile | 1),     .attributes = 0x40 },
     { .tile = static_cast<oam::oam_t>((chrPlayerStanding_tile + 2) | 1), .attributes = 0x40 },
 };

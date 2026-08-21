@@ -1,8 +1,9 @@
 ﻿#pragma once
 #include <platform-nes/video.hpp>
+#include "../banks.hpp"   // LEVEL_GRAPHICS
 
-extern const oam::sprite_t msMary[0x02];
-extern const oam::sprite_t msMary2[0x02];  // player 2: same tiles, horizontally flipped
+LEVEL_GRAPHICS extern const oam::sprite_t msMary[0x02];
+LEVEL_GRAPHICS extern const oam::sprite_t msMary2[0x02];  // player 2: same tiles, horizontally flipped
 
 // Hardware-sprite count of the player metasprite (two hardware 8x16 columns),
 // derived from msMary's array extent so the OAM populate counts can never

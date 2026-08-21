@@ -147,13 +147,22 @@ namespace level {
         oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
         // fill in with mario metatiles
-        oam::PopulateFromBuffer(  OAMBuffer, 1, oam::tile, msMary,  kMarySprites);
+        // msMary/msMary2 are ::LEVEL_GRAPHICS now (bank 7, window 2) -- window
+        // 2 is ambient LevelDataBank here (LoadLevel above already switched
+        // it), so both tile-source reads are bracketed in one block. The
+        // Provider calls (SpriteY/SpriteX) don't touch msMary at all -- they
+        // stay outside, ambient window 2 unchanged.
+        CallLevelGraphics([] {
+            oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile, msMary, kMarySprites);
+#ifdef PLAYER2_SUPPORTED
+            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::tile, msMary2, kMarySprites);
+#endif
+        });
         oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY,  kMarySprites);
         oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX,  kMarySprites);
 
 #ifdef PLAYER2_SUPPORTED
         // player 2: horizontally flipped, OAM slots 5..8
-        oam::PopulateFromBuffer(  OAMBuffer, 1 + kMarySprites, oam::tile, msMary2, kMarySprites);
         oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::y, SpriteY2, kMarySprites);
         oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::x, SpriteX2, kMarySprites);
 #endif
@@ -176,9 +185,16 @@ namespace level {
         nmi_done = false;
         while (!nmi_done) {}
 #endif
-        ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
-        ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
-        ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
+        // BGColours/maryColors/msg_mary now live in ::level_graphics_tag
+        // (bank 7, window 2) -- window 2 is otherwise LevelDataBank at this
+        // point (LoadLevel above already switched it there for the rest of
+        // the session), so this read is bracketed in its own block and
+        // restored before ColMapSeed below, which needs LevelDataBank back.
+        CallLevelGraphics([] {
+            ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
+            ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
+            ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
+        });
 
         constexpr u8 coinUI[] = {chrHUDCoin_tile, chrFont_tile + 0, chrFont_tile + 0};
         ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(coinUI), 1, SIZED_OBJ(coinUI), 0);

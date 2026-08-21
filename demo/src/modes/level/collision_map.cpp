@@ -2,7 +2,8 @@
 
 #include "levels.hpp"                  // levelHeight, kHudRows
 #include "../../graphics/metatiles.hpp"   // GetMetatileCollisions, MetatileCollision
-#include "../../banks.hpp"             // FIXED, LEVEL_CODE
+#include "../../banks.hpp"             // FIXED, LEVEL_CODE, level_graphics_tag
+#include <platform-nes/mappers/mmc3.hpp>  // mmc3::CallInBlock
 
 #include <array>
 
@@ -246,21 +247,28 @@ NI FIXED bool Blocked(const u16 px, const u16 py, const vec2<u8> dimensions, con
 
     const u16 colL = px >> 4;
     const u16 colR = (px + w - 1) >> 4;
-    for (u16 c = colL; c <= colR; c++) {
-        const u16 d = c - ColMapBaseCol;
-        if (d >= ColMapWidth()) continue;       // column outside window = air
-        u8 slot = ColMapOrigin + static_cast<u8>(d);
-        if (slot >= ColMapWidth()) slot -= ColMapWidth();   // non-pow2 ring: one wrap
-        // kSlotOffset replaces slot*levelHeight (16-bit software multiply) with a
-        // ROM table lookup.  Start colp at rowT so the inner walk is a bare *colp.
-        const u8* colp = ViewMap + kSlotOffset[slot] + rowT;
-        for (u8 cnt = rowB - rowT + 1; cnt != 0; --cnt, ++colp) {
-            const MetatileCollision cls = GetMetatileCollisions(*colp);
-            if (cls == MetatileCollision::Solid) return true;
-            if (collectBlocks && cls == MetatileCollision::Collect) return true;
+    // Whole scan wrapped in ONE window-2 switch: nothing in this loop touches
+    // TileData/DynLengths (LevelDataBank), only ViewMap (RAM) and the metatile
+    // planes (::level_graphics_tag) -- see the "why not R7" discussion this
+    // followed. mmc3::CallInBlock restores window 2 to whatever it was
+    // (LevelDataBank) before returning.
+    return CallLevelGraphics([&]() -> bool {
+        for (u16 c = colL; c <= colR; c++) {
+            const u16 d = c - ColMapBaseCol;
+            if (d >= ColMapWidth()) continue;       // column outside window = air
+            u8 slot = ColMapOrigin + static_cast<u8>(d);
+            if (slot >= ColMapWidth()) slot -= ColMapWidth();   // non-pow2 ring: one wrap
+            // kSlotOffset replaces slot*levelHeight (16-bit software multiply) with a
+            // ROM table lookup.  Start colp at rowT so the inner walk is a bare *colp.
+            const u8* colp = ViewMap + kSlotOffset[slot] + rowT;
+            for (u8 cnt = rowB - rowT + 1; cnt != 0; --cnt, ++colp) {
+                const MetatileCollision cls = GetMetatileCollisions(*colp);
+                if (cls == MetatileCollision::Solid) return true;
+                if (collectBlocks && cls == MetatileCollision::Collect) return true;
+            }
         }
-    }
-    return false;
+        return false;
+    });
 }
 
 // Collect coins overlapping the AABB. Same column/row projection as Blocked. Uses
@@ -330,18 +338,23 @@ NI FIXED static u8 CollectCoinsImpl(CollectorAnchor& anchor, const u16 px, const
     // Collect tiles too (ViewMap is composite), but the probe's pd.Fetch()!=0 guard
     // rejects those. Skips the probe walk entirely on the common no-coin frame.
     {
-        bool anyCoin = false;
-        for (u16 c = colL; !anyCoin && c <= colR; c++) {
-            const u16 d = c - ColMapBaseCol;
-            if (d >= ColMapWidth()) continue;
-            u8 slot = ColMapOrigin + static_cast<u8>(d);
-            if (slot >= ColMapWidth()) slot -= ColMapWidth();
-            const u8* colp = ViewMap + kSlotOffset[slot];
-            for (i16 r = rowTop; !anyCoin && r <= rowBot; r++) {
-                if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect)
-                    anyCoin = true;
+        // Whole prescan wrapped in ONE window-2 switch, same reasoning as
+        // Blocked(): only ViewMap (RAM) and the metatile planes
+        // (::level_graphics_tag) are touched here, never TileData/DynLengths.
+        const bool anyCoin = CallLevelGraphics([&]() -> bool {
+            for (u16 c = colL; c <= colR; c++) {
+                const u16 d = c - ColMapBaseCol;
+                if (d >= ColMapWidth()) continue;
+                u8 slot = ColMapOrigin + static_cast<u8>(d);
+                if (slot >= ColMapWidth()) slot -= ColMapWidth();
+                const u8* colp = ViewMap + kSlotOffset[slot];
+                for (i16 r = rowTop; r <= rowBot; r++) {
+                    if (GetMetatileCollisions(colp[r]) == MetatileCollision::Collect)
+                        return true;
+                }
             }
-        }
+            return false;
+        });
         if (!anyCoin) { anchor.dry = true; return 0; }   // verified empty: safe to skip next time
     }
 
@@ -362,7 +375,17 @@ NI FIXED static u8 CollectCoinsImpl(CollectorAnchor& anchor, const u16 px, const
             colp = ViewMap + kSlotOffset[slot];
         }
         for (i16 r = rowTop; r <= rowBot; r++) {
-            if (inWin && pd.Fetch() != 0 && GetMetatileCollisions(colp[r]) == MetatileCollision::Collect) {
+            // pd.Fetch() reads DynData -- RAM, not window 2, so it stays
+            // ambient. Only the metatile check itself needs a switch; it's
+            // bracketed so window 2 is back on LevelDataBank (restored by
+            // CallInBlock) before ps.Fetch() below reads TileData. Gated
+            // behind the anyCoin prescan above and the one-coin-per-call cap,
+            // so this per-iteration switch is rare, not hot.
+            const bool isCollect = inWin && pd.Fetch() != 0 &&
+                CallLevelGraphics([&]() -> bool {
+                    return GetMetatileCollisions(colp[r]) == MetatileCollision::Collect;
+                });
+            if (isCollect) {
                 // *pd.dp = 0 is DynData[pd.Run()] = 0 (Run() is just dp-DynData)
                 // without the round trip: pd.dp already points at that DynData
                 // byte, so this skips a 16-bit subtract (Run()) immediately

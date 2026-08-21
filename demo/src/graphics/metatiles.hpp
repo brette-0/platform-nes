@@ -1,13 +1,14 @@
 ﻿#pragma once
 #include <intsh>
 #include <array>
+#include "../banks.hpp"   // LEVEL_GRAPHICS
 using namespace br0::intsh;
 
-extern const std::array<u8, 256> Metatiles_UL;   // top-left  CHR tile
-extern const std::array<u8, 256> Metatiles_UR;   // top-right CHR tile
-extern const std::array<u8, 256> Metatiles_BL;   // bottom-left  CHR tile
-extern const std::array<u8, 256> Metatiles_BR;   // bottom-right CHR tile
-extern const std::array<u8, 256> Metatiles_ATTR; // 5th plane, packed per id:
+LEVEL_GRAPHICS extern const std::array<u8, 256> Metatiles_UL;   // top-left  CHR tile
+LEVEL_GRAPHICS extern const std::array<u8, 256> Metatiles_UR;   // top-right CHR tile
+LEVEL_GRAPHICS extern const std::array<u8, 256> Metatiles_BL;   // bottom-left  CHR tile
+LEVEL_GRAPHICS extern const std::array<u8, 256> Metatiles_BR;   // bottom-right CHR tile
+LEVEL_GRAPHICS extern const std::array<u8, 256> Metatiles_ATTR; // 5th plane, packed per id:
                                                  //   bits 7..2 collision class
                                                  //   bits 1..0 PPU palette index
 

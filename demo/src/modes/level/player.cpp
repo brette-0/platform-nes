@@ -54,25 +54,31 @@ ACTORS static bool IsBlocked(const Actor* self, const u16 wx, const u16 wy) {
 // PushCoinVram translates a picked cell into VRAM writes queued for NMI drain.
 // ---------------------------------------------------------------------------
 
+// The four Metatiles_* reads below are ::level_graphics_tag (bank 7, window
+// 2) now; CoinVramPush itself only touches the RAM CoinVram queue, so the
+// whole body is one switch-in/switch-out, restoring window 2 to whatever it
+// was (LevelDataBank) before returning to the caller.
 ACTORS static void PushCoinVram(const CoinPick& pick) {
-    const u8  m  = pick.reveal;
-    const u16 tx = static_cast<u16>(pick.col) << 1;
-    const u16 ty = static_cast<u16>(2 + (pick.row << 1));
+    CallLevelGraphics([&] {
+        const u8  m  = pick.reveal;
+        const u16 tx = static_cast<u16>(pick.col) << 1;
+        const u16 ty = static_cast<u16>(2 + (pick.row << 1));
 #ifdef TARGET_NES
-    // TODO: profile CartesianToAddress on NES vs this inline formula before shipping.
-    // ty = 2 + row*2 <= 28 < 30, so nt_v = 0; remaining tiles follow by addition.
-    const u16 nt_h = static_cast<u16>((tx >> 5) & 1) << 10;
-    const u16 base = 0x2000 + nt_h + (static_cast<u16>(ty) << 5) + (tx & 0x1F);
-    CoinVramPush(base,      Metatiles_UL[m]);
-    CoinVramPush(base +  1, Metatiles_UR[m]);
-    CoinVramPush(base + 32, Metatiles_BL[m]);
-    CoinVramPush(base + 33, Metatiles_BR[m]);
+        // TODO: profile CartesianToAddress on NES vs this inline formula before shipping.
+        // ty = 2 + row*2 <= 28 < 30, so nt_v = 0; remaining tiles follow by addition.
+        const u16 nt_h = static_cast<u16>((tx >> 5) & 1) << 10;
+        const u16 base = 0x2000 + nt_h + (static_cast<u16>(ty) << 5) + (tx & 0x1F);
+        CoinVramPush(base,      Metatiles_UL[m]);
+        CoinVramPush(base +  1, Metatiles_UR[m]);
+        CoinVramPush(base + 32, Metatiles_BL[m]);
+        CoinVramPush(base + 33, Metatiles_BR[m]);
 #else
-    CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx + 1, ty + 1), Metatiles_BR[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
+        CoinVramPush(ppu::CartesianToAddress(tx + 1, ty + 1), Metatiles_BR[m]);
 #endif
+    });
 }
 
 // CollectCoins/CollectCoins2 remove at most one coin per call (the "one pickup

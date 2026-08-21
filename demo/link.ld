@@ -28,7 +28,7 @@ PROVIDE(__chr_rom_size = 8);
  * level code (0), level data (1), audio (2), audio_data (3), cold (4),
  * actors (5), level's dynamic-plane source (6) -- see banks.hpp. MUST be set
  * before `INCLUDE mmc3-helper.ld`: PROVIDE() only takes its first value. */
-PROVIDE(__mmc3_reserved_banks = 7);
+PROVIDE(__mmc3_reserved_banks = 8);
 
 /* ONE resident window ($C000-$DFFF), not the default three. Both switchable
  * windows go to the level domain below (16 KiB contiguous, since no farcall
@@ -97,6 +97,11 @@ MEMORY {
    * a raw mmc3::SwitchBank(window2Control, LevelDynamicBank(n)) in LoadLevel,
    * not permanently pinned like prg_rom_level_data. See ::LevelDynamicBank. */
   prg_rom_level_dynamic : ORIGIN = 0x0007a000, LENGTH = 0x2000  /* bank 6, window 2 */
+  /* LEVEL GRAPHICS: bank 7, window 2. Metatile planes, level palette data,
+   * and the level's string/charmap data -- reached via
+   * mmc3::CallInBlock<level_graphics_tag>, switched in and back out around
+   * the reads that need it. See banks.hpp's ::level_graphics_tag. */
+  prg_rom_level_graphics : ORIGIN = 0x0008a000, LENGTH = 0x2000  /* bank 7, window 2 */
 }
 
 /* Published for the build-time space report -- see mmc3-helper.ld's own
@@ -115,6 +120,8 @@ __space_origin_prg_rom_actors = ORIGIN(prg_rom_actors);
 __space_length_prg_rom_actors = LENGTH(prg_rom_actors);
 __space_origin_prg_rom_level_dynamic = ORIGIN(prg_rom_level_dynamic);
 __space_length_prg_rom_level_dynamic = LENGTH(prg_rom_level_dynamic);
+__space_origin_prg_rom_level_graphics = ORIGIN(prg_rom_level_graphics);
+__space_length_prg_rom_level_graphics = LENGTH(prg_rom_level_graphics);
 
 SECTIONS {
   /* Level's interrupt path needs no rule at all: nmi_handler, irq_handler and
@@ -130,6 +137,7 @@ SECTIONS {
   .prg_rom_cold : { *(.prg_rom_cold .prg_rom_cold.*) } >prg_rom_cold
   .prg_rom_actors : { *(.prg_rom_actors .prg_rom_actors.*) } >prg_rom_actors
   .prg_rom_level_dynamic : { *(.prg_rom_level_dynamic .prg_rom_level_dynamic.*) } >prg_rom_level_dynamic
+  .prg_rom_level_graphics : { *(.prg_rom_level_graphics .prg_rom_level_graphics.*) } >prg_rom_level_graphics
 }
 
 /* Moves the C writable arena (.data/.bss/heap/soft stack) into PRG-RAM
@@ -177,6 +185,7 @@ OUTPUT_FORMAT {
   FULL(prg_rom_cold)
   FULL(prg_rom_actors)
   FULL(prg_rom_level_dynamic)
+  FULL(prg_rom_level_graphics)
   FULL(prg_rom_spare)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)

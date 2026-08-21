@@ -10,6 +10,15 @@ namespace title {
         pIRQ = irq_handler;
         pNMI = nmi_handler;
 
+        mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
+        mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
+        mmc3::SwitchCHRBank(mmc3::chr2Control, 0);
+        mmc3::SwitchCHRBank(mmc3::chr3Control, 1);
+        mmc3::SwitchCHRBank(mmc3::chr4Control, 6);
+        mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
+        ppu::Flush(0, 0);
+        ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG | ppu::mask::BG_L);
+
         u8 port1, port2;
 
         while (~(port1 | port2) & input::START) {
@@ -17,18 +26,6 @@ namespace title {
         }
 
         irq::EnableInterrupts();
-
-        // Blank nametable/attribute data -- invisible regardless of timing
-        // since rendering's still off, so the PPU isn't fetching it yet.
-        // The BG palette write moved to nmi_handler (below): palette RAM is
-        // live the instant it's written, even with rendering off (see
-        // level.cpp's own EnterLevelSetup comment on this), so NMI -- which
-        // only ever runs during vblank -- is the one place a palette write
-        // is guaranteed safe by construction, not just safe-by-accident of
-        // nothing else being on screen yet.
-        ppu::Flush(0, 0);
-
-        ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG | ppu::mask::BG_L);
         mmc3::ScheduleScanlineIRQ(0, {0, 0});
         while (gameMode == eGameModes::Title) {}
         ppu::PPUMASK = 0;
