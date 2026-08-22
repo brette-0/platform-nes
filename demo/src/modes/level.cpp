@@ -188,11 +188,6 @@ namespace level {
         nmi_done = false;
         while (!nmi_done) {}
 #endif
-        // BGColours/maryColors/msg_mary now live in ::level_graphics_tag
-        // (bank 7, window 2) -- window 2 is otherwise LevelDataBank at this
-        // point (LoadLevel above already switched it there for the rest of
-        // the session), so this read is bracketed in its own block and
-        // restored before ColMapSeed below, which needs LevelDataBank back.
         CallLevelGraphics([] {
             ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
             ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));

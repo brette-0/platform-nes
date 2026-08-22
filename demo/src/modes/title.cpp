@@ -2,6 +2,7 @@
 #include "../main.hpp"
 #include "../banks.hpp"
 #include "../graphics/colours.hpp"
+#include "../graphics/strings.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
 
 namespace title {
@@ -18,6 +19,11 @@ namespace title {
         mmc3::SwitchCHRBank(mmc3::chr5Control, 7);
         ppu::Flush(0, 0);
         ppu::EnableRendering(ppu::ctrl::BG_ADDR, ppu::mask::BG | ppu::mask::BG_L);
+
+        ppu::WriteFromBufferToNameTable(
+            (video::viewport_tx() + sizeof(msg_title)) >> 1, 0,
+            SIZED_OBJ(msg_title), 0
+        );
 
         u8 port1, port2;
 

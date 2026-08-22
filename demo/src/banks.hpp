@@ -56,6 +56,14 @@ template <> struct mmc3::bank_layout<actor_tag> {
 
 #define TITLE CREATE_SEGMENT_KEYWORD(".prg_rom_cold")
 
+// Same physical bank as ::COLD/::TITLE (link.ld's prg_rom_cold output section
+// globs ".prg_rom_cold.*" into that region too), but a distinct section NAME:
+// clang/LLD reject placing code and data under the identical literal section
+// name (a "section type conflict" -- executable vs non-executable content
+// need different section flags), so any data object living in the cold/title
+// bank -- e.g. strings.hpp's msg_title -- needs this instead of plain ::TITLE.
+#define TITLE_DATA CREATE_SEGMENT_KEYWORD(".prg_rom_cold.rodata")
+
 #define LEVEL_CODE CREATE_SEGMENT_KEYWORD(".prg_rom_level_code")
 
 #define LEVEL_DATA CREATE_SEGMENT_KEYWORD(".prg_rom_level_data")

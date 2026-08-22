@@ -13,3 +13,6 @@
 // LEVEL_GRAPHICS, not the plain ::STRING macro expansion -- level's own text,
 // same bank as its metatiles/palette. See ::level_graphics_tag.
 LEVEL_GRAPHICS inline constexpr auto msg_mary = ::tech::nes_str::encode<charmap_generic>("MARY");
+
+
+TITLE_DATA inline constexpr auto msg_title = ::tech::nes_str::encode<charmap_generic>("SUPER MARY SISTERS");
