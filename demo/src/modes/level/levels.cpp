@@ -115,6 +115,13 @@ namespace level {
         mmc3::SwitchBank(mmc3::window2Control, LevelDynamicBank(n));
         LoadDynamicLayer(Levels[n].DynLengths, Levels[n].DynData, Levels[n].DynRuns);
 
+        // ROM -> RAM copy of the metatile planes (see metatiles.hpp's
+        // LoadMetatilePlanes), so collision checks and coin-tile fetches
+        // read ambient PRG-RAM afterward instead of farcalling into a
+        // paged bank several times per actor per frame.
+        mmc3::SwitchBank(mmc3::window2Control, LevelGraphicsBank(n));
+        LoadMetatilePlanes();
+
         // Settle window 2 on the level's STATIC data for the rest of the
         // session: TileData/DynLengths are read every frame via plain
         // pointers, never through a farcall, so window 2 must stay here,
@@ -141,13 +148,10 @@ namespace level {
         return d ? d : s;
     }
 
-    // NOT AI any more: the body now crosses a window-2 farcall boundary
-    // (::level_graphics_tag), so it can't be inlined at the caller regardless
-    // -- these are only ever reached through a function pointer
-    // (ppu::WriteFromProviderToNameTable) anyway, which already ruled out
-    // real inlining. One-time cost only: sole call site is EnterLevelSetup's
-    // initial column prefill (level.cpp), never touched again after level
-    // entry, so the extra switch per tile here is free.
+    // AI again: the metatile planes are ambient PRG-RAM now (see
+    // metatiles.hpp's LoadMetatilePlanes), so this no longer crosses a
+    // window-2 farcall boundary.
+    AI
     u8 GetNextWrite(const u8 step) {
         u8 m;
         if (~step & 1) {
@@ -157,28 +161,25 @@ namespace level {
                 for (auto & j : AttributeBuffer)
                     j &= mask;
             }
-            // GetNextMetaTile reads TileData/DynLengths -- LevelDataBank,
-            // ambient window 2 -- so it runs OUTSIDE the level_graphics block.
             m = GetNextMetaTile();
             MetatileBuffer[step >> 1] = m;
         } else {
             m = MetatileBuffer[step >> 1];
         }
-        return CallLevelGraphics([&]() -> u8 {
-            if (~step & 1) {
-                const u8 tile_row  = 2 + step;
-                const u8 attr_idx  = tile_row >> 2;
-                const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
-                const u8 is_bottom = tile_row >> 1 & 1;
-                const u8 shift     = attr_column & 1
-                                        ? (is_bottom ? 6 : 2)
-                                        : is_bottom ? 4 : 0;
-                AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
-            }
-            return step & 1 ? Metatiles_UR[m] : Metatiles_UL[m];
-        });
+        if (~step & 1) {
+            const u8 tile_row  = 2 + step;
+            const u8 attr_idx  = tile_row >> 2;
+            const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 is_bottom = tile_row >> 1 & 1;
+            const u8 shift     = attr_column & 1
+                                    ? (is_bottom ? 6 : 2)
+                                    : is_bottom ? 4 : 0;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
+        }
+        return step & 1 ? Metatiles_UR[m] : Metatiles_UL[m];
     }
 
+    AI
     u8 GetPrevWrite(const u8 step) {
         u8 m;
         if (~step & 1) {
@@ -188,52 +189,44 @@ namespace level {
                 for (auto & j : AttributeBuffer)
                     j &= mask;
             }
-            // GetPrevMetaTile: ambient window 2 (LevelDataBank), same
-            // reasoning as GetNextWrite above.
             m = GetPrevMetaTile();
             MetatileBuffer[step >> 1] = m;
         } else {
             m = MetatileBuffer[step >> 1];
         }
-        return CallLevelGraphics([&]() -> u8 {
-            if (~step & 1) {
-                const u8 tile_row  = 29 - step;
-                const u8 attr_idx  = tile_row >> 2;
-                const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
-                const u8 is_bottom = tile_row >> 1 & 1;
-                const u8 shift     = (attr_column + prev_parity_fix()) & 1
-                                        ? (is_bottom ? 4 : 0)
-                                        : is_bottom ? 6 : 2;
-                AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
-            }
-            return step & 1 ? Metatiles_UL[m] : Metatiles_UR[m];
-        });
+        if (~step & 1) {
+            const u8 tile_row  = 29 - step;
+            const u8 attr_idx  = tile_row >> 2;
+            const u8 pal       = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 is_bottom = tile_row >> 1 & 1;
+            const u8 shift     = (attr_column + prev_parity_fix()) & 1
+                                    ? (is_bottom ? 4 : 0)
+                                    : is_bottom ? 6 : 2;
+            AttributeBuffer[attr_idx] |= kPalShifted[pal][shift >> 1];
+        }
+        return step & 1 ? Metatiles_UL[m] : Metatiles_UR[m];
     }
 
     // GetCurrentNext/GetCurrentPrev only ever read MetatileBuffer (RAM,
     // already filled by GetNextWrite/GetPrevWrite's own pass over the same
-    // step) and the metatile planes -- no window-2/LevelData dependency, so
-    // the whole body is one level_graphics_tag block.
+    // step) and the metatile planes (RAM mirrors) -- no window-2 dependency.
+    AI
     u8 GetCurrentNext(const u8 step) {
-        return CallLevelGraphics([&]() -> u8 {
-            const u8 m = MetatileBuffer[step >> 1];
-            return step & 1 ? Metatiles_BR[m] : Metatiles_BL[m];
-        });
+        const u8 m = MetatileBuffer[step >> 1];
+        return step & 1 ? Metatiles_BR[m] : Metatiles_BL[m];
     }
 
+    AI
     u8 GetCurrentPrev(const u8 step) {
-        return CallLevelGraphics([&]() -> u8 {
-            const u8 m = MetatileBuffer[step >> 1];
-            return step & 1 ? Metatiles_BL[m] : Metatiles_BR[m];
-        });
+        const u8 m = MetatileBuffer[step >> 1];
+        return step & 1 ? Metatiles_BL[m] : Metatiles_BR[m];
     }
 
-    // ACTORS: sole caller is ProcessMovement (player.cpp), now in the actors
+    // ACTORS: sole caller is ProcessMovement (player.cpp), in the actors
     // bank -- see banks.hpp's ::actor_tag comment. col[] comes from ColMapColumn
-    // (ViewMap, RAM) -- no window-2/LevelData dependency anywhere in this
-    // function, so the metatile-table portion is ONE level_graphics_tag block
-    // rather than per-row: only fires on a scroll-column boundary crossing
-    // (lastXWorldSpace hysteresis in player.cpp), not every frame.
+    // (ViewMap, RAM); the metatile planes are RAM mirrors now too, so this
+    // fires on every scroll-column boundary crossing (lastXWorldSpace
+    // hysteresis in player.cpp) with no window-2 switch at all.
     ACTORS void BuildNextColumn(u8* buf, const u16 worldCol) {
         attr_column++;
         const u8 mask = attr_column & 1 ? 0x33 : 0x00;
@@ -246,20 +239,18 @@ namespace level {
         const u8 shiftIdxEven = attr_column & 1 ? 3 : 2;
         const u8 shiftIdxOdd  = attr_column & 1 ? 1 : 0;
 
-        CallLevelGraphics([&] {
-            for (u8 mt = 0; mt < 14; ++mt) {
-                const u8 m   = col[mt];                  // top-to-bottom, slot s row mt
-                const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
-                const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
-                AttributeBuffer[kNextAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
+        for (u8 mt = 0; mt < 14; ++mt) {
+            const u8 m   = col[mt];                  // top-to-bottom, slot s row mt
+            const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
+            AttributeBuffer[kNextAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
 
-                const u8 step      = mt << 1;             // even tile-step: 0,2,..,26
-                buf[step]          = Metatiles_UL[m];
-                buf[step + 1]      = Metatiles_UR[m];
-                buf[28 + step]     = Metatiles_BL[m];
-                buf[28 + step + 1] = Metatiles_BR[m];
-            }
-        });
+            const u8 step      = mt << 1;             // even tile-step: 0,2,..,26
+            buf[step]          = Metatiles_UL[m];
+            buf[step + 1]      = Metatiles_UR[m];
+            buf[28 + step]     = Metatiles_BL[m];
+            buf[28 + step + 1] = Metatiles_BR[m];
+        }
     }
 
     // ACTORS: see BuildNextColumn's comment.
@@ -276,20 +267,18 @@ namespace level {
         const u8 shiftIdxEven = ap ? 0 : 1;
         const u8 shiftIdxOdd  = ap ? 2 : 3;
 
-        CallLevelGraphics([&] {
-            for (u8 mt = 0; mt < 14; ++mt) {
-                const u8 m   = col[13 - mt];              // bottom-to-top, mirroring edgeL's walk
-                const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
-                const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
-                AttributeBuffer[kPrevAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
+        for (u8 mt = 0; mt < 14; ++mt) {
+            const u8 m   = col[13 - mt];              // bottom-to-top, mirroring edgeL's walk
+            const u8 pal = Metatiles_ATTR[m] & MetatilePaletteMask;
+            const u8 shiftIdx = mt & 1 ? shiftIdxOdd : shiftIdxEven;
+            AttributeBuffer[kPrevAttrIdx[mt]] |= kPalShifted[pal][shiftIdx];
 
-                const u8 step  = mt << 1;
-                buf[54 - step] = Metatiles_UL[m];
-                buf[55 - step] = Metatiles_UR[m];
-                buf[26 - step] = Metatiles_BL[m];
-                buf[27 - step] = Metatiles_BR[m];
-            }
-        });
+            const u8 step  = mt << 1;
+            buf[54 - step] = Metatiles_UL[m];
+            buf[55 - step] = Metatiles_UR[m];
+            buf[26 - step] = Metatiles_BL[m];
+            buf[27 - step] = Metatiles_BR[m];
+        }
     }
 
 }
