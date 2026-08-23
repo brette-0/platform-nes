@@ -110,7 +110,7 @@ namespace title {
          ui::text::DrawText(
              SIZED_OBJ(msg_title),
              {1, bandTop + 1},
-     {(viewport_mx() >> 1) - 1, 3}, chrEmpty_tile,
+     {static_cast<u8>((viewport_mx() >> 1) - 1), 3}, chrEmpty_tile,
              ui::text::Alignment::Left
          );
 
