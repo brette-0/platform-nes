@@ -79,10 +79,16 @@ CHARACTER_ROM_BEGIN(chrHUDWhitespace)
 #embed "../../chr/tiles/static/ui/hud_whitespace.chr"
 CHARACTER_ROM_END(chrHUDWhitespace, chrHUDCoin);
 
+// dedicated blank tile -- the official ' ' glyph (see charmaps.hpp). Kept
+// separate from chrFont so it isn't at the mercy of font.chr's own layout.
+CHARACTER_ROM_BEGIN(chrEmpty)
+#embed "../../chr/tiles/static/ui/empty.chr"
+CHARACTER_ROM_END(chrEmpty, chrHUDWhitespace);
+
 // world dynamic tiles -- FINAL blob. Closing it with _FINAL also emits the
 // whole cartridge's CHR ROM image: 0x2000 (8 KB) is the entire CHR ROM here,
 // which (being a single page) the PPU maps directly. A banked cartridge would
 // pass its full CHR ROM size instead and let the mapper window it in.
 CHARACTER_ROM_BEGIN(chrCoin)
 #embed "../../chr/tiles/dynamic/coin.chr"
-CHARACTER_ROM_END_FINAL(chrCoin, chrHUDWhitespace, 0x2000);
+CHARACTER_ROM_END_FINAL(chrCoin, chrEmpty, 0x2000);

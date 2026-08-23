@@ -1,4 +1,5 @@
 #include <platform-nes/mappers/mmc3.hpp>
+#include <platform-nes/video.hpp>
 
 mmc3::Register<6> mmc3::window1Control;
 mmc3::Register<7> mmc3::window2Control;
@@ -29,6 +30,36 @@ void mmc3::ScheduleScanlineIRQ(const u8 scanline, vec2<u16>) {
 void mmc3::AcknowledgeScanlineIRQ() {
     tech::poke(0xe000, 0); // $E000: disable + acknowledge pending IRQ (value ignored).
 }
+
+#if ALTERNATIVE_NAMETABLE == 1
+/**
+ * @brief Strong ::ppu::Flush override -- see that function's own doc comment
+ * (src/nes/video.cpp) for the weak/strong relationship. A four-screen board
+ * has 4 KiB of distinct physical nametable/attribute storage across
+ * $2000-$2FFF, none of it mirrored, so all 4 pages need writing where the
+ * weak default's 2-page loop relies on mirroring to cover the other two.
+ */
+void ppu::Flush(const u8 nt, const u8 at) {
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, 0x20);
+    tech::poke(raw::PPUADDR, 0x00);
+
+    for (auto page = 0; page < 4; page++) {
+        for (auto nt_hunk = 0; nt_hunk < 0xf0; nt_hunk++) {
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+            tech::poke(raw::PPUDATA, nt);
+        }
+        for (u8 at_hunk = 0; at_hunk < 0x10; at_hunk++) {
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+            tech::poke(raw::PPUDATA, at);
+        }
+    }
+}
+#endif
 
 extern "C" void _start();
 

@@ -976,6 +976,27 @@ namespace ppu {
     void WriteSingleToAttributeTable(u16 x, u16 y, u8 value);
 
     /**
+     * @brief Writes bytes produced by a provider callback into attribute memory.
+     *
+     * Equivalent to ::ppu::WriteFromBufferToAttributeTable but sources each byte
+     * from `fn(i)` instead of a preallocated buffer, mirroring how
+     * ::ppu::WriteFromProviderToNameTable relates to ::ppu::WriteFromBufferToNameTable.
+     *
+     * @p Idx is generic, so a `u8` provider binds without forcing the callback
+     * signature up to `u16`. The body differs per target, so it is defined
+     * out-of-line in each backend with explicit instantiations for `u8`/`u16`.
+     *
+     * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
+     * @param x        Tile X position.
+     * @param y        Tile Y position.
+     * @param fn       Provider returning the attribute byte to write for iteration `i`.
+     * @param amt      Number of iterations.
+     * @param polarity Non-zero for vertical writes, zero for horizontal.
+     */
+    template <typename Idx>
+    void WriteFromProviderToAttributeTable(u16 x, u16 y, u8 (*fn)(Idx), u8 amt, u8 polarity);
+
+    /**
      * @brief Flushes pending nametable and attribute-table writes to the PPU.
      * @param nt Nametable index to flush.
      * @param at Attribute-table index to flush.

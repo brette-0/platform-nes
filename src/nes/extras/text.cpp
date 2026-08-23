@@ -14,24 +14,26 @@ namespace ui::text {
                 if (*(buff + cursor) == splitter) lastWhite = cursor;
             }
 
-            last   = cursor;
-            cursor = lastWhite;
+            // ran off the end of the buffer (rather than the width limit) ->
+            // print the rest as-is instead of trimming to the last splitter
+            const u8 end = (cursor == sBuff) ? cursor : lastWhite;
 
             const u16 xpos = pos.x + (align == Alignment::Left
                 ? 0
-                : box.x >> 1
+                : (box.x - (end - last)) >> 1
             );
 
             // draw to row
             ppu::WriteFromBufferToNameTable(
                 xpos, pos.y + row,
                 buff + last,
-                cursor - last,
+                end - last,
                 0
             );
 
             row++;              // next row
-            cursor++; last++;   // bump past the leading whitespace
+            last   = end + 1;   // bump past the splitter
+            cursor = last;
         }
     }
 }

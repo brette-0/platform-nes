@@ -517,6 +517,22 @@ void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     ppu::WriteNametable(offset, value);
 }
 
+template <typename Idx>
+void WriteFromProviderToAttributeTable(
+    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt,
+    const u8 polarity
+) {
+    const u16 offset = xy_to_at_addr(x, y);
+    for (Idx i = 0; i < amt; ++i) {
+        ppu::WriteNametable(static_cast<u16>(offset + i * (polarity ? 8 : 1)), fn(i));
+    }
+}
+
+// Explicit instantiations for the provider index types in use. The body writes
+// host video RAM, so it must stay in this backend rather than the header.
+template void WriteFromProviderToAttributeTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
+
 u16 CartesianToAddress(const u16 x, const u16 y) {
     return xy_to_nt_addr(x, y);
 }

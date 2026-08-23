@@ -87,6 +87,15 @@ VIDEO_BANK void EnableRendering(const u8 ppuCtrl_, const u8 ppuMask_) {
     PPUMASK = ppuMask_;
 }
 
+// Weak default: flushes the 2 KiB of physical CIRAM every ordinary
+// (non-four-screen) mirroring mode aliases across the full $2000-$2FFF
+// nametable range. A board wired for four-screen mirroring exposes a full
+// 4 KiB of distinct physical storage instead -- no mirroring left to make 2
+// pages implicitly cover all 4 logical nametables -- so its own mapper TU
+// (see src/nes/mappers/mmc3.cpp's ALTERNATIVE_NAMETABLE build) supplies a
+// strong override that walks all 4 pages. Resolved at link time, same idiom
+// as the emu backend's ppu::ReadNametable/WriteNametable (src/emu/ppu.cpp).
+__attribute__((weak))
 VIDEO_BANK void Flush(const u8 nt, const u8 at) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, NameTables >> 8);
@@ -243,6 +252,44 @@ AI void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
     tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
     tech::poke(raw::PPUDATA, value);
 }
+
+template <typename Idx>
+__attribute__((hot))
+AI void WriteFromProviderToAttributeTable(
+    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+) {
+    const u16 offset = xy_to_at_addr(x, y);
+
+    PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
+
+    if (polarity) {
+        // AT rows for the same tile column are 8 bytes apart, so re-address per
+        // byte instead of striding via PPUCTRL/PPUDATA reads. Unlike
+        // WriteFromBufferToAttributeTable's sBuffer<=8 callers, amt here can run
+        // past 8 (e.g. title::InitTitleScreen's full-height pass), so the stride
+        // is carried through a 16-bit add rather than truncated to the low byte.
+        for (Idx i = 0; i < amt; ++i) {
+            const u16 addr = static_cast<u16>(offset + (static_cast<u16>(i) << 3));
+            tech::peek(raw::PPUSTATUS);
+            tech::poke(raw::PPUADDR, static_cast<u8>(addr >> 8));
+            tech::poke(raw::PPUADDR, static_cast<u8>(addr & 0xFF));
+            tech::poke(raw::PPUDATA, fn(i));
+        }
+        return;
+    }
+
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    for (Idx i = 0; i < amt; ++i) {
+        tech::poke(raw::PPUDATA, fn(i));
+    }
+}
+
+// Explicit instantiations for the provider index types in use. The body pokes
+// PPU registers, so it must stay in this backend rather than the header.
+template void WriteFromProviderToAttributeTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
 
 VIDEO_BANK u16 CartesianToAddress(const u16 x, const u16 y) {
     return xy_to_nt_addr(x, y);

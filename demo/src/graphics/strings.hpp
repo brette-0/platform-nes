@@ -15,4 +15,8 @@
 LEVEL_GRAPHICS inline constexpr auto msg_mary = ::tech::nes_str::encode<charmap_generic>("MARY");
 
 
-TITLE_DATA inline constexpr auto msg_title = ::tech::nes_str::encode<charmap_generic>("SUPER MARY SISTERS");
+TITLE_DATA inline constexpr auto msg_title  = ::tech::nes_str::encode<charmap_generic>("SUPER MARY SISTERS");
+TITLE_DATA inline constexpr auto msg_newGame = ::tech::nes_str::encode<charmap_generic>("NEW GAME");
+TITLE_DATA inline constexpr auto msg_continue= ::tech::nes_str::encode<charmap_generic>("CONTINUE");
+TITLE_DATA inline constexpr auto msg_options = ::tech::nes_str::encode<charmap_generic>("OPTIONS");
+TITLE_DATA inline constexpr auto msg_quit    = ::tech::nes_str::encode<charmap_generic>("QUIT");

@@ -10,7 +10,7 @@
 // constexpr (hence inline), the charmap can be included by any number of TUs
 // with no ODR/LTO trouble.
 CHARMAP(generic,                            // default char map
-    if (_c == ' ') return (u8)(chrFont_tile - 1);   // tile just before '0' is blank/space
+    if (_c == ' ') return (u8)(chrEmpty_tile);      // dedicated blank tile
     CM(0, chrFont_tile + 0x00)
     CM(1, chrFont_tile + 0x01)
     CM(2, chrFont_tile + 0x02)

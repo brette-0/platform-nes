@@ -7,6 +7,11 @@ enum class eGameModes : u8 {
     Level,  // gameplay, platforming in level
 };
 
+/** @brief Viewport width in metatiles (tiles / 2). */
+constexpr u8 viewport_mx() { return video::viewport_tx() >> 1; }
+/** @brief Viewport height in metatiles (tiles / 2). */
+constexpr u8 viewport_my() { return video::viewport_ty() >> 1; }
+
 extern atomic eGameModes gameMode;
 
 // Mode-dispatched NMI/IRQ entry points: main.cpp's nmiTrampoline/irqTrampoline

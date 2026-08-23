@@ -13,4 +13,4 @@ extern const u8 maryColors[3];
 
 
 // title screen colours
-extern const u8 titleScreenColours[16];
+extern const u8 titleScreenColours[4];

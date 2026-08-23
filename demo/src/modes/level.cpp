@@ -213,8 +213,8 @@ namespace level {
             ppu::WriteFromBufferToAttributeTable(i & ~3, 2, AttributeBuffer, 8, 1);
         }
 
-        edgeRAbs = (1 + viewport_mx()) * levelHeight;
-        edgeL = { TileData };
+        edgeRAbs    = (1 + viewport_mx()) * levelHeight;
+        edgeL    = { TileData };
         dynEdgeL = { DynLengths, DynData, 0 }; // dyn backward edge, lockstep w/ edgeL
 
         ppu::SetScroll(0, 0);
