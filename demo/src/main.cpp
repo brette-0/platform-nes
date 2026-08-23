@@ -1,5 +1,6 @@
 #include <platform-nes>
 #include <platform-nes/apu.hpp>
+#include <platform-nes/mappers/mmc3.hpp>
 #include "header.hpp"
 #include "main.hpp"
 
@@ -11,6 +12,8 @@
 
 // ReSharper disable once CppUseAuto
 atomic eGameModes gameMode = eGameModes::Title;
+
+SYSMEM oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
 
 void (*pNMI)();
 void (*pIRQ)();

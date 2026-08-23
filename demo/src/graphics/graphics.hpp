@@ -85,10 +85,15 @@ CHARACTER_ROM_BEGIN(chrEmpty)
 #embed "../../chr/tiles/static/ui/empty.chr"
 CHARACTER_ROM_END(chrEmpty, chrHUDWhitespace);
 
+// menu selection cursor (title screen)
+CHARACTER_ROM_BEGIN(chrArrow)
+#embed "../../chr/tiles/static/ui/Arrow.chr"
+CHARACTER_ROM_END(chrArrow, chrEmpty);
+
 // world dynamic tiles -- FINAL blob. Closing it with _FINAL also emits the
 // whole cartridge's CHR ROM image: 0x2000 (8 KB) is the entire CHR ROM here,
 // which (being a single page) the PPU maps directly. A banked cartridge would
 // pass its full CHR ROM size instead and let the mapper window it in.
 CHARACTER_ROM_BEGIN(chrCoin)
 #embed "../../chr/tiles/dynamic/coin.chr"
-CHARACTER_ROM_END_FINAL(chrCoin, chrEmpty, 0x2000);
+CHARACTER_ROM_END_FINAL(chrCoin, chrArrow, 0x2000);

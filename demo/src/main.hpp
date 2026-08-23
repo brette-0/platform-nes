@@ -24,3 +24,8 @@ extern atomic eGameModes gameMode;
 // uninitialized (zero) so both land in BSS rather than .data.
 extern void (*pNMI)();
 extern void (*pIRQ)();
+
+// Shared OAM staging buffer -- every mode (title, level, ...) refreshes its
+// own sprites into the same 64-sprite table rather than each owning one, so
+// it lives here instead of any one mode's header.
+extern oam::sprite_t OAMBuffer[64];

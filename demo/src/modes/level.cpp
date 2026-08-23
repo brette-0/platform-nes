@@ -22,8 +22,6 @@ using enum level::eLevelStreamCommands;
 namespace level {
     bool paused;
 
-    static volatile bool nmi_done;
-
     u8 port1;
     u8 port2;
 
@@ -83,8 +81,6 @@ namespace level {
     // it each frame because the PPU scroll register is integer-pixel only.
     u16 cameraX;
 
-    oam::sprite_t OAMBuffer[64] __attribute__((aligned(256)));
-
     atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
     u8 TileBuffer[56];
 
@@ -116,16 +112,8 @@ namespace level {
         // generation is already running by this point (title leaves
         // PPUCTRL's GEN_NMI bit set -- it only clears PPUMASK on exit), and
         // pNMI now points at nmi_handler (just above), so this is safe the
-        // instant it's reached. Portable primitive, not a raw NES register
-        // poll: ::WaitForPresent is the cross-platform half (a no-op stub
-        // on NES specifically -- see its own TODO), nmi_done is NES's own
-        // concrete wait, same pattern main()'s per-frame loop already uses
-        // below.
+        // instant it's reached.
         video::WaitForPresent();
-#if TARGET_NES
-        nmi_done = false;
-        while (!nmi_done) {}
-#endif
 
         mmc3::SwitchCHRBank(mmc3::chr0Control, 4);
         mmc3::SwitchCHRBank(mmc3::chr1Control, 5);
@@ -156,9 +144,11 @@ namespace level {
         // Provider calls (SpriteY/SpriteX) don't touch msMary at all -- they
         // stay outside, ambient window 2 unchanged.
         CallLevelGraphics([] {
-            oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile, msMary, kMarySprites);
+            oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile,       msMary, kMarySprites);
+            oam::PopulateFromBuffer(OAMBuffer, 1, oam::attributes, msMary, kMarySprites);
 #ifdef PLAYER2_SUPPORTED
-            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::tile, msMary2, kMarySprites);
+            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::tile,       msMary2, kMarySprites);
+            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::attributes, msMary2, kMarySprites);
 #endif
         });
         oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY,  kMarySprites);
@@ -184,10 +174,6 @@ namespace level {
         // is currently scanning. Fresh sync immediately before the write
         // that actually needs it, not just once at entry.
         video::WaitForPresent();
-#if TARGET_NES
-        nmi_done = false;
-        while (!nmi_done) {}
-#endif
         CallLevelGraphics([] {
             ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
             ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
@@ -254,18 +240,13 @@ namespace level {
         // above ran as ordinary sequential code with nothing synced to the
         // PPU's frame boundary, so without this the write lands wherever
         // in the current scanline execution happens to reach here --
-        // rendering can pop on mid-frame, a visible one-frame tear. Same
-        // portable nmi_done wait as the top of this function (and the
-        // per-frame loop below) -- safe here specifically because NMI
-        // generation is already running (inherited from title, which never
-        // clears it) and pNMI has pointed at nmi_handler since this
-        // function's own first line, not because ::EnableRendering has run
-        // yet (it hasn't -- that's the next line).
+        // rendering can pop on mid-frame, a visible one-frame tear. Safe
+        // here specifically because NMI generation is already running
+        // (inherited from title, which never clears it) and pNMI has
+        // pointed at nmi_handler since this function's own first line, not
+        // because ::EnableRendering has run yet (it hasn't -- that's the
+        // next line).
         video::WaitForPresent();
-#if TARGET_NES
-        nmi_done = false;
-        while (!nmi_done) {}
-#endif
         ppu::EnableRendering(ppu::ctrl::SPRITE_SIZE | ppu::ctrl::SPRITE_ADDR, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
         apu::DisableFrameIRQ();
@@ -301,11 +282,6 @@ namespace level {
             ppu::SetColorPriority(0);
 
             video::WaitForPresent();
-
-#if TARGET_NES
-            nmi_done = false;
-            while (!nmi_done) {}
-#endif
         }
     }
 
@@ -346,8 +322,6 @@ namespace level {
 
         ppu::SetColorPriority(0);
         mmc3::ScheduleScanlineIRQ(kHudSplitMMC3, {0, kHudSplitRow});
-
-        nmi_done = true;
     }
 
     // ::FIXED for the same reason as nmi_handler, and it calls ApplyHudSplit

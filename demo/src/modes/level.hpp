@@ -28,8 +28,6 @@ namespace level {
 
     extern atomic u16 lastXWorldSpace;
 
-    extern oam::sprite_t OAMBuffer[64];
-
     extern u8 TileBuffer[56];
 
     extern Player player1;

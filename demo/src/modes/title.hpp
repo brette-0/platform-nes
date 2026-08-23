@@ -10,4 +10,18 @@ namespace title {
 
     void InitTitleScreen();
     u8 MenuAttributesProvider(u8 i);
+
+    enum titleOptions : u8 {
+        NewGame = 0,
+        Continue = 1,
+        Options  = 2,
+#if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
+        Quit     = 3,
+        End      = Quit
+#else
+        End      = Options
+#endif
+    };
+
+    extern atomic u8 menuOption;
 }

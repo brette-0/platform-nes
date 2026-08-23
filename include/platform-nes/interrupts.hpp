@@ -86,6 +86,17 @@ extern bool           irqPendingValid;
 namespace irq {
 inline void EnableInterrupts()  { __asm__ volatile ("cli"); }
 inline void DisableInterrupts() { __asm__ volatile ("sei"); }
+
+/**
+ * @brief Set true by every ::NMI vector right after its body returns; cleared
+ *        by ::video::WaitForPresent once it's done spinning on it.
+ *
+ * Lets ::video::WaitForPresent give NES the same "block until the next
+ * VBlank has been presented" semantics it already has on desktop, without
+ * every mode reimplementing its own done-flag and its own
+ * `#ifdef TARGET_NES` spin-wait around a plain ::video::WaitForPresent call.
+ */
+extern volatile bool nmi_done;
 } // namespace irq
 
 /**
@@ -114,11 +125,19 @@ inline void DisableInterrupts() { __asm__ volatile ("sei"); }
  * @note Unverified whether llvm-mos drops the RTI epilogue for `[[noreturn]]`.
  *       For a guaranteed empty epilogue use ::NAKED_NMI / ::NAKED_IRQ.
  * @note The C++ function is `nmi_vector`; `asm("nmi")` restores the symbol.
+ * @note The body supplied after this macro doesn't become `nmi_vector`
+ *       itself -- it becomes a `static` function (`nmi_body`) that the real
+ *       vector calls before unconditionally setting ::irq::nmi_done, so every
+ *       project's NMI marks the flag for free (see ::irq::nmi_done). The
+ *       same `__VA_ARGS__` placement attributes apply to both, so a body too
+ *       large to inline into `nmi_vector` still lands in the guaranteed bank.
  */
 #define NMI(...)                                                          \
 ASM_LINKAGE __VA_ARGS__ void nmi_vector() asm("nmi");                     \
+static __VA_ARGS__ void nmi_body();                                       \
 ASM_LINKAGE __VA_ARGS__ __attribute__((used, interrupt_norecurse))        \
-void nmi_vector()
+void nmi_vector() { nmi_body(); irq::nmi_done = true; }                   \
+static __VA_ARGS__ void nmi_body()
 
 /**
  * @brief Declares the IRQ handler on NES builds.

@@ -6,8 +6,15 @@
 #include "platform-nes/mappers/mmc3.hpp"
 
 namespace title {
+    // ReSharper disable once CppUseAuto
+    atomic u8 menuOption = NewGame;
+    // ReSharper disable once CppUseAuto
+    static atomic u8 lastMenuOption = NewGame;
+    static oam::oam_t Clear(u16 _);
+
 
     TITLE NI void main() {
+        oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
         pIRQ = irq_handler;
         pNMI = nmi_handler;
 
@@ -21,22 +28,67 @@ namespace title {
         ppu::pal::WriteFromBuffer(0, titleScreenColours, 4);
         InitTitleScreen();
         ppu::SetScroll(0, 0xff);
-        ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::GEN_NMI, ppu::mask::BG | ppu::mask::BG_L);
+        ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::GEN_NMI, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
-        u8 port1, port2;
+        u8 port1, port2, prevInputs = 0;
 
-        while (~(port1 | port2) & input::START) {
+        while (true) {
             input::PollControllers(&port1, &port2);
+
+            const auto inputs  = port1 | port2;
+            const auto pressed = inputs & static_cast<u8>(~prevInputs); // strobe: only the frame a button goes down
+            prevInputs = inputs;
+
+            if (pressed & (input::UP | input::DOWN)) {
+                menuOption -= (pressed & input::UP)   == input::UP;
+                if (menuOption > End) menuOption = 0;
+                menuOption += (pressed & input::DOWN) == input::DOWN;
+                if (menuOption > End) menuOption = End;
+                video::WaitForPresent();
+                continue;
+            }
+
+            if (~pressed & input::A) continue;
+            // A is pressed, proceed with option
+
+            switch (menuOption) {
+                case NewGame:
+                    break;
+
+                case Continue:
+                    continue;
+
+                case Options:
+                    continue;
+
+#if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
+                case Quit:
+                    quit = true;
+                    return;
+#endif
+            }
+            break;
         }
 
-        irq::EnableInterrupts();
-        mmc3::ScheduleScanlineIRQ(0, {0, 0});
-        while (gameMode == eGameModes::Title) {}
+        video::WaitForPresent();
         ppu::PPUMASK = 0;
-        irq::DisableInterrupts();
+        gameMode = eGameModes::Level;
     }
 
     void nmi_handler() {
+        const auto bandTop = (((viewport_my() + 1) >> 1) - 2) << 2;
+        const u16 menuCol  = (viewport_mx() << 1) - 1 - sizeof(msg_continue);
+
+        // write chrEmpty_tile where arrow was
+        ppu::WriteSingleToNameTable(menuCol - 2, bandTop + 1 + lastMenuOption, chrEmpty_tile);
+        // write chrArrow_tile where arrow now is
+        ppu::WriteSingleToNameTable(menuCol - 2, bandTop + 1 + menuOption, chrArrow_tile);
+        lastMenuOption = menuOption;
+
+        // re-DMA OAM every frame -- OAM decays if it isn't refreshed
+        // regularly, and now that sprites are enabled that matters here too.
+        oam::RefreshSprites(OAMBuffer);
+
         ppu::SetScroll(0, 0);
     }
 
@@ -47,7 +99,7 @@ namespace title {
 
     void InitTitleScreen() {
         // write attributes horizontally (palette 0) for bottom most six rows of screen
-        constexpr auto bandTop = (((viewport_my() + 1) >> 1) - 2) << 2;
+        const auto bandTop = (((viewport_my() + 1) >> 1) - 2) << 2;
         for (auto r = bandTop; r < viewport_my() << 1; r += 4) {
             ppu::WriteFromProviderToAttributeTable(
                 0, r,
@@ -64,15 +116,25 @@ namespace title {
 
         // menu items -- all start at the same column, with a 1-tile gap from
         // the right edge for the longest entry (msg_newGame/msg_continue).
-        constexpr u16 menuCol = (viewport_mx() << 1) - 1 - sizeof(msg_continue);
+        const u16 menuCol = (viewport_mx() << 1) - 1 - sizeof(msg_continue);
+
+        // selection cursor -- starts on New Game, one tile of gap before the text.
+        ppu::WriteSingleToNameTable(menuCol - 2, bandTop + 1, chrArrow_tile);
 
         ppu::WriteFromBufferToNameTable(menuCol, bandTop + 1, SIZED_OBJ(msg_newGame), 0);
         ppu::WriteFromBufferToNameTable(menuCol, bandTop + 2, SIZED_OBJ(msg_continue), 0);
         ppu::WriteFromBufferToNameTable(menuCol, bandTop + 3, SIZED_OBJ(msg_options), 0);
+#if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
+        // consoles have no OS to quit back to -- PC targets only.
         ppu::WriteFromBufferToNameTable(menuCol, bandTop + 4, SIZED_OBJ(msg_quit), 0);
+#endif
     }
 
     u8 MenuAttributesProvider(const u8 i) {
         return 0x00;
+    }
+
+    static oam::oam_t Clear(const u16) {
+        return 0xf0;
     }
 }

@@ -1,5 +1,6 @@
 #include <platform-nes/video.hpp>
 #include <platform-nes/technology.hpp>
+#include <platform-nes/interrupts.hpp>
 
 // WHERE THIS MODULE'S CODE GOES -- the consuming project's choice, supplied as
 // PLATFORM_NES_VIDEO_SECTION. Optional, unlike audio's: unset means the default,
@@ -71,11 +72,14 @@ static u16 xy_to_at_addr(const u16 x, const u16 y) {
 
 namespace video {
 
-// TODO: This is a bad name, it does not actually wait on NES and shouldn't for NES multithreading
-//       a true 'wait for present' on NES would infinite loop, but won't return to main thread
-//       without special return tech which we don't have yet
+// Spins on ::irq::nmi_done, which every ::NMI vector sets true right after
+// its body returns (see that macro's own doc comment), then clears it --
+// so this blocks until exactly one more NMI has run, giving NES the same
+// "wait for the next VBlank to be presented" semantics ::WaitForPresent
+// already has on desktop, with no per-mode done-flag required.
 VIDEO_BANK void WaitForPresent() {
-
+    while (!irq::nmi_done) {}
+    irq::nmi_done = false;
 }
 
 }   // namespace video
