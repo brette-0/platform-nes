@@ -97,13 +97,25 @@ static constexpr u32 nes_rgb[64] = {
 };
 
 // Background cells gathered per band, bucketed by palette so each palette is one
-// texture bind + a run of same-atlas draws. A band is at most 33x32 cells.
+// texture bind + a run of same-atlas draws. A single band can cover the WHOLE
+// screen (no mid-frame IRQ split, e.g. the title screen) and, worse, can land
+// every one of its cells in the SAME palette bucket -- title's
+// ppu::Flush(chrEmpty_tile, 0xff) leaves most of the nametable at attribute
+// 0xFF (palette 3), so that one bucket alone must hold a full band's worth of
+// cells, not band_cells/4. Each bucket therefore needs capacity for
+// (viewport width in tiles + 1) x (viewport height in tiles + 1) cells -- the
+// +1s cover the partial edge tile a non-zero fine scroll adds on each axis.
+// A too-small bound here overflows bg_bucket[3][MAX_CELLS] straight into
+// adjacent static data (the atlas handles, palette_cache, ...), which reads
+// as a mostly-blank screen with corrupted content and can crash much later,
+// e.g. on shutdown when the corrupted state is finally touched again.
+//
 // Each cell carries its clip against both the band (vertical: r0/h/vy0) and the
 // NES 256-wide window (horizontal: c0/w/sx) so partial edge or seam tiles cut
 // clean -- no rotated-framebuffer scissor needed. sx/vy0 are the clipped NES
 // top-left, c0/r0 the first visible tile column/row, w/h the visible size.
 struct Cell { u16 tile; i16 sx; i16 vy0; u8 c0; u8 w; u8 r0; u8 h; };
-static constexpr int MAX_CELLS = 33 * 32;
+static constexpr int MAX_CELLS = (video::viewport_tx() + 1) * (video::viewport_ty() + 1);
 static Cell  bg_bucket[4][MAX_CELLS];
 static int   bg_count[4];
 

@@ -107,10 +107,17 @@ namespace title {
     void InitTitleScreen() {
         // write attributes horizontally (palette 0) for bottom most six rows of screen
         const auto bandTop = (((viewport_my() + 1) >> 1) - 2) << 2;
+        // Ceiling-divide, not viewport_mx()>>1 (== viewport_tx()>>2, floor):
+        // every other backend's viewport width is a multiple of 4 tiles, but
+        // the 3DS's fixed 50-tile viewport isn't (50/4 = 12.5) -- floor
+        // division under-covers by one cell, leaving the trailing partial
+        // attribute column (the last 2 tile-columns) at Flush's default
+        // palette 3 instead of this band's palette 0.
+        const u8 attrCells = static_cast<u8>((video::viewport_tx() + 3) >> 2);
         for (auto r = bandTop; r < viewport_my() << 1; r += 4) {
             ppu::WriteFromProviderToAttributeTable(
                 0, r,
-                MenuAttributesProvider, viewport_mx() >> 1, 0
+                MenuAttributesProvider, attrCells, 0
             );
         }
 

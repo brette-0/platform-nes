@@ -113,9 +113,27 @@ static constexpr u32 nes_rgb[64] = {
 };
 
 // Background cells gathered per band, bucketed by palette so each palette is a
-// single TLUT load + GX_Begin batch. A band is at most 33x31 cells.
+// single TLUT load + GX_Begin batch. A single band can cover the WHOLE screen
+// (no mid-frame IRQ split, e.g. the title screen) and, worse, can land every
+// one of its cells in the SAME palette bucket -- title's
+// ppu::Flush(chrEmpty_tile, 0xff) leaves most of the nametable at attribute
+// 0xFF (palette 3), so that one bucket alone must hold a full band's worth of
+// cells, not band_cells/4. Each bucket therefore needs capacity for
+// (viewport width in tiles + 1) x (viewport height in tiles + 1) cells -- the
+// +1s cover the partial edge tile a non-zero fine scroll adds on each axis.
+// viewport_tx() is runtime here (ogc_world_tx, video.hpp), so this can't be
+// sized from it directly; its own formula -- ((fbWidth/ogc_scale)>>3)&~3,
+// fbWidth<=640, ogc_scale>=1 -- caps out at 80 tiles wide (a 240p/double-
+// strike TV mode forces ogc_scale down to 1), height is always the fixed 30.
+// A too-small bound overflows bg_bucket[3][MAX_CELLS] straight into adjacent
+// static data (TLUTs, chr_atlas state, ...), which reads as a mostly-blank/
+// corrupted screen and can crash much later when that state is next touched
+// -- this is exactly what happened on the 3DS backend's equivalent buffer,
+// whose narrower fixed 33x32 bound this one used to share, before its
+// viewport (also wider than 32 tiles) overflowed it on the very same title
+// screen. Sized for the 80x30 extreme rather than the common ~40x30 case.
 struct Cell { u16 atlas; i16 sx; i16 sy; };
-static constexpr int MAX_CELLS = 33 * 32;
+static constexpr int MAX_CELLS = 81 * 31;
 static Cell  bg_bucket[4][MAX_CELLS];
 static int   bg_count[4];
 
