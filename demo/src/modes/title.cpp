@@ -44,33 +44,40 @@ namespace title {
                 if (menuOption > End) menuOption = 0;
                 menuOption += (pressed & input::DOWN) == input::DOWN;
                 if (menuOption > End) menuOption = End;
-                video::WaitForPresent();
-                continue;
             }
 
-            if (~pressed & input::A) continue;
-            // A is pressed, proceed with option
+            // Every iteration reaches WaitForPresent exactly once, regardless
+            // of which branch above ran -- on SDL3 that's what pumps the OS
+            // event queue, paces to 60Hz, and presents the frame. Skipping it
+            // on the idle (no input) path -- as this loop used to -- leaves
+            // desktop targets spinning with no event pump, which reads to the
+            // OS as a hung window. NES/console backends don't need the pump
+            // but still want the one-call-per-frame NMI/present pacing.
+            bool proceed = false;
+            if (pressed & input::A) {
+                switch (menuOption) {
+                    case NewGame:
+                        proceed = true;
+                        break;
 
-            switch (menuOption) {
-                case NewGame:
-                    break;
-
-                case Continue:
-                    continue;
-
-                case Options:
-                    continue;
+                    case Continue:
+                    case Options:
+                        break;
 
 #if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
-                case Quit:
-                    quit = true;
-                    return;
+                    case Quit:
+                        quit = true;
+                        return;
 #endif
+
+                    default: ;
+                }
             }
-            break;
+
+            video::WaitForPresent();
+            if (proceed) break;
         }
 
-        video::WaitForPresent();
         ppu::PPUMASK = 0;
         gameMode = eGameModes::Level;
     }

@@ -454,9 +454,19 @@ void WriteFromBufferToNameTable(
 ) {
     ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
-    const u16 offset = xy_to_nt_addr(x, y);
+    const bool vertical = ppu::PPUCTRL & ppu::ctrl::POLARITY;
+    // Re-derive the full page-aware address per tile rather than walking a
+    // single precomputed offset by a flat stride: a run that crosses a
+    // 32-tile nametable page boundary (row for horizontal writes, or the
+    // 30-tile column boundary for vertical ones) needs to land in the next
+    // page at the same row/col, not fall through into the next row/col of
+    // the SAME page the way raw offset+i arithmetic would. Only visible on
+    // viewports wider/taller than one page (e.g. OGC's runtime ~40-tile
+    // width), which is why this stayed latent on the fixed-32-wide NES.
     for (u8 i = 0; i < sBuffer; i++) {
-        ppu::WriteNametable(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), source[i]);
+        const u16 addr = vertical ? xy_to_nt_addr(x, static_cast<u16>(y + i))
+                                   : xy_to_nt_addr(static_cast<u16>(x + i), y);
+        ppu::WriteNametable(addr, source[i]);
     }
 }
 
@@ -490,10 +500,14 @@ void WriteFromProviderToNameTable(
 ) {
     ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
+    const bool vertical = ppu::PPUCTRL & ppu::ctrl::POLARITY;
 
-    const u16 offset = xy_to_nt_addr(x, y);
+    // See WriteFromBufferToNameTable above: page-aware address per tile, not
+    // a flat stride off one precomputed offset.
     for (Idx i = 0; i < amt; ++i) {
-        ppu::WriteNametable(static_cast<u16>(offset + i * (ppu::PPUCTRL & ppu::ctrl::POLARITY ? 32 : 1)), fn(i));
+        const u16 addr = vertical ? xy_to_nt_addr(x, static_cast<u16>(y + i))
+                                   : xy_to_nt_addr(static_cast<u16>(x + i), y);
+        ppu::WriteNametable(addr, fn(i));
     }
 }
 
@@ -506,9 +520,24 @@ void WriteFromBufferToAttributeTable(
     const u16 x, const u16 y, const u8* source,
     const u8 sBuffer, const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(x, y);
-    for (u8 i = 0; i < sBuffer; i++) {
-        ppu::WriteNametable(static_cast<u16>(offset + i * (polarity ? 8 : 1)), source[i]);
+    // Horizontal (polarity 0) runs can cross an nt_h page on any viewport
+    // wider than 32 tiles (OGC/Switch/WiiU/PSP), so those need the full
+    // page-aware address recomputed per cell -- see WriteFromBufferToNameTable
+    // above. Vertical (polarity 1) runs never cross a page: every backend's
+    // viewport is <=30 tiles tall (one page), so nt_v is always 0 -- walking
+    // the flat 8-byte row-bucket stride off one base address is correct and
+    // avoids reintroducing xy_to_at_addr's y%30 wraparound, which trips
+    // incorrectly for a run whose start row isn't itself a multiple of 4
+    // (e.g. level.cpp's ground column starts at y=2).
+    if (polarity) {
+        const u16 offset = xy_to_at_addr(x, y);
+        for (u8 i = 0; i < sBuffer; i++) {
+            ppu::WriteNametable(static_cast<u16>(offset + i * 8), source[i]);
+        }
+    } else {
+        for (u8 i = 0; i < sBuffer; i++) {
+            ppu::WriteNametable(xy_to_at_addr(static_cast<u16>(x + i * 4), y), source[i]);
+        }
     }
 }
 
@@ -522,9 +551,19 @@ void WriteFromProviderToAttributeTable(
     const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt,
     const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(x, y);
+    // See WriteFromBufferToAttributeTable above: vertical stays a flat stride
+    // off one base address (nt_v is always 0, never crosses a page);
+    // horizontal recomputes the page-aware address per cell.
+    if (polarity) {
+        const u16 offset = xy_to_at_addr(x, y);
+        for (Idx i = 0; i < amt; ++i) {
+            ppu::WriteNametable(static_cast<u16>(offset + i * 8), fn(i));
+        }
+        return;
+    }
     for (Idx i = 0; i < amt; ++i) {
-        ppu::WriteNametable(static_cast<u16>(offset + i * (polarity ? 8 : 1)), fn(i));
+        const u16 addr = xy_to_at_addr(static_cast<u16>(x + i * 4), y);
+        ppu::WriteNametable(addr, fn(i));
     }
 }
 
