@@ -211,9 +211,14 @@ namespace level {
         // while running, so it must still be mapped when audio_tag's block
         // runs -- entering audio_data_tag from inside audio_tag's own block
         // is what guarantees that ordering.
+        //
+        // audio::Init itself is NOT called here: it's one-shot device/asset
+        // setup (on native backends it decodes and buffers the whole music
+        // + SFX library), not per-level work. Calling it on every level entry
+        // re-decoded and re-buffered all of that from scratch each time --
+        // see RESET in main.cpp, which now runs it once at boot instead.
         mmc3::CallInBlock<audio_tag>([] {
             mmc3::CallInBlock<audio_data_tag>([] {
-                audio::Init(REGION);
                 audio::TrackPlay(0);
             });
         });
