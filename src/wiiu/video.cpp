@@ -58,6 +58,18 @@ static void present_frame() {
         // pitch is in bytes; GenerateFrame wants a stride in pixels. For a
         // freshly created streaming texture pitch == VP_W*4, but honour it.
         emu::GenerateFrame(static_cast<u32 *>(pixels), pitch / 4);
+
+        // Cemu (Vulkan backend) appears to skip presenting a frame whose
+        // composited pixels are bit-identical to the last one it actually
+        // pushed -- harmless for a genuinely static scene, but can drop a
+        // real transition if its "last frame" reference is stale by one,
+        // wedging the display until forced different again. Flip the LSB
+        // of one pixel every frame so no two consecutive frames are ever
+        // bit-identical; the change is below perceptible contrast.
+        static u32 parity = 0;
+        parity ^= 1;
+        static_cast<u32 *>(pixels)[0] ^= parity;
+
         SDL_UnlockTexture(frame);
     }
 

@@ -80,3 +80,6 @@ docs/doxygen-advanced/
 # wrangler's local OAuth/cache state. Neither belongs in the repo.
 dist/
 .wrangler/
+
+# Scratch/local-only notes (investigation write-ups, etc.) that shouldn't be committed.
+.ignore/
