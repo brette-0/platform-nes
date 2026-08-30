@@ -75,6 +75,7 @@ namespace title {
             }
 
             video::WaitForPresent();
+            if (quit) return;
             if (proceed) break;
         }
 
