@@ -50,7 +50,7 @@ if [[ -z "$PLATFORM" ]]; then
 fi
 
 PRESET="${PLATFORM}-${BUILD_TYPE}"
-BUILD_DIR="${ROOT}/cmake-build-${PRESET}"
+BUILD_DIR="${ROOT}/builds/cmake-build-${PRESET}"
 
 if [[ "$CLEAN" -eq 1 && -d "$BUILD_DIR" ]]; then
     echo ">> cleaning ${BUILD_DIR}"

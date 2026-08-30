@@ -60,7 +60,10 @@ CMakeUserPresets.json
 .env
 
 # CMake build trees. Releases are produced by GitHub Actions;
-# local build directories should never be committed.
+# local build directories should never be committed. Non-CI local builds
+# live under builds/ (see CMakePresets.json); CI builds still build in the
+# repo root as cmake-build-ci-*/.
+builds/
 cmake-build-*/
 build/
 build-*/

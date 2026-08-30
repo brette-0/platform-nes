@@ -14,7 +14,8 @@
 #   PRESET=linux-debug docker compose run --rm build-linux          # bash
 #   $env:PRESET="linux-debug"; docker compose run --rm build-linux  # PowerShell
 #
-# Output is written to ./cmake-build-<preset-name> in the repository root.
+# Output is written to ./cmake-build-ci-<preset-name> in the repository root
+# (kept out of builds/, which is reserved for non-CI local/IDE build trees).
 # These are the same commands CI runs (.github/workflows/ci.yml), so the
 # Linux and NES jobs reproduce locally byte-for-byte (also via `act -j ...`).
 #

@@ -375,7 +375,7 @@ jobs:
 
       - name: Build demo
         run: |
-          cmake --preset mac-release
+          cmake --preset mac-release -B cmake-build-mac-release
           cmake --build cmake-build-mac-release -j"$(sysctl -n hw.ncpu)"
 
       - uses: actions/upload-artifact@v7
@@ -411,7 +411,7 @@ jobs:
       - name: Build demo
         shell: cmd
         run: |
-          cmake --preset win-release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          cmake --preset win-release -B cmake-build-win-release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           cmake --build cmake-build-win-release -j
 
       - uses: actions/upload-artifact@v7

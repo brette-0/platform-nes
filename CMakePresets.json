@@ -6,7 +6,7 @@
       "name": "_base",
       "hidden": true,
       "generator": "Ninja",
-      "binaryDir": "${sourceDir}/cmake-build-${presetName}"
+      "binaryDir": "${sourceDir}/builds/cmake-build-${presetName}"
     },
     {
       "name": "nes-release",
