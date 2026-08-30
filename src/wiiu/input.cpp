@@ -45,6 +45,21 @@ static u8 read_pad(SDL_GameController *gc) {
 
 void input::PollControllers(u8 *port1, u8 *port2) {
     SDL_GameControllerUpdate();
-    *port1 = read_pad(pads[0]);
-    *port2 = read_pad(pads[1]);
+    // TEMP DIAGNOSTIC: SDL enumeration order does not reliably put the
+    // controller actually in use into slot 0 -- a second, idle/phantom
+    // SDL_GameController object (real second controller, or a wiiu-sdl2
+    // enumeration artifact) can occupy pads[0] while the pad you're actually
+    // pressing lands in pads[1], silently driving player2 (no camera
+    // coupling) instead of player1 (drives cameraX). Fix that by ACTIVITY,
+    // not slot: whichever pad has a nonzero reading this frame drives port1.
+    // If both are active at once, fall back to slot order (real 2P co-op).
+    const u8 r0 = read_pad(pads[0]);
+    const u8 r1 = read_pad(pads[1]);
+    if (r0 && !r1) {
+        *port1 = r0; *port2 = 0;
+    } else if (r1 && !r0) {
+        *port1 = r1; *port2 = 0;
+    } else {
+        *port1 = r0; *port2 = r1;
+    }
 }
