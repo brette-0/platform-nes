@@ -8,8 +8,8 @@ LEVEL_GRAPHICS const u8 BGColours[16] = {
     0x20, 0x07, 0x0c, 0x0e,
 };
 
-TITLE const u8 titleScreenColours[4] = {
-    0x0e, 0x30, 0x30, 0x30
+TITLE const u8 titleScreenColours[3] = {
+    0x0f, 0x30, 0x30
 };
 
 LEVEL_GRAPHICS const u8 maryColors[3] = {0x07, 0x26, 0x04};

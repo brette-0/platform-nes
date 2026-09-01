@@ -12,5 +12,8 @@ extern const u8 BGColours[16];
 extern const u8 maryColors[3];
 
 
-// title screen colours
-extern const u8 titleScreenColours[4];
+// Title screen text colours 1-3 (BG palette 3). No colour-0 entry here --
+// colour 0 mirrors the shared $3F00 backdrop, which the level's own
+// BGColours owns (see title.cpp's DrawLevelPreview) -- the title screen
+// itself never decides transparency/backdrop.
+extern const u8 titleScreenColours[3];

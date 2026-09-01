@@ -87,7 +87,7 @@ CHARACTER_ROM_END(chrEmpty, chrHUDWhitespace);
 
 // menu selection cursor (title screen)
 CHARACTER_ROM_BEGIN(chrArrow)
-#embed "../../chr/tiles/static/ui/Arrow.chr"
+#embed "../../chr/tiles/static/ui/arrow.chr"
 CHARACTER_ROM_END(chrArrow, chrEmpty);
 
 // world dynamic tiles -- FINAL blob. Closing it with _FINAL also emits the
