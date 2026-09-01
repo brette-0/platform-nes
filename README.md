@@ -42,9 +42,9 @@ Which will demonstrate how you can easily begin using this project.
 - Windows
 - Mac
 - Linux
-- Web Assembly
 
 >  *performance issues have been found on GBA and PSP  
+>  Web Assembly support is disabled pending a rewrite
 
 ## Supported Cartridges
 - NROM
@@ -66,7 +66,7 @@ or in the case of more modern targets save files with paths managed by the devel
 
 A simple means to support online over LAN or direct IP server connection!
 
-## Minimum Spec (Windows/Mac/Linux/Web)
+## Minimum Spec (Windows/Mac/Linux)
 
 On the SDL3 targets, the per-tick cost is the shared game logic plus the software PPU compositor
 (`src/emu/ppu.cpp`) writing a real frame every 60Hz, independent of display refresh. That workload needs an

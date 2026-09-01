@@ -114,28 +114,6 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
     },
     {
-      "name": "web-release",
-      "inherits": "_base",
-      "displayName": "Web (Release)",
-      "description": "WebAssembly build via Emscripten. Requires the emsdk installed and the EMSDK env var set (e.g. by sourcing emsdk_env.sh); the toolchain file ports SDL3 to the browser. The blocking main loop runs under -sASYNCIFY and the demo's tracks/sfx are baked into MEMFS. Output is demo.html + demo.js + demo.wasm + demo.data; serve over http and open demo.html.",
-      "cacheVariables": {
-        "TARGET_PLATFORM": "web",
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_TOOLCHAIN_FILE": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
-      },
-      "condition": {
-        "type": "notEquals",
-        "lhs": "$env{EMSDK}",
-        "rhs": ""
-      }
-    },
-    {
-      "name": "web-debug",
-      "inherits": "web-release",
-      "displayName": "Web (Debug)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
-    },
-    {
       "name": "ctr-release",
       "inherits": "_base",
       "displayName": "3DS (Release)",

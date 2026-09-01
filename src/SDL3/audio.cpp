@@ -2,18 +2,6 @@
 #include <platform-nes/technology.hpp>
 #include <SDL3/SDL.h>
 
-// The web build cannot ship the 47MB pc_audio.wav -- Cloudflare Pages enforces
-// a 25MB/file limit on the MEMFS blob (demo.data). Instead CMake encodes a ~3MB
-// Vorbis pc_audio.ogg for the web bundle, and stb_vorbis decodes it to S16 PCM
-// here at load time. Desktop builds are untouched: they keep loading the full
-// WAV via SDL_LoadWAV (see LoadTrack below). stb_vorbis.c is header+impl in one
-// translation unit; pull it in only on Emscripten so desktop never compiles it.
-#ifdef __EMSCRIPTEN__
-#define STB_VORBIS_NO_PUSHDATA_API
-#define STB_VORBIS_NO_STDIO
-#include <stb_vorbis.c>
-#endif
-
 typedef struct {
     u32 offset;
     u32 length;
@@ -62,44 +50,10 @@ static u32 track_lengths[256];
 #define BYTES_PER_SECOND (48000 * 2 * sizeof(float))
 
 // Load one track's source audio into an SDL_LoadWAV-shaped (spec,data,len)
-// triple. Desktop reads the WAV directly; the web build swaps the extension to
-// .ogg and decodes it with stb_vorbis into S16 PCM (the shared convert path
-// downstream resamples whatever spec we hand back). Returns false on failure;
-// on success *data is SDL_malloc'd and must be SDL_free'd by the caller, exactly
-// like SDL_LoadWAV, so the rest of BuildPCMBuffer is identical on both paths.
+// triple. On success *data is SDL_malloc'd and must be SDL_free'd by the
+// caller, exactly like SDL_LoadWAV.
 static bool LoadTrack(const char *fp, SDL_AudioSpec *spec, u8 **data, u32 *len) {
-#ifdef __EMSCRIPTEN__
-    char oggpath[260];
-    SDL_strlcpy(oggpath, fp, sizeof(oggpath));
-    char *dot = SDL_strrchr(oggpath, '.');
-    if (dot) SDL_strlcpy(dot, ".ogg", sizeof(oggpath) - (dot - oggpath));
-
-    size_t filelen = 0;
-    void *filebuf = SDL_LoadFile(oggpath, &filelen);
-    if (!filebuf) return false;
-
-    int channels = 0, rate = 0;
-    short *decoded = nullptr;
-    const int frames = stb_vorbis_decode_memory(
-        static_cast<const unsigned char *>(filebuf),
-        static_cast<int>(filelen), &channels, &rate, &decoded);
-    SDL_free(filebuf);
-    if (frames < 0 || !decoded) return false;
-
-    const u32 bytes = static_cast<u32>(frames) * channels * sizeof(short);
-    u8 *out = static_cast<u8 *>(SDL_malloc(bytes));
-    SDL_memcpy(out, decoded, bytes);
-    free(decoded);  // stb_vorbis allocates with the libc allocator, not SDL's
-
-    spec->format = SDL_AUDIO_S16LE;
-    spec->channels = channels;
-    spec->freq = rate;
-    *data = out;
-    *len = bytes;
-    return true;
-#else
     return SDL_LoadWAV(fp, spec, data, len);
-#endif
 }
 
 static void BuildPCMBuffer() {
@@ -270,7 +224,9 @@ static void UpdateSfx() {
     }
 }
 
-void audio::Init(u8) {
+static void OpenAudioStreams() {
+    if (music_stream) return;  // already opened
+
     constexpr SDL_AudioSpec spec = {
         .format = SDL_AUDIO_F32LE,
         .channels = 2,
@@ -284,20 +240,28 @@ void audio::Init(u8) {
     }
     SDL_ResumeAudioStreamDevice(music_stream);
 
-    sfx_stream = SDL_OpenAudioDeviceStream(
-        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+    // Bind sfx_stream to the same logical device as music_stream rather than
+    // opening a second device (mixed additively by SDL, same as two real
+    // devices).
+    sfx_stream = SDL_CreateAudioStream(&spec, &spec);
     if (!sfx_stream) {
         SDL_Log("AUDIO: SFX stream creation failed: %s", SDL_GetError());
-    } else {
-        SDL_ResumeAudioStreamDevice(sfx_stream);
+    } else if (!SDL_BindAudioStream(SDL_GetAudioStreamDevice(music_stream), sfx_stream)) {
+        SDL_Log("AUDIO: SFX stream bind failed: %s", SDL_GetError());
+        SDL_DestroyAudioStream(sfx_stream);
+        sfx_stream = nullptr;
     }
+}
+
+void audio::Init(u8) {
+    OpenAudioStreams();
 
     BuildPCMBuffer();
     BuildSfxPCMBuffer();
 }
 
 void audio::Update() {
-    if (music_playing && !music_paused && current_track >= 0) {
+    if (music_stream && music_playing && !music_paused && current_track >= 0) {
         const auto queued = SDL_GetAudioStreamQueued(music_stream);
         if (queued <= 32768) {
             const track_runtime_t *t = &track_info[current_track];
@@ -330,13 +294,13 @@ void audio::TrackPlay(const u8 index) {
     playback_pos = track_info[index].offset;
     music_playing = 1;
     music_paused = 0;
-    SDL_ClearAudioStream(music_stream);
+    if (music_stream) SDL_ClearAudioStream(music_stream);
 }
 
 void audio::TrackStop() {
     music_playing = 0;
     current_track = -1;
-    SDL_ClearAudioStream(music_stream);
+    if (music_stream) SDL_ClearAudioStream(music_stream);
 }
 
 void audio::TrackPause(const u8 pause) {

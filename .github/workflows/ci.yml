@@ -1,8 +1,8 @@
 # Build matrix for platform-nes: NES ROM + GameCube/Wii .dol + 3DS .3dsx +
-# WebAssembly + three desktop targets.
+# three desktop targets.
 #
 # Local reproduction:
-#   The `nes`, `gc`, `wii`, `web`, `ctr` and `linux` jobs are just
+#   The `nes`, `gc`, `wii`, `ctr` and `linux` jobs are just
 #   `docker compose run` against the images in docker/, so they reproduce
 #   locally byte-for-byte:
 #
@@ -10,7 +10,6 @@
 #       PRESET=nes-pal-release docker compose run --rm build-nes  # == the `nes-pal` job
 #       docker compose run --rm build-gc       # == the `gc` job
 #       docker compose run --rm build-wii      # == the `wii` job
-#       docker compose run --rm build-web      # == the `web` job
 #       docker compose run --rm build-3ds      # == the `ctr` job
 #       docker compose run --rm build-switch   # == the `switch` job
 #       docker compose run --rm build-nds      # == the `nds` job
@@ -24,7 +23,6 @@
 #       act -j nes-pal
 #       act -j gc
 #       act -j wii
-#       act -j web
 #       act -j ctr
 #       act -j switch
 #       act -j nds
@@ -139,64 +137,6 @@ jobs:
           name: demo-wii
           path: cmake-build-ci-wii-release/demo.dol
           if-no-files-found: error
-
-  web:
-    name: Web (WASM)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Cache build tree
-        uses: actions/cache@v5
-        with:
-          path: cmake-build-ci-web-release
-          key: web-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'docker/Dockerfile.web') }}
-          restore-keys: web-
-
-      - name: Build demo.html
-        run: docker compose run --rm --build build-web
-
-      # The web build emits an interdependent set (HTML shell + JS glue + wasm +
-      # the MEMFS asset blob); upload all four so the artifact is runnable.
-      - uses: actions/upload-artifact@v7
-        with:
-          name: demo-web
-          path: |
-            cmake-build-ci-web-release/demo.html
-            cmake-build-ci-web-release/demo.js
-            cmake-build-ci-web-release/demo.wasm
-            cmake-build-ci-web-release/demo.data
-          if-no-files-found: error
-
-      # Stage a clean directory for Cloudflare Pages: just the four runtime files
-      # plus the _headers caching rules. demo.html becomes index.html so the bare
-      # site URL works (the .js still references demo.{js,wasm,data} by basename,
-      # which the rename does not touch). The CMake build dir is NOT deployed
-      # wholesale -- it carries the entire CMake tree.
-      - name: Stage Pages site
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          mkdir -p dist
-          cp cmake-build-ci-web-release/demo.html dist/index.html
-          cp cmake-build-ci-web-release/demo.js   dist/
-          cp cmake-build-ci-web-release/demo.wasm dist/
-          cp cmake-build-ci-web-release/demo.data dist/
-          cp web/_headers                         dist/
-
-      # Deploy to Cloudflare Pages (free, unmetered bandwidth, global CDN). Only
-      # on push to main -- PRs (incl. forks, which lack the secrets) just build.
-      # Requires repo secrets CLOUDFLARE_API_TOKEN (token with the
-      # "Cloudflare Pages: Edit" permission) and CLOUDFLARE_ACCOUNT_ID, and a
-      # Pages project named platform-nes-demo (production branch: main).
-      - name: Deploy to Cloudflare Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.CLOUDFLARE_API_TOKEN != ''
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=platform-nes-demo --branch=main
 
   ctr:
     name: 3DS (.3dsx)

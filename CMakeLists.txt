@@ -953,7 +953,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # (src/switch/audio.cpp streams it). ffmpeg is provided by
         # docker/Dockerfile.switch. This leaves demo/audio/tracks (the lossless
         # WAV) untouched for desktop -- the conversion output lives only in the
-        # build tree, mirroring the web branch's OGG step.
+        # build tree.
         find_program(FFMPEG ffmpeg REQUIRED)
         set(NX_ROMFS ${CMAKE_BINARY_DIR}/romfs)
         set(NX_RAW   ${NX_ROMFS}/tracks/pc_audio.raw)
@@ -1042,7 +1042,7 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # content, and a bare .rpx (e.g. dropped into Cemu) has none. So encode
         # the desktop WAV to a small Vorbis OGG and #embed it (src/wiiu/audio.cpp
         # decodes it with stb_vorbis at startup) -- it then plays however the
-        # title is launched, and the artifact stays small. Mirrors the web branch.
+        # title is launched, and the artifact stays small.
         find_program(FFMPEG ffmpeg REQUIRED)
         FetchContent_Declare(
                 stb
@@ -1569,17 +1569,8 @@ else()
         set(PLATFORM_DEFINE TARGET_WINDOWS)
     elseif(TARGET_PLATFORM STREQUAL "linux")
         set(PLATFORM_DEFINE TARGET_LINUX)
-    elseif(TARGET_PLATFORM STREQUAL "web")
-        # Emscripten/WASM. This is "just another SDL3 desktop target": the
-        # emsdk toolchain (active via the web-* presets / emcmake) ports SDL3's
-        # video, audio, keyboard and gamepad to the browser, so the src/SDL3
-        # backend and the emu core compile unchanged. The only target-specific
-        # bits are Asyncify (to let the blocking main loop yield to the browser)
-        # and packaging the runtime assets into MEMFS -- handled in the
-        # if(EMSCRIPTEN) block after the demo target below.
-        set(PLATFORM_DEFINE TARGET_WEB)
     else()
-        message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux, web")
+        message(FATAL_ERROR "Set -DTARGET_PLATFORM to one of: nes, win, mac, linux")
     endif()
 
     # Alternative nametable wiring (see the TARGET_NES branch's own comment,
@@ -1603,7 +1594,7 @@ else()
     # package it now (Arch, Fedora, Debian trixie+, Tumbleweed, Gentoo,
     # NixOS) and building it from source every time is otherwise pure
     # waste. Same policy for both: prefer the system package on Linux,
-    # keep vendoring on platforms (Windows/Mac/Web) where one isn't
+    # keep vendoring on platforms (Windows/Mac) where one isn't
     # reliably available.
     #
     # NOTE: requires libsdl3-dev + libusb-1.0 and their pkg-config files
@@ -1669,22 +1660,6 @@ else()
         target_link_libraries(platform-nes PUBLIC PkgConfig::LibUSB)
     endif()
 
-    # The web build decodes a compressed Vorbis track at runtime (the full WAV
-    # would blow Cloudflare's 25MB/file limit); src/SDL3/audio.cpp #includes
-    # stb_vorbis.c under __EMSCRIPTEN__. stb is header-only with no CMakeLists,
-    # so FetchContent just populates it and we add the dir to the include path.
-    # Desktop never fetches or compiles it.
-    if(EMSCRIPTEN)
-        FetchContent_Declare(
-                stb
-                GIT_REPOSITORY https://github.com/nothings/stb.git
-                GIT_TAG        master
-                GIT_SHALLOW    TRUE
-        )
-        FetchContent_MakeAvailable(stb)
-        target_include_directories(platform-nes PRIVATE ${stb_SOURCE_DIR})
-    endif()
-
     file(GLOB_RECURSE DEMO_SOURCES CONFIGURE_DEPENDS demo/*.cpp)
 
     # metatiles.cpp includes chr.hpp, which #embeds the demo/chr art files and
@@ -1703,62 +1678,6 @@ else()
     # option" note, and its own #embed support doesn't warn here anyway.
     target_compile_options(demo PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-c23-extensions>)
 
-    # ------------------------------------------------------------------
-    # Emscripten / WebAssembly packaging.
-    #
-    # The browser owns the event loop and cannot be blocked, but the demo's
-    # main() is a classic blocking `while (!quit) { ...; WaitForPresent(); }`.
-    # -sASYNCIFY lets that loop yield to requestAnimationFrame transparently:
-    # the SDL3 backend's per-frame wait calls emscripten_sleep() (guarded by
-    # __EMSCRIPTEN__ in src/SDL3/video.cpp), which Asyncify turns into a real
-    # browser yield -- so main.cpp stays byte-identical to every other platform.
-    #
-    # The demo loads its music/SFX from tracks/ and sfx/ at runtime via
-    # SDL_LoadWAV; on the web there is no host filesystem, so those trees are
-    # baked into the MEMFS virtual FS with --preload-file (producing demo.data).
-    # They mount at /tracks and /sfx, matching the relative paths the desktop
-    # build uses from the executable's working directory.
-    #
-    # SUFFIX .html makes emcc emit the HTML shell + demo.js + demo.wasm so the
-    # artifact is openable directly (served over http).
-    if(EMSCRIPTEN)
-        set_target_properties(demo PROPERTIES SUFFIX ".html")
-
-        # The desktop bundle's tracks/ is a 47MB PCM WAV -- too big for the web
-        # (Cloudflare Pages rejects any single deployed file > 25MB, and the WAV
-        # lands whole inside demo.data). Encode it to ~3MB Vorbis at build time
-        # and bake only that into MEMFS; src/SDL3/audio.cpp decodes it with
-        # stb_vorbis at load. Nothing under demo/ changes, so desktop keeps the
-        # lossless WAV. ffmpeg is provided by docker/Dockerfile.web.
-        find_program(FFMPEG ffmpeg REQUIRED)
-        set(WEB_ASSET_DIR ${CMAKE_BINARY_DIR}/web-assets)
-        set(WEB_OGG ${WEB_ASSET_DIR}/tracks/pc_audio.ogg)
-        set(WEB_WAV ${CMAKE_SOURCE_DIR}/demo/audio/tracks/pc_audio.wav)
-        add_custom_command(
-                OUTPUT ${WEB_OGG}
-                COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_ASSET_DIR}/tracks
-                COMMAND ${FFMPEG} -y -loglevel error -i ${WEB_WAV}
-                        -c:a libvorbis -q:a 4 ${WEB_OGG}
-                DEPENDS ${WEB_WAV}
-                COMMENT "Encoding web audio: pc_audio.wav -> pc_audio.ogg (Vorbis)"
-                VERBATIM)
-        add_custom_target(web-assets DEPENDS ${WEB_OGG})
-        add_dependencies(demo web-assets)
-
-        # The single --preload-file mounts the generated OGG at /tracks, matching
-        # the relative path the audio backend opens (sfx/ is NES-only .s source
-        # and PlaySFX is a no-op on this backend, so nothing is baked for it).
-        # SHELL: keeps the flag and path as one token so link-option dedup can't
-        # split them.
-        target_link_options(demo PRIVATE
-                -sASYNCIFY
-                -sALLOW_MEMORY_GROWTH=1
-                "SHELL:--preload-file ${WEB_ASSET_DIR}/tracks@/tracks"
-        )
-        # Re-link when the encoded asset changes (emcc reads it at link time).
-        set_property(TARGET demo APPEND PROPERTY LINK_DEPENDS "${WEB_OGG}")
-    endif()
-
     # Enable LTO for release-type configs on desktop targets. CMake routes
     # archive/link through gcc-ar/gcc-ranlib (GCC) or lld (Clang) automatically
     # once INTERPROCEDURAL_OPTIMIZATION is set on the target.
@@ -1775,30 +1694,25 @@ else()
     endif()
 
     # Desktop runs the demo from its own directory and loads tracks/ + sfx/ by
-    # relative path, so they are copied next to the executable. On Emscripten the
-    # same trees are baked into MEMFS via --preload-file (above), so skip the copy.
-    if(NOT EMSCRIPTEN)
-        add_custom_command(TARGET demo POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/demo/audio/tracks
-                $<TARGET_FILE_DIR:demo>/tracks
-        )
+    # relative path, so they are copied next to the executable.
+    add_custom_command(TARGET demo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/demo/audio/tracks
+            $<TARGET_FILE_DIR:demo>/tracks
+    )
 
-        add_custom_command(TARGET demo POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${CMAKE_SOURCE_DIR}/demo/audio/sfx
-                $<TARGET_FILE_DIR:demo>/sfx
-        )
-    endif()
+    add_custom_command(TARGET demo POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/demo/audio/sfx
+            $<TARGET_FILE_DIR:demo>/sfx
+    )
 
     # ------------------------------------------------------------------
     # Strip the final executable in non-Debug builds. MSVC has no strip
     # (symbols live in a separate .pdb), so only run when CMAKE_STRIP is
-    # available (GCC/Clang/MinGW toolchains). Emscripten output is .wasm/.js,
-    # not an ELF the host `strip` understands, so skip it there (emcc strips
-    # itself in non-debug optimisation levels anyway).
+    # available (GCC/Clang/MinGW toolchains).
     # ------------------------------------------------------------------
-    if(CMAKE_STRIP AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT EMSCRIPTEN)
+    if(CMAKE_STRIP AND NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_custom_command(TARGET demo POST_BUILD
                 COMMAND ${CMAKE_STRIP} $<TARGET_FILE:demo>
                 COMMENT "Stripping demo executable"
