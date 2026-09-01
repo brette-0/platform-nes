@@ -133,7 +133,7 @@ namespace level {
             irq::reset();    // spin reset on NES, exit on SDL3
         }
 
-        ppu::Flush(chrHUDWhitespace_tile, 0x11);
+        ppu::Flush(chrHUDWhitespace_tile, 0xff);
 
         oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
@@ -176,6 +176,7 @@ namespace level {
         video::WaitForPresent();
         CallLevelGraphics([] {
             ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
+            ppu::pal::WriteFromBuffer(13,                SIZED_OBJ(hudColours));   // BG palette 3 (HUD), same colours as the title screen's
             ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
             ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
         });

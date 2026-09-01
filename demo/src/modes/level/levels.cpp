@@ -160,6 +160,7 @@ namespace level {
                 const u8 mask = attr_column & 1 ? 0x33 : 0x00;
                 for (auto & j : AttributeBuffer)
                     j &= mask;
+                AttributeBuffer[0] |= 0x0F;   // HUD rows 0-1 share attr_idx 0's top quadrant with level rows 2-3; pin it to palette 3
             }
             m = GetNextMetaTile();
             MetatileBuffer[step >> 1] = m;
@@ -188,6 +189,7 @@ namespace level {
                 const u8 mask = (attr_column + prev_parity_fix()) & 1 ? 0xCC : 0x00;
                 for (auto & j : AttributeBuffer)
                     j &= mask;
+                AttributeBuffer[0] |= 0x0F;   // HUD rows 0-1 share attr_idx 0's top quadrant with level rows 2-3; pin it to palette 3
             }
             m = GetPrevMetaTile();
             MetatileBuffer[step >> 1] = m;
@@ -231,6 +233,7 @@ namespace level {
         attr_column++;
         const u8 mask = attr_column & 1 ? 0x33 : 0x00;
         for (auto & j : AttributeBuffer) j &= mask;
+        AttributeBuffer[0] |= 0x0F;   // HUD rows 0-1 share attr_idx 0's top quadrant with level rows 2-3; pin it to palette 3
 
         const u8* col = ColMapColumn(worldCol);
         if (!col) return;                            // out of window (never in steady scroll)

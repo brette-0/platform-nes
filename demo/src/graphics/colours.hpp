@@ -17,3 +17,7 @@ extern const u8 maryColors[3];
 // BGColours owns (see title.cpp's DrawLevelPreview) -- the title screen
 // itself never decides transparency/backdrop.
 extern const u8 titleScreenColours[3];
+
+// Same palette as titleScreenColours, but reachable from LEVEL_GRAPHICS
+// (the level's HUD, drawn in palette 3, can't reach the TITLE bank copy).
+extern const u8 hudColours[3];

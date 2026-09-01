@@ -12,4 +12,11 @@ TITLE const u8 titleScreenColours[3] = {
     0x0f, 0x30, 0x30
 };
 
+// Same colours as titleScreenColours, duplicated into LEVEL_GRAPHICS: the
+// level's HUD (palette 3) needs them too, but title.cpp's copy lives in the
+// TITLE bank, which isn't mapped during level mode.
+LEVEL_GRAPHICS const u8 hudColours[3] = {
+    0x0f, 0x30, 0x30
+};
+
 LEVEL_GRAPHICS const u8 maryColors[3] = {0x07, 0x26, 0x04};
