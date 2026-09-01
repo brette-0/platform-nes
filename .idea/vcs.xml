@@ -2,47 +2,5 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-ctr-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-ctr-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-ctr-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-ctr-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-dsi-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gba-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gba-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gba-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gba-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gc-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gc-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gc-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-gc-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-linux-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-linux-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-linux-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nds-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nds-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nds-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nds-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nes-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nes-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nes-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-nes-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-switch-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-switch-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-switch-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-switch-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wii-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wii-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wii-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wii-release/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-debug/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-debug/_deps/stb-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-debug/_deps/tuple-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-release/_deps/intsh-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-release/_deps/stb-src" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/cmake-build-wiiu-release/_deps/tuple-src" vcs="Git" />
   </component>
 </project>

@@ -39,8 +39,34 @@
 #include <ogc/gx.h>
 #include <ogc/gu.h>
 #include <ogc/pad.h>
+#include <ogc/system.h>
 #include <malloc.h>
 #include <string.h>
+#ifdef TARGET_WII
+#include <wiiuse/wpad.h>
+#endif
+
+// ---------------------------------------------------------------------------
+// Wii shutdown handshake.
+//
+// A Wii title is expected to answer IOS/STM power-down and reset requests
+// itself; nothing here did, so the GameCube-oriented "loop forever, the
+// loader/BIOS reclaims the machine on exit" model left the Wii side with no
+// way to ever satisfy that handshake. On real hardware this mostly goes
+// unnoticed (the HOME menu still works). In Dolphin, choosing Stop for a Wii
+// title sends that same STM power-button event and then waits for the title
+// to call SYS_ResetSystem in response -- which never happened, so Dolphin
+// sits on "Shutting Down" forever. The GameCube target has no such handshake
+// (Dolphin just halts the CPU on Stop), which is why only Wii is affected.
+//
+// The callbacks below just set the existing `quit` flag so the ordinary
+// `while (!quit)` game loop (demo/src/main.cpp) unwinds normally; post()
+// below then completes the handshake with the real SYS_ResetSystem call.
+#ifdef TARGET_WII
+static void wii_power_callback() { quit = 1; }
+static void wii_remote_power_callback(s32 chan) { quit = 1; }
+#endif
+static void wii_reset_callback(u32 irq, void *ctx) { quit = 1; }
 
 // ---------------------------------------------------------------------------
 // Shared GX / video state. All fixed for the window's lifetime.
@@ -649,6 +675,18 @@ void irq::init() {
 
     ogc_input_init();
 
+    // See the wii_*_callback comment above: without these, a Wii title never
+    // answers IOS/STM's power-down or reset request, which is what leaves
+    // Dolphin stuck on "Shutting Down" for the Wii build. SYS_SetResetCallback
+    // exists on GameCube too (it's the physical Reset button), so it's
+    // registered unconditionally; it's a no-op for this bug since GC has no
+    // such handshake to hang on.
+    SYS_SetResetCallback(wii_reset_callback);
+#ifdef TARGET_WII
+    SYS_SetPowerCallback(wii_power_callback);
+    WPAD_SetPowerButtonCallback(wii_remote_power_callback);
+#endif
+
 #if defined(OGC_PROFILER)
     // Start the statistical PC sampler. MUST run here -- init() executes on the
     // main thread, whose KThread* the sampler reads PCs from.
@@ -662,4 +700,13 @@ void irq::post() {
     // so a clean shutdown doesn't leak (mostly documentary on a console).
     free(chr_atlas);
     free(gp_fifo);
+
+#ifdef TARGET_WII
+    // This is the other half of the wii_*_callback registration in init():
+    // the callbacks only set `quit` so the game loop unwinds; the actual
+    // SYS_ResetSystem call is the acknowledgement IOS/STM (and, in Dolphin,
+    // the Stop button) is waiting on. Without it the request is never
+    // answered and Dolphin hangs on "Shutting Down" instead of closing.
+    SYS_ResetSystem(SYS_POWEROFF, 0, 0);
+#endif
 }
