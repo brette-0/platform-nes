@@ -9,7 +9,6 @@ namespace title {
     void irq_handler();
 
     void InitTitleScreen();
-    u8 MenuAttributesProvider(u8 i);
 
     enum titleOptions : u8 {
         NewGame = 0,
