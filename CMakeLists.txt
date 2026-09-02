@@ -499,7 +499,7 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
         list(APPEND DEMO_ASM_OBJECTS ${ASM_OBJ})
     endforeach()
 
-    file(GLOB_RECURSE NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp)
+    file(GLOB_RECURSE NES_SOURCES CONFIGURE_DEPENDS src/nes/*.cpp src/all/*.cpp)
     # This build targets MMC3 only (TOPLEVEL_LD/MAPPER above) -- vrc1.cpp
     # still exists for a VRC1 project to use, but it also defines a global
     # extern "C" _reset (and other symbols mmc3.cpp defines too), which the
@@ -690,7 +690,8 @@ elseif(TARGET_PLATFORM STREQUAL "gc" OR TARGET_PLATFORM STREQUAL "wii")
     # platform-agnostic and compiled here alongside the GX-specific
     # video/present, the PAD/WPAD input, and the (stub) audio.
     file(GLOB OGC_SOURCES CONFIGURE_DEPENDS src/ogc/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-    add_library(platform-nes STATIC ${OGC_SOURCES})
+    file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+    add_library(platform-nes STATIC ${OGC_SOURCES} ${ALL_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -818,7 +819,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
     # platform-agnostic and compiled here alongside the citro2d video/present,
     # the hid input, and the (stub) audio.
     file(GLOB CTR_SOURCES CONFIGURE_DEPENDS src/3ds/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-    add_library(platform-nes STATIC ${CTR_SOURCES})
+    file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+    add_library(platform-nes STATIC ${CTR_SOURCES} ${ALL_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -903,7 +905,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # platform-agnostic and compiled here alongside the libnx framebuffer
         # video/present, the hid input, and the audout audio.
         file(GLOB NX_SOURCES CONFIGURE_DEPENDS src/switch/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-        add_library(platform-nes STATIC ${NX_SOURCES})
+        file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+        add_library(platform-nes STATIC ${NX_SOURCES} ${ALL_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
                 ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -1020,7 +1023,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # platform-agnostic and compiled here alongside the SDL2 video/present,
         # the SDL2 GameController input, and the SDL2 audio.
         file(GLOB WIIU_SOURCES CONFIGURE_DEPENDS src/wiiu/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-        add_library(platform-nes STATIC ${WIIU_SOURCES})
+        file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+        add_library(platform-nes STATIC ${WIIU_SOURCES} ${ALL_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
                 ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -1253,7 +1257,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # platform-agnostic and compiled here alongside the raw-VRAM video/
         # present, the pspctrl input, and the pspaudio streaming audio.
         file(GLOB PSP_SOURCES CONFIGURE_DEPENDS src/psp/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-        add_library(platform-nes STATIC ${PSP_SOURCES})
+        file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+        add_library(platform-nes STATIC ${PSP_SOURCES} ${ALL_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
                 ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -1393,7 +1398,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # are platform-agnostic and compiled here alongside the libnds video/
         # present, the keypad input, and the (stub) audio.
         file(GLOB NDS_SOURCES CONFIGURE_DEPENDS src/nds/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-        add_library(platform-nes STATIC ${NDS_SOURCES})
+        file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+        add_library(platform-nes STATIC ${NDS_SOURCES} ${ALL_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
                 ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -1496,7 +1502,8 @@ elseif(TARGET_PLATFORM STREQUAL "ctr")
         # are platform-agnostic and compiled here alongside the libgba video/
         # present, the keypad input, and the (stub) audio.
         file(GLOB GBA_SOURCES CONFIGURE_DEPENDS src/gba/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-        add_library(platform-nes STATIC ${GBA_SOURCES})
+        file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+        add_library(platform-nes STATIC ${GBA_SOURCES} ${ALL_SOURCES})
         target_include_directories(platform-nes PUBLIC
                 ${CMAKE_SOURCE_DIR}/include
                 ${CMAKE_SOURCE_DIR}/include/umbrella
@@ -1647,7 +1654,8 @@ else()
     # and all the nametable/OAM/palette write functions are platform-agnostic
     # and compiled here alongside the SDL-specific window/present/input/audio.
     file(GLOB SDL3_SOURCES CONFIGURE_DEPENDS src/SDL3/*.cpp src/emu/*.cpp src/emu/mappers/*.cpp)
-    add_library(platform-nes STATIC ${SDL3_SOURCES})
+    file(GLOB_RECURSE ALL_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/all/*.cpp)
+    add_library(platform-nes STATIC ${SDL3_SOURCES} ${ALL_SOURCES})
     target_include_directories(platform-nes PUBLIC
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_SOURCE_DIR}/include/umbrella

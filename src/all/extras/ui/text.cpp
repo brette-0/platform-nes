@@ -1,4 +1,4 @@
-#include <../../../include/platform-nes/extras/ui/text.hpp>
+#include <platform-nes/extras/ui/text.hpp>
 
 #include "platform-nes/video.hpp"
 
