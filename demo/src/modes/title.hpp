@@ -1,6 +1,6 @@
 #pragma once
 #include <platform-nes/technology.hpp>
-#include <platform-nes/extras/text.hpp>
+#include <platform-nes/extras/ui/text.hpp>
 
 namespace title {
     void main();

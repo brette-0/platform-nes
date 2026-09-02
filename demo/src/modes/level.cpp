@@ -137,12 +137,7 @@ namespace level {
 
         oam::PopulateFromProvider(OAMBuffer, 0, oam::y, Clear, 64);
 
-        // fill in with mario metatiles
-        // msMary/msMary2 are ::LEVEL_GRAPHICS now (bank 7, window 2) -- window
-        // 2 is ambient LevelDataBank here (LoadLevel above already switched
-        // it), so both tile-source reads are bracketed in one block. The
-        // Provider calls (SpriteY/SpriteX) don't touch msMary at all -- they
-        // stay outside, ambient window 2 unchanged.
+
         CallLevelGraphics([] {
             oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile,       msMary, kMarySprites);
             oam::PopulateFromBuffer(OAMBuffer, 1, oam::attributes, msMary, kMarySprites);

@@ -1,9 +1,9 @@
-#include <platform-nes/extras/text.hpp>
+#include <../../include/platform-nes/extras/ui/text.hpp>
 
 #include "platform-nes/video.hpp"
 
 namespace ui::text {
-    void DrawText(const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box, const u8 splitter, const Alignment align) {
+    void Draw(const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box, const u8 splitter, const Alignment align) {
         u8 cursor    = 0;
         u8 last      = 0;
         u8 lastWhite = 0;
