@@ -326,7 +326,7 @@ ACTORS void Player::Reset() {
 ACTORS void UpdateActors() {
     player1.Update();
 #ifdef PLAYER2_SUPPORTED
-    player2.Update();
+    if (multiplayer) player2.Update();
 #endif
 }
 

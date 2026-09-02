@@ -61,6 +61,10 @@ namespace level {
     Player player1;
 #ifdef PLAYER2_SUPPORTED
     Player player2;
+
+    // Zero-initialized (BSS): single-player by default until something
+    // wires this up, per the doc comment in level.hpp.
+    SYSMEM bool multiplayer;
 #endif
 
     i8 lastDeltaScroll;
@@ -142,17 +146,22 @@ namespace level {
             oam::PopulateFromBuffer(OAMBuffer, 1, oam::tile,       msMary, kMarySprites);
             oam::PopulateFromBuffer(OAMBuffer, 1, oam::attributes, msMary, kMarySprites);
 #ifdef PLAYER2_SUPPORTED
-            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::tile,       msMary2, kMarySprites);
-            oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::attributes, msMary2, kMarySprites);
+            if (multiplayer) {
+                oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::tile,       msMary2, kMarySprites);
+                oam::PopulateFromBuffer(OAMBuffer, 1 + kMarySprites, oam::attributes, msMary2, kMarySprites);
+            }
 #endif
         });
         oam::PopulateFromProvider(OAMBuffer, 1, oam::y, SpriteY,  kMarySprites);
         oam::PopulateFromProvider(OAMBuffer, 1, oam::x, SpriteX,  kMarySprites);
 
 #ifdef PLAYER2_SUPPORTED
-        // player 2: horizontally flipped, OAM slots 5..8
-        oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::y, SpriteY2, kMarySprites);
-        oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::x, SpriteX2, kMarySprites);
+        // player 2: horizontally flipped, OAM slots 5..8 -- left at the
+        // Clear() (y=0xf0, off-screen) fill above unless multiplayer is on.
+        if (multiplayer) {
+            oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::y, SpriteY2, kMarySprites);
+            oam::PopulateFromProvider(OAMBuffer, 1 + kMarySprites, oam::x, SpriteX2, kMarySprites);
+        }
 #endif
 
         // Palette RAM is a special case, unlike the nametable/attribute

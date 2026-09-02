@@ -33,6 +33,13 @@ namespace level {
     extern Player player1;
 #ifdef PLAYER2_SUPPORTED
     extern Player player2;
+
+    // Runtime switch, owned by level mode: whether player2 is actually in
+    // play this session. Distinct from PLAYER2_SUPPORTED (a compile-time
+    // capability gate) -- this is the session-level choice, e.g. from a
+    // future title-screen menu. Unwired for now, so it stays false and only
+    // player1 is ever active.
+    extern bool multiplayer;
 #endif
 
     extern atomic tech::enum_flags<eLevelStreamCommands> levelStreamCommand;
