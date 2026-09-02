@@ -125,7 +125,9 @@ VIDEO_BANK void Flush(const u8 nt, const u8 at) {
 // Pinned: a raster split writes PPUSCROLL at an exact dot, so anything added in
 // front of these writes moves the split.
 __attribute__((hot))
-AI void SetScroll(const u16 x, u16 y) {
+AI void SetScroll(const vec2<u16> pos) {
+    const u16 x = pos.x;
+    u16 y = pos.y;
     xScroll = x; yScroll = y;
 
 
@@ -149,15 +151,15 @@ AI void SetScroll(const u16 x, u16 y) {
     tech::poke(raw::PPUSCROLL, static_cast<u8>(y & 0xFF));
 }
 
-AI void DeltaScroll(const i8 x, const i8 y) {
-    SetScroll(xScroll + x, yScroll + y);
+AI void DeltaScroll(const vec2<i8> delta) {
+    SetScroll({static_cast<u16>(xScroll + delta.x), static_cast<u16>(yScroll + delta.y)});
 }
 
 __attribute__((hot))
 AI void WriteFromBufferToNameTable(
-    const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
+    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
-    const auto offset = xy_to_nt_addr(x, y);
+    const auto offset = xy_to_nt_addr(pos.x, pos.y);
     u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
@@ -172,8 +174,8 @@ AI void WriteFromBufferToNameTable(
 }
 
 __attribute__((hot))
-VIDEO_BANK void WriteSingleToNameTable(const u16 x, const u16 y, const u8 value) {
-    const auto offset = xy_to_nt_addr(x, y);
+VIDEO_BANK void WriteSingleToNameTable(const vec2<u16> pos, const u8 value) {
+    const auto offset = xy_to_nt_addr(pos.x, pos.y);
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
@@ -195,9 +197,9 @@ AI void WriteSingleToNameTable(const int address, const u8 value) {
 template <typename Idx>
 __attribute__((hot))
 VIDEO_BANK void WriteFromProviderToNameTable(
-    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
-    const auto offset = xy_to_nt_addr(x, y);
+    const auto offset = xy_to_nt_addr(pos.x, pos.y);
     u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
@@ -213,14 +215,14 @@ VIDEO_BANK void WriteFromProviderToNameTable(
 
 // Explicit instantiations for the provider index types in use. The body pokes
 // PPU registers, so it must stay in this backend rather than the header.
-template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
-template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
+template void WriteFromProviderToNameTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
 __attribute__((hot))
 AI void WriteFromBufferToAttributeTable(
-    const u16 x, const u16 y, const u8* source, const u8 sBuffer, const u8 polarity
+    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(x, y);
+    const u16 offset = xy_to_at_addr(pos.x, pos.y);
 
     PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
 
@@ -248,8 +250,8 @@ AI void WriteFromBufferToAttributeTable(
     }
 }
 
-AI void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
-    const auto offset = xy_to_at_addr(x, y);
+AI void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {
+    const auto offset = xy_to_at_addr(pos.x, pos.y);
 
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
@@ -260,9 +262,9 @@ AI void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
 template <typename Idx>
 __attribute__((hot))
 AI void WriteFromProviderToAttributeTable(
-    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(x, y);
+    const u16 offset = xy_to_at_addr(pos.x, pos.y);
 
     PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
 
@@ -292,15 +294,16 @@ AI void WriteFromProviderToAttributeTable(
 
 // Explicit instantiations for the provider index types in use. The body pokes
 // PPU registers, so it must stay in this backend rather than the header.
-template void WriteFromProviderToAttributeTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
-template void WriteFromProviderToAttributeTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
+template void WriteFromProviderToAttributeTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
-VIDEO_BANK u16 CartesianToAddress(const u16 x, const u16 y) {
-    return xy_to_nt_addr(x, y);
+VIDEO_BANK u16 CartesianToAddress(const vec2<u16> pos) {
+    return xy_to_nt_addr(pos.x, pos.y);
 }
 
-AI scroll_t CartesianToScroll(const u16 px, const u16 py) {
-    auto y = py;
+AI scroll_t CartesianToScroll(const vec2<u16> pos) {
+    const u16 px = pos.x;
+    auto y = pos.y;
     if (y >= 240) { y -= 240; y ^= 0x100; }
     if (y >= 240) { y -= 240; y ^= 0x100; }
     const auto nt = static_cast<u8>(px >> 8 & 0x01 | y >> 7 & 0x02);
@@ -381,8 +384,8 @@ VIDEO_BANK void StreamFromVideoMemory(const u16 offset, atomic u8* target, const
 }   // namespace ppu
 
 __attribute__((hot))
-VIDEO_BANK void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
-    (void)px; (void)py;
+VIDEO_BANK void video::WaitThenReactToSpriteZero(const vec2<u16> pos, void (*fn)(), atomic u8* latch) {
+    (void)pos;
 
     while (!*latch) {
         while (  tech::peek(ppu::raw::PPUSTATUS) & 0x40)  { }  // wait for pre-render to clear stale hit

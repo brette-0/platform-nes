@@ -53,7 +53,7 @@ namespace title {
         DrawLevelPreview();
         InitTitleScreen();
 
-        ppu::SetScroll(0, 0xff);
+        ppu::SetScroll({0, 0xff});
         ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::SPRITE_SIZE | ppu::ctrl::GEN_NMI, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
         irq::EnableInterrupts();
@@ -109,13 +109,13 @@ namespace title {
         const u16 menuRow1 = SplitRow() + 1;
 
         // write chrEmpty_tile where arrow was
-        ppu::WriteSingleToNameTable(menuCol - 2, menuRow1 + lastMenuOption, chrHUDWhitespace_tile);
+        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(menuRow1 + lastMenuOption)}, chrHUDWhitespace_tile);
         // write chrArrow_tile where arrow now is
-        ppu::WriteSingleToNameTable(menuCol - 2, menuRow1 + menuOption, chrArrow_tile);
+        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(menuRow1 + menuOption)}, chrArrow_tile);
         lastMenuOption = menuOption;
 
         oam::RefreshSprites(OAMBuffer);
-        ppu::SetScroll(0, 0);
+        ppu::SetScroll({0, 0});
 
         // Arm the preview/menu split for this frame -- see ApplySplit.
         // Reload value is latency-corrected the same way level.cpp's
@@ -136,7 +136,7 @@ namespace title {
     }
 
     static void ApplySplit() {
-        ppu::SetScroll(kMenuNT << 3, static_cast<u16>(SplitRow()) << 3);
+        ppu::SetScroll({static_cast<u16>(kMenuNT << 3), static_cast<u16>(SplitRow() << 3)});
     }
 
     void InitTitleScreen() {
@@ -145,7 +145,7 @@ namespace title {
         const u8 attrCells = static_cast<u8>((video::viewport_tx() + 3) >> 2);
         for (u8 r = 0; r < menuRows; r += 4) {
             ppu::WriteFromProviderToAttributeTable(
-                kMenuNT, splitRow + r,
+                {kMenuNT, static_cast<u16>(splitRow + r)},
                 MenuAttributesProvider, attrCells, 0
             );
         }
@@ -162,14 +162,14 @@ namespace title {
         const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - sizeof(msg_continue);
 
         // selection cursor -- starts on New Game, one tile of gap before the text.
-        ppu::WriteSingleToNameTable(menuCol - 2, splitRow + 1, chrArrow_tile);
+        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(splitRow + 1)}, chrArrow_tile);
 
-        ppu::WriteFromBufferToNameTable(menuCol, splitRow + 1, SIZED_OBJ(msg_newGame), 0);
-        ppu::WriteFromBufferToNameTable(menuCol, splitRow + 2, SIZED_OBJ(msg_continue), 0);
-        ppu::WriteFromBufferToNameTable(menuCol, splitRow + 3, SIZED_OBJ(msg_options), 0);
+        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(splitRow + 1)}, SIZED_OBJ(msg_newGame), 0);
+        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(splitRow + 2)}, SIZED_OBJ(msg_continue), 0);
+        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(splitRow + 3)}, SIZED_OBJ(msg_options), 0);
 #if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
         // consoles have no OS to quit back to -- PC targets only.
-        ppu::WriteFromBufferToNameTable(menuCol, splitRow + 4, SIZED_OBJ(msg_quit), 0);
+        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(splitRow + 4)}, SIZED_OBJ(msg_quit), 0);
 #endif
     }
 
@@ -227,14 +227,14 @@ namespace title {
             for (u8 r = 0; r < visibleMetaRows; ++r) {
                 const u8  mL = colBuf[0][r], mR = colBuf[1][r];
                 const u16 ty = static_cast<u16>(2 * r);
-                ppu::WriteSingleToNameTable(tx,     ty,     Metatiles_UL[mL]);
-                ppu::WriteSingleToNameTable(tx + 1, ty,     Metatiles_BL[mL]);
-                ppu::WriteSingleToNameTable(tx,     ty + 1, Metatiles_UR[mL]);
-                ppu::WriteSingleToNameTable(tx + 1, ty + 1, Metatiles_BR[mL]);
-                ppu::WriteSingleToNameTable(tx + 2, ty,     Metatiles_UL[mR]);
-                ppu::WriteSingleToNameTable(tx + 3, ty,     Metatiles_BL[mR]);
-                ppu::WriteSingleToNameTable(tx + 2, ty + 1, Metatiles_UR[mR]);
-                ppu::WriteSingleToNameTable(tx + 3, ty + 1, Metatiles_BR[mR]);
+                ppu::WriteSingleToNameTable({tx,     ty},     Metatiles_UL[mL]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 1), ty},     Metatiles_BL[mL]);
+                ppu::WriteSingleToNameTable({tx,     static_cast<u16>(ty + 1)}, Metatiles_UR[mL]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 1), static_cast<u16>(ty + 1)}, Metatiles_BR[mL]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 2), ty},     Metatiles_UL[mR]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 3), ty},     Metatiles_BL[mR]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 2), static_cast<u16>(ty + 1)}, Metatiles_UR[mR]);
+                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 3), static_cast<u16>(ty + 1)}, Metatiles_BR[mR]);
             }
             for (u8 br = 0; br < visibleMetaRows; br += 2) {
                 const u8 palTL = Metatiles_ATTR[colBuf[0][br]]     & MetatilePaletteMask;
@@ -242,7 +242,7 @@ namespace title {
                 const u8 palBL = Metatiles_ATTR[colBuf[0][br + 1]] & MetatilePaletteMask;
                 const u8 palBR = Metatiles_ATTR[colBuf[1][br + 1]] & MetatilePaletteMask;
                 const u8 attrByte = static_cast<u8>(palTL | (palTR << 2) | (palBL << 4) | (palBR << 6));
-                ppu::WriteSingleToAttributeTable(tx, static_cast<u16>(2 * br), attrByte);
+                ppu::WriteSingleToAttributeTable({tx, static_cast<u16>(2 * br)}, attrByte);
             }
         }
 

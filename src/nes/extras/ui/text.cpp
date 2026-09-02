@@ -25,7 +25,7 @@ namespace ui::text {
 
             // draw to row
             ppu::WriteFromBufferToNameTable(
-                xpos, pos.y + row,
+                {xpos, static_cast<u16>(pos.y + row)},
                 buff + last,
                 end - last,
                 0

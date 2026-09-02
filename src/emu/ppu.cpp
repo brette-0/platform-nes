@@ -43,8 +43,8 @@ static int yScroll_written;
 
 static video::spriteZeroHandler_t sprite0_zero;
 
-void video::SetSpriteZeroHandler(const u16 px, const u16 py, void (*fn)()) {
-    sprite0_zero = (video::spriteZeroHandler_t){ .method = fn, .px = px, .py = py };
+void video::SetSpriteZeroHandler(const vec2<u16> pos, void (*fn)()) {
+    sprite0_zero = (video::spriteZeroHandler_t){ .method = fn, .pos = pos };
 }
 
 /* Weak default ::ppu::ResolveTile: identity, matching a board with no CHR
@@ -450,8 +450,9 @@ void Flush(const u8 nt, const u8 at) {
 }
 
 void WriteFromBufferToNameTable(
-    const u16 x, const u16 y, const u8* source, const u8 sBuffer, u8 polarity
+    const vec2<u16> pos, const u8* source, const u8 sBuffer, u8 polarity
 ) {
+    const u16 x = pos.x, y = pos.y;
     ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
     const bool vertical = ppu::PPUCTRL & ppu::ctrl::POLARITY;
@@ -470,8 +471,8 @@ void WriteFromBufferToNameTable(
     }
 }
 
-void WriteSingleToNameTable(const u16 x, const u16 y, u8 value) {
-    const u16 offset = xy_to_nt_addr(x, y);
+void WriteSingleToNameTable(const vec2<u16> pos, u8 value) {
+    const u16 offset = xy_to_nt_addr(pos.x, pos.y);
     ppu::WriteNametable(offset, value);
 }
 
@@ -482,22 +483,23 @@ void WriteSingleToNameTable(const int address, u8 value) {
     ppu::WriteNametable(static_cast<u16>(address), value);
 }
 
-void SetScroll(const u16 x, const u16 y) {
-    xScroll = x; yScroll = y;
+void SetScroll(const vec2<u16> pos) {
+    xScroll = pos.x; yScroll = pos.y;
     yScroll_written = 1;
 }
 
-void DeltaScroll(const i8 x, const i8 y) {
-    xScroll = static_cast<u16>(xScroll + x);
-    yScroll = static_cast<u16>(yScroll + y);
+void DeltaScroll(const vec2<i8> delta) {
+    xScroll = static_cast<u16>(xScroll + delta.x);
+    yScroll = static_cast<u16>(yScroll + delta.y);
     yScroll_written = 1;
 }
 
 template <typename Idx>
 void WriteFromProviderToNameTable(
-    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt,
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt,
     const u8 polarity
 ) {
+    const u16 x = pos.x, y = pos.y;
     ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
     if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
     const bool vertical = ppu::PPUCTRL & ppu::ctrl::POLARITY;
@@ -513,13 +515,14 @@ void WriteFromProviderToNameTable(
 
 // Explicit instantiations for the provider index types in use. The body writes
 // host video RAM, so it must stay in this backend rather than the header.
-template void WriteFromProviderToNameTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
-template void WriteFromProviderToNameTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
+template void WriteFromProviderToNameTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
 void WriteFromBufferToAttributeTable(
-    const u16 x, const u16 y, const u8* source,
+    const vec2<u16> pos, const u8* source,
     const u8 sBuffer, const u8 polarity
 ) {
+    const u16 x = pos.x, y = pos.y;
     // Horizontal (polarity 0) runs can cross an nt_h page on any viewport
     // wider than 32 tiles (OGC/Switch/WiiU/PSP), so those need the full
     // page-aware address recomputed per cell -- see WriteFromBufferToNameTable
@@ -541,16 +544,17 @@ void WriteFromBufferToAttributeTable(
     }
 }
 
-void WriteSingleToAttributeTable(const u16 x, const u16 y, const u8 value) {
-    const u16 offset = xy_to_at_addr(x, y);
+void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {
+    const u16 offset = xy_to_at_addr(pos.x, pos.y);
     ppu::WriteNametable(offset, value);
 }
 
 template <typename Idx>
 void WriteFromProviderToAttributeTable(
-    const u16 x, const u16 y, u8 (*fn)(Idx), const u8 amt,
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt,
     const u8 polarity
 ) {
+    const u16 x = pos.x, y = pos.y;
     // See WriteFromBufferToAttributeTable above: vertical stays a flat stride
     // off one base address (nt_v is always 0, never crosses a page);
     // horizontal recomputes the page-aware address per cell.
@@ -569,15 +573,15 @@ void WriteFromProviderToAttributeTable(
 
 // Explicit instantiations for the provider index types in use. The body writes
 // host video RAM, so it must stay in this backend rather than the header.
-template void WriteFromProviderToAttributeTable<u8>(u16, u16, u8 (*)(u8), u8, u8);
-template void WriteFromProviderToAttributeTable<u16>(u16, u16, u8 (*)(u16), u8, u8);
+template void WriteFromProviderToAttributeTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
-u16 CartesianToAddress(const u16 x, const u16 y) {
-    return xy_to_nt_addr(x, y);
+u16 CartesianToAddress(const vec2<u16> pos) {
+    return xy_to_nt_addr(pos.x, pos.y);
 }
 
-scroll_t CartesianToScroll(const u16 px, const u16 py) {
-    return (scroll_t){ .x = px, .y = py };
+scroll_t CartesianToScroll(const vec2<u16> pos) {
+    return (scroll_t){ .x = pos.x, .y = pos.y };
 }
 
 void SetColorPriority(const u8 priority) {
@@ -637,10 +641,10 @@ void StreamFromVideoMemory(const u16 offset, atomic u8* target, const u8 size) {
 
 }   // namespace ppu
 
-void video::WaitThenReactToSpriteZero(const u16 px, const u16 py, void (*fn)(), atomic u8* latch) {
+void video::WaitThenReactToSpriteZero(const vec2<u16> pos, void (*fn)(), atomic u8* latch) {
     *latch = true;
-    video::SetSpriteZeroHandler(px, py, fn);
+    video::SetSpriteZeroHandler(pos, fn);
     irq::irqHandler      = fn;
-    irq::irqPosition     = { px, py };
+    irq::irqPosition     = pos;
     irq::irqPendingValid = true;
 }

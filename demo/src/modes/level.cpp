@@ -173,33 +173,33 @@ namespace level {
             ppu::pal::WriteFromBuffer(ppu::BG_0,         SIZED_OBJ(BGColours));
             ppu::pal::WriteFromBuffer(13,                SIZED_OBJ(hudColours));   // BG palette 3 (HUD), same colours as the title screen's
             ppu::pal::WriteFromBuffer(ppu::SPRITE_0 + 1, SIZED_OBJ(maryColors));
-            ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(msg_mary), 0, SIZED_OBJ(msg_mary), 0);
+            ppu::WriteFromBufferToNameTable({static_cast<u16>(video::viewport_tx() - sizeof(msg_mary)), 0}, SIZED_OBJ(msg_mary), 0);
         });
 
         constexpr u8 coinUI[] = {chrHUDCoin_tile, chrFont_tile + 0, chrFont_tile + 0};
-        ppu::WriteFromBufferToNameTable(video::viewport_tx() - sizeof(coinUI), 1, SIZED_OBJ(coinUI), 0);
+        ppu::WriteFromBufferToNameTable({static_cast<u16>(video::viewport_tx() - sizeof(coinUI)), 1}, SIZED_OBJ(coinUI), 0);
 
         edgeR = { TileData };
         dynEdgeR = { DynLengths, DynData, 0 }; // dyn forward edge, lockstep w/ edgeR
         for (auto i = 0; i < 2 + video::viewport_tx(); i += 2) {
             ppu::WriteFromProviderToNameTable(
-                i, 2,
+                {static_cast<u16>(i), 2},
                 GetNextWrite, 28, 1
             );
 
             ppu::WriteFromProviderToNameTable(
-                i + 1, 2,
+                {static_cast<u16>(i + 1), 2},
                 GetCurrentNext, 28, 1
             );
 
-            ppu::WriteFromBufferToAttributeTable(i & ~3, 2, AttributeBuffer, 8, 1);
+            ppu::WriteFromBufferToAttributeTable({static_cast<u16>(i & ~3), 2}, AttributeBuffer, 8, 1);
         }
 
         edgeRAbs    = (1 + viewport_mx()) * levelHeight;
         edgeL    = { TileData };
         dynEdgeL = { DynLengths, DynData, 0 }; // dyn backward edge, lockstep w/ edgeL
 
-        ppu::SetScroll(0, 0);
+        ppu::SetScroll({0, 0});
 
         // Farcalled: module+engine share one bank, songs+SFX another, both
         // mapped for the duration -- see banks.hpp's ::audio_tag. Nested
@@ -297,15 +297,15 @@ namespace level {
         if (levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_DONE) SHADOW(ppu::PPUMASK) {
             ppu::PPUMASK = 0;
             if (levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_RIGHT) {
-                ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 0, 2, TileBuffer, 28, 1);
-                ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) + video::viewport_tx() + 1, 2, TileBuffer + 28, 28, 1);
+                ppu::WriteFromBufferToNameTable({static_cast<u16>((lastXWorldSpace >> 3) + video::viewport_tx() + 0), 2}, TileBuffer, 28, 1);
+                ppu::WriteFromBufferToNameTable({static_cast<u16>((lastXWorldSpace >> 3) + video::viewport_tx() + 1), 2}, TileBuffer + 28, 28, 1);
                 if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
-                    ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) + video::viewport_tx() & ~3, 2, AttributeBuffer, 8, 1);
+                    ppu::WriteFromBufferToAttributeTable({static_cast<u16>(((lastXWorldSpace >> 3) + video::viewport_tx()) & ~3), 2}, AttributeBuffer, 8, 1);
             } else {
-                ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 1, 2, TileBuffer, 28, 1);
-                ppu::WriteFromBufferToNameTable((lastXWorldSpace >> 3) - 2, 2, TileBuffer + 28, 28, 1);
+                ppu::WriteFromBufferToNameTable({static_cast<u16>((lastXWorldSpace >> 3) - 1), 2}, TileBuffer, 28, 1);
+                ppu::WriteFromBufferToNameTable({static_cast<u16>((lastXWorldSpace >> 3) - 2), 2}, TileBuffer + 28, 28, 1);
                 if (!(levelStreamCommand & eLevelStreamCommands::STREAM_LEVEL_SWAP))
-                    ppu::WriteFromBufferToAttributeTable((lastXWorldSpace >> 3) - 2 & ~3, 2, AttributeBuffer, 8, 1);
+                    ppu::WriteFromBufferToAttributeTable({static_cast<u16>(((lastXWorldSpace >> 3) - 2) & ~3), 2}, AttributeBuffer, 8, 1);
             }
         }
 
@@ -316,7 +316,7 @@ namespace level {
         }
         CoinVramReset();
 
-        ppu::SetScroll(0, 0);
+        ppu::SetScroll({0, 0});
         if (levelStreamCommand & STREAM_LEVEL_DONE) {
             levelStreamCommand = {};
         }
@@ -359,9 +359,9 @@ namespace level {
             const i16 anchor = static_cast<i16>(240 - video::viewport_py());
             const i16 raw    = static_cast<i16>(player1.actor.screen.y) - mid;
             const i16 bump   = raw < 0 ? 0 : (raw > anchor ? anchor : raw);
-            ppu::SetScroll(cameraX, static_cast<u16>(16 + bump));
+            ppu::SetScroll({cameraX, static_cast<u16>(16 + bump)});
         #else
-            ppu::SetScroll(cameraX, kHudSplitRow);
+            ppu::SetScroll({cameraX, kHudSplitRow});
         #endif
     }
 }

@@ -24,6 +24,7 @@ using namespace br0::intsh;
 #include <cstddef>
 #include <array>
 
+#include "types.hpp"
 #include "technology.hpp"
 
 // The SDL desktop backend pulls in SDL3's display-mode types here. The libogc
@@ -461,10 +462,8 @@ namespace ppu {
      */
     typedef struct { u8 data[3]; } scroll_t;
 #else
-    /** @brief 2-D unsigned 16-bit vector used on desktop. */
-    typedef struct { u16 x; u16 y; } vec2u16;
     /** @brief Platform-specific scroll encoding (desktop: plain XY pixels). */
-    typedef vec2u16 scroll_t;
+    typedef vec2<u16> scroll_t;
 #endif
 
     /**
@@ -487,11 +486,10 @@ namespace ppu {
 
     /**
      * @brief Converts a pixel position into a PPU VRAM address.
-     * @param x Tile X position.
-     * @param y Tile Y position.
+     * @param pos Tile position.
      * @return  Absolute PPU address of the corresponding nametable byte.
      */
-    u16 CartesianToAddress(u16 x, u16 y);
+    u16 CartesianToAddress(vec2<u16> pos);
 
 
     void StreamFromVideoMemory(u16 offset, atomic u8* target, u8 size);
@@ -873,48 +871,43 @@ namespace ppu {
      * NES builds encode nametable select plus fine X/Y into the 3-byte
      * PPU format. Desktop builds just store the pixel coordinates.
      *
-     * @param px Horizontal pixel position.
-     * @param py Vertical pixel position.
+     * @param pos Pixel position.
      * @return   Encoded scroll value.
      */
-    scroll_t CartesianToScroll(u16 px, u16 py);
+    scroll_t CartesianToScroll(vec2<u16> pos);
 
     /**
      * @brief Sets the absolute scroll of the screen.
-     * @param x New horizontal scroll, in pixels.
-     * @param y New vertical scroll, in pixels.
+     * @param pos New scroll, in pixels.
      */
-    void SetScroll(u16 x, u16 y);
+    void SetScroll(vec2<u16> pos);
 
     /**
      * @brief Adds a signed delta to the current scroll.
-     * @param x Horizontal delta, in pixels.
-     * @param y Vertical delta, in pixels.
+     * @param delta Signed delta, in pixels.
      */
-    void DeltaScroll(i8 x, i8 y);
+    void DeltaScroll(vec2<i8> delta);
 
     /**
      * @brief Writes an array of bytes into nametable memory with a stride.
      *
      * Copies @p source byte-by-byte starting at the tile position
-     * corresponding to (@p x, @p y). @p polarity selects horizontal
+     * @p pos. @p polarity selects horizontal
      * (stride 1) or vertical (stride 32) writes, matching ::ppu::ctrl::POLARITY.
      *
-     * @param x        Tile X position (pixels / 8).
-     * @param y        Tile Y position (pixels / 8).
+     * @param pos      Tile position (pixels / 8).
      * @param source   Source buffer to push into PPU video RAM.
      * @param sBuffer  Size of @p source in bytes.
      * @param polarity Non-zero for vertical writes, zero for horizontal.
      */
-    void WriteFromBufferToNameTable(u16 x, u16 y, const u8* source, u8 sBuffer, u8 polarity);
+    void WriteFromBufferToNameTable(vec2<u16> pos, const u8* source, u8 sBuffer, u8 polarity);
 
     /**
      * @brief Writes a single byte into nametable memory.
-     * @param x     Tile X position.
-     * @param y     Tile Y position.
+     * @param pos   Tile position.
      * @param value Byte value to write.
      */
-    void WriteSingleToNameTable(u16 x, u16 y, u8 value);
+    void WriteSingleToNameTable(vec2<u16> pos, u8 value);
 
     /**
      * @brief Writes a single byte into nametable memory at a precomputed address.
@@ -944,14 +937,13 @@ namespace ppu {
      * out-of-line in each backend with explicit instantiations for `u8`/`u16`.
      *
      * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
-     * @param x        Tile X position.
-     * @param y        Tile Y position.
+     * @param pos      Tile position.
      * @param fn       Provider returning the byte to write for iteration `i`.
      * @param amt      Number of iterations.
      * @param polarity Non-zero for vertical writes, zero for horizontal.
      */
     template <typename Idx>
-    void WriteFromProviderToNameTable(u16 x, u16 y, u8 (*fn)(Idx), u8 amt, u8 polarity);
+    void WriteFromProviderToNameTable(vec2<u16> pos, u8 (*fn)(Idx), u8 amt, u8 polarity);
 
     /**
      * @brief Writes an array of bytes into the attribute table with a stride.
@@ -959,21 +951,19 @@ namespace ppu {
      * Same layout as ::ppu::WriteFromBufferToNameTable but targets attribute
      * memory instead of the nametable.
      *
-     * @param x        Tile X position.
-     * @param y        Tile Y position.
+     * @param pos      Tile position.
      * @param source   Source buffer of attribute bytes.
      * @param sBuffer  Size of @p source in bytes.
      * @param polarity Non-zero for vertical, zero for horizontal.
      */
-    void WriteFromBufferToAttributeTable(u16 x, u16 y, const u8* source, u8 sBuffer, u8 polarity);
+    void WriteFromBufferToAttributeTable(vec2<u16> pos, const u8* source, u8 sBuffer, u8 polarity);
 
     /**
      * @brief Writes a single byte into attribute memory.
-     * @param x     Tile X position.
-     * @param y     Tile Y position.
+     * @param pos   Tile position.
      * @param value Attribute byte (palette + flip flags).
      */
-    void WriteSingleToAttributeTable(u16 x, u16 y, u8 value);
+    void WriteSingleToAttributeTable(vec2<u16> pos, u8 value);
 
     /**
      * @brief Writes bytes produced by a provider callback into attribute memory.
@@ -987,14 +977,13 @@ namespace ppu {
      * out-of-line in each backend with explicit instantiations for `u8`/`u16`.
      *
      * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
-     * @param x        Tile X position.
-     * @param y        Tile Y position.
+     * @param pos      Tile position.
      * @param fn       Provider returning the attribute byte to write for iteration `i`.
      * @param amt      Number of iterations.
      * @param polarity Non-zero for vertical writes, zero for horizontal.
      */
     template <typename Idx>
-    void WriteFromProviderToAttributeTable(u16 x, u16 y, u8 (*fn)(Idx), u8 amt, u8 polarity);
+    void WriteFromProviderToAttributeTable(vec2<u16> pos, u8 (*fn)(Idx), u8 amt, u8 polarity);
 
     /**
      * @brief Flushes pending nametable and attribute-table writes to the PPU.
@@ -1055,35 +1044,32 @@ typedef void (*spriteZeroHandler_t)();
  */
 typedef struct {
   void (*method)(void); /**< Callback fired on sprite-zero hit. */
-  u16 px;          /**< Pixel X at which to fire. */
-  u16 py;          /**< Pixel Y at which to fire. */
+  vec2<u16> pos;   /**< Pixel position at which to fire. */
 } spriteZeroHandler_t;
 
 /**
  * @brief Registers a sprite-zero-hit handler (desktop only).
- * @param px Pixel X at which to fire.
- * @param py Pixel Y at which to fire.
- * @param fn Callback to invoke when the sprite-zero test trips.
+ * @param pos Pixel position at which to fire.
+ * @param fn  Callback to invoke when the sprite-zero test trips.
  */
-void SetSpriteZeroHandler(u16 px, u16 py, void (*fn)(void));
+void SetSpriteZeroHandler(vec2<u16> pos, void (*fn)(void));
 /** @brief Convenience wrapper around ::video::SetSpriteZeroHandler. */
-#define SET_SPRITE_ZERO_HANDLER(px, py, fn) ::video::SetSpriteZeroHandler(px, py, fn)
+#define SET_SPRITE_ZERO_HANDLER(px, py, fn) ::video::SetSpriteZeroHandler({px, py}, fn)
 #endif
 
 /**
- * @brief Spins until the beam crosses (@p px, @p py), then invokes @p fn.
+ * @brief Spins until the beam crosses @p pos, then invokes @p fn.
  *
  * The NES implementation busy-waits on the sprite-zero hit flag in
  * ::PPUSTATUS; the desktop implementation schedules @p fn via the
  * renderer. In both cases @p latch is set to a non-zero value when
  * the handler has run, so frame code can detect completion.
  *
- * @param px    Pixel X trigger.
- * @param py    Pixel Y trigger.
+ * @param pos   Pixel trigger position.
  * @param fn    Callback to fire.
  * @param latch Flag written non-zero when @p fn has completed.
  */
-void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
+void WaitThenReactToSpriteZero(vec2<u16> pos, void (*fn)(), atomic u8* latch);
 
 /**
  * @brief As above, but accepts any invocable rather than a bare function
@@ -1094,13 +1080,13 @@ void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
  * converts to the plain overload above and the bank rides in the constant:
  *
  *     constexpr auto split = mmc3::GetCallable<BankedSplit>();
- *     video::WaitThenReactToSpriteZero(px, py, []{ mmc3::Call(split); }, &done);
+ *     video::WaitThenReactToSpriteZero(pos, []{ mmc3::Call(split); }, &done);
  *
  * It is not fine when the target is chosen at runtime. A capturing lambda
  * holding a runtime-selected callable cannot convert to a function pointer, so
  * it needs this overload:
  *
- *     video::WaitThenReactToSpriteZero(px, py, [&]{ mmc3::Call(table[i]); }, &done);
+ *     video::WaitThenReactToSpriteZero(pos, [&]{ mmc3::Call(table[i]); }, &done);
  *
  * Nothing here names a mapper: which bank the handler lives in is the project's
  * business. Bank-switching inside is safe -- sprite-zero hit is a polled
@@ -1111,10 +1097,10 @@ void WaitThenReactToSpriteZero(u16 px, u16 py, void (*fn)(), atomic u8* latch);
  *       and there are no banks to carry. Resolve the choice before the call.
  */
 template <typename Handler>
-void WaitThenReactToSpriteZero(const u16 px, const u16 py, Handler &&fn,
+void WaitThenReactToSpriteZero(const vec2<u16> pos, Handler &&fn,
                                atomic u8* latch) {
 #ifdef TARGET_NES
-    (void)px; (void)py;
+    (void)pos;
     // Same loop as the out-of-line NES definition in src/nes/video.cpp: clear
     // any stale hit left over from the previous frame's pre-render line, then
     // wait for the real one.
@@ -1126,7 +1112,7 @@ void WaitThenReactToSpriteZero(const u16 px, const u16 py, Handler &&fn,
     }
 #else
     void (*thunk)() = fn;   // captureless off-NES; see @note above
-    WaitThenReactToSpriteZero(px, py, thunk, latch);
+    WaitThenReactToSpriteZero(pos, thunk, latch);
 #endif
 }
 } // namespace video

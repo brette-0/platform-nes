@@ -71,10 +71,10 @@ ACTORS static void PushCoinVram(const CoinPick& pick) {
     CoinVramPush(base + 32, Metatiles_BL[m]);
     CoinVramPush(base + 33, Metatiles_BR[m]);
 #else
-    CoinVramPush(ppu::CartesianToAddress(tx,     ty),     Metatiles_UL[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx + 1, ty),     Metatiles_UR[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx,     ty + 1), Metatiles_BL[m]);
-    CoinVramPush(ppu::CartesianToAddress(tx + 1, ty + 1), Metatiles_BR[m]);
+    CoinVramPush(ppu::CartesianToAddress({tx,     ty}),     Metatiles_UL[m]);
+    CoinVramPush(ppu::CartesianToAddress({static_cast<u16>(tx + 1), ty}),     Metatiles_UR[m]);
+    CoinVramPush(ppu::CartesianToAddress({tx,     static_cast<u16>(ty + 1)}), Metatiles_BL[m]);
+    CoinVramPush(ppu::CartesianToAddress({static_cast<u16>(tx + 1), static_cast<u16>(ty + 1)}), Metatiles_BR[m]);
 #endif
 }
 
