@@ -54,6 +54,15 @@ set(TOPLEVEL_LD "${CMAKE_SOURCE_DIR}/demo/link.ld" CACHE FILEPATH "" FORCE)
 # crash with no diagnostic.
 set(PLATFORM_NES_AUDIO_SECTION ".prg_rom_audio" CACHE STRING "" FORCE)
 
+# ELF section the UI toolkit (src/all/extras/ui/*.cpp) is placed into.
+# Compulsory, like audio's above -- there is no default, because a guessed
+# section would place this module wherever the library guessed with no
+# diagnostic. Unlike audio, there's no external engine it must share a bank
+# with; this is required purely so the placement decision is never silent.
+# Your linker script must define a MEMORY region and rule for the name, and
+# the section must be reachable from wherever UI code is called.
+set(PLATFORM_NES_UI_SECTION ".prg_rom_ui" CACHE STRING "" FORCE)
+
 # ELF section the video module (src/nes/video.cpp) is placed into. OPTIONAL and
 # unset by default, unlike audio's: leave it out and video is inlined into its
 # callers, which is both smaller overall and what LTO does anyway.

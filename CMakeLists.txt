@@ -199,6 +199,37 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             "PLATFORM_NES_AUDIO_SECTION=\"${PLATFORM_NES_AUDIO_SECTION}\"")
 
     # ------------------------------------------------------------------
+    # Where the UI toolkit (src/all/extras/ui/*.cpp) is placed. Same
+    # treatment as audio's PLATFORM_NES_AUDIO_SECTION above: COMPULSORY,
+    # no default value. A default would silently place this module
+    # wherever the library guessed, which is exactly the
+    # wrong-bank-with-no-diagnostic failure this project's placement
+    # mechanism otherwise avoids everywhere else -- a project targeting
+    # NES has to make an explicit call for the UI module too, not just
+    # audio. Unlike audio, there is no external engine to co-locate with;
+    # this is required purely so the placement decision is never a silent
+    # guess.
+    #
+    # Covers every ui .cpp file as one group -- the whole toolkit moves or
+    # stays together, same as audio's single-module contract.
+    # ------------------------------------------------------------------
+    if(NOT PLATFORM_NES_UI_SECTION)
+        message(FATAL_ERROR
+                "PLATFORM_NES_UI_SECTION is not set. It names the ELF section "
+                "src/all/extras/ui/*.cpp is placed into. See local.cmake.example.")
+    endif()
+    set(PLATFORM_NES_UI_SOURCES
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/canvas.cpp
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/tickbox.cpp
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/tileslider.cpp
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/text.cpp
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/textbox.cpp
+            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/singlechoice.cpp)
+    set_source_files_properties(${PLATFORM_NES_UI_SOURCES}
+            PROPERTIES COMPILE_DEFINITIONS
+            "PLATFORM_NES_UI_SECTION=\"${PLATFORM_NES_UI_SECTION}\"")
+
+    # ------------------------------------------------------------------
     # Placement for the other modules that produce code. OPTIONAL, unlike
     # audio's: audio MUST share a bank with the engine it plain-calls, so an
     # unset section there is an #error. These have no such contract, so unset
