@@ -8,16 +8,25 @@ namespace ui {
 
     }
 
+    // need a draw call for movement of arrow
     template <bool vertical, typename Tuple>
     auto Canvas<vertical, Tuple>::Pass(const u8 inputs) -> void {
         if constexpr (vertical) {
-            if (inputs & (input::UP | input::DOWN)) {
-                // move selectedButton
+            if (inputs & input::UP) {
+                if (selectedItem > 0) --selectedItem;
+                return;
+            }
+            if (inputs & input::DOWN) {
+                if (selectedItem < ItemCount - 1) ++selectedItem;
                 return;
             }
         } else {
-            if (inputs & (input::LEFT | input::RIGHT)) {
-                // move selectedButton
+            if (inputs & input::LEFT) {
+                if (selectedItem > 0) --selectedItem;
+                return;
+            }
+            if (inputs & input::RIGHT) {
+                if (selectedItem < ItemCount - 1) ++selectedItem;
                 return;
             }
         }

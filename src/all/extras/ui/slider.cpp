@@ -4,18 +4,31 @@
 #include "platform-nes/extras/math.hpp"
 
 namespace ui::slider {
-    TileSlider::TileSlider(
-        const vec2<u16> pos,        const u8 width,
+    template <bool vertical>
+    TileSlider<vertical>::TileSlider(
+        const vec2<u16> pos,        const u8 size,
         const u8 defaultPosition,
-        const u8 unselectedGraphic, const u8 selectedGraphic
-    ) : pos(pos), width(width), unselectedGraphic(unselectedGraphic),
-        selectedGraphic(selectedGraphic), selectedPosition(defaultPosition) {
+        const u8 unselectedGraphic, const u8 selectedGraphic,
+        u8 (*post)(u8 inputs)
+    ) : pos(pos), size(size), unselectedGraphic(unselectedGraphic),
+        selectedGraphic(selectedGraphic), selectedPosition(defaultPosition),
+        post(post) {
         // slider body is presumed to be drawn, but not the slider piece itself
         // does not edit attributes, as we presume an attribute has 16x16 finity
-        ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
+        if constexpr (vertical) {
+            ppu::WriteSingleToNameTable({pos.x, pos.y + selectedPosition}, selectedGraphic);
+        } else {
+            ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
+        }
     }
 
-    void TileSlider::Move(const i8 amt) {
+    template <bool vertical>
+    auto TileSlider<vertical>::Pass(const u8 inputs) -> void {
+        Move(post(inputs));
+    }
+
+    template <bool vertical>
+    void TileSlider<vertical>::Move(const i8 amt) {
         ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, unselectedGraphic);
         const auto aamt = abs(amt);
         if (amt < 0) {
@@ -24,12 +37,17 @@ namespace ui::slider {
                 : aamt;
         } else {
             selectedPosition += amt;
-            if (selectedPosition > width) selectedPosition = width;
+            if (selectedPosition > size) selectedPosition = size;
         }
 
-        ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
+        if constexpr (vertical) {
+            ppu::WriteSingleToNameTable({pos.x, pos.y + selectedPosition}, selectedGraphic);
+        } else {
+            ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
+        }
     }
 
+    template <bool vertical>
     auto TileSlider::Pass(const u8 inputs) -> void {
 
     }
