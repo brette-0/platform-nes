@@ -39,8 +39,6 @@ u32 chrGeneration;
 
 const u8 *patternTable = CHR_ROM;
 
-static int yScroll_written;
-
 static video::spriteZeroHandler_t sprite0_zero;
 
 void video::SetSpriteZeroHandler(const vec2<u16> pos, void (*fn)()) {
@@ -118,20 +116,36 @@ static struct oam::sprite_t oamShadow[OAM_SPRITES];
 
 /* Per-pixel NES PPU emulator.
  *
- * Scroll model (matches real PPU V-register behaviour):
- *   yScroll is an ABSOLUTE source address into VRAM -- not an offset added
- *   to the screen row. The PPU maintains an internal Y counter (ppu_y here)
- *   that starts at yScroll and auto-increments once per scanline. When code
- *   writes yScroll (SetScroll / DeltaScroll), ppu_y is reset to that value
- *   at the next IRQ boundary, so the remaining pixels on that scanline read
- *   from the new address. xScroll works the same way in X: it defines the
- *   absolute VRAM column of screen pixel 0, and px is added as the scan
- *   offset within the line.
+ * Scroll model (matches real PPU v/t-register behaviour -- deliberately
+ * ASYMMETRIC between X and Y, not a simplification):
+ *
+ *   On real hardware, the PPU's internal v register only re-latches its
+ *   HORIZONTAL bits from t once per scanline (at dot 257); the VERTICAL bits
+ *   are only re-latched from t once per FRAME, during the pre-render
+ *   scanline (dots 280-304). A mid-frame $2005/$2006 write updates t
+ *   immediately, but a change to the Y portion never reaches v -- and so
+ *   never affects what's on screen -- until the following frame's
+ *   pre-render line. This is exactly why real NES status-bar Y-splits use
+ *   the $2006-double-write trick instead of a plain $2005 Y write: an
+ *   ordinary mid-frame Y write is supposed to be a no-op for the rest of
+ *   that frame. X has no such restriction, which is what makes mid-frame
+ *   horizontal splits (this engine's own MMC3 HUD/menu splits) work at all.
+ *
+ *   xScroll is read fresh every segment (see wx0 below) -- any write takes
+ *   effect on the very next pixel, matching the real per-scanline reload.
+ *   yScroll instead only seeds ppu_y once, here at the top of the frame;
+ *   ppu_y then free-runs (auto-incrementing once per scanline) for the rest
+ *   of the frame regardless of any further yScroll writes an IRQ handler
+ *   makes -- those are only picked up the NEXT time GenerateFrame runs,
+ *   same as real hardware only picking up a new Y at the next pre-render
+ *   line. A handler that wants an on-screen Y split within one frame still
+ *   needs the same trick a real NES program would.
  *
  * IRQ dispatch: each scanline is split at the px of the next queued IRQ.
  * The handler fires before the pixel at its (px, py) renders, so it can
- * mutate xScroll, yScroll, ppu::PPUCTRL, palette -- anything -- and the very
- * next pixel sees the new state in both axes.
+ * mutate xScroll, ppu::PPUCTRL, palette -- anything -- and the very next
+ * pixel sees the new X/palette/etc state; a yScroll write there is stored
+ * but, per above, not visible until next frame.
  *
  * The finished frame is written into the caller's ARGB8888 surface (@p fb,
  * @p stride pixels per row); the backend presents it. */
@@ -153,13 +167,11 @@ void GenerateFrame(u32 *fb, const int stride) {
     const int spr_base = (ppu::PPUCTRL & ppu::ctrl::SPRITE_ADDR) ? 0x1000 : 0x0000;
     const int spr_h    = (ppu::PPUCTRL & ppu::ctrl::SPRITE_SIZE) ? 16 : 8;
 
-    /* PPU Y counter: the absolute VRAM row currently being sourced.
-     * Initialised from yScroll, then auto-incremented after each scanline.
-     * Any write to yScroll (via SetScroll/DeltaScroll) sets yScroll_written;
-     * we pick that up after the IRQ fires and reset ppu_y to the new value,
-     * so the next segment renders from the new absolute row. */
+    /* PPU Y counter: the absolute VRAM row currently being sourced. Seeded
+     * from yScroll once, here -- NOT re-read from yScroll again for the rest
+     * of this frame, even if an IRQ handler below writes it (see this
+     * function's own doc comment for why that matches real hardware). */
     int ppu_y = (int)yScroll;
-    yScroll_written = 0;
 
     for (int py = 0; py < vph; py++) {
         /* Sprites use screen-space Y -- they don't scroll with the background. */
@@ -322,18 +334,18 @@ void GenerateFrame(u32 *fb, const int stride) {
                 }
             }
 
-            /* Fire the IRQ, then check if yScroll was written by the handler.
-             * If so, reset ppu_y to the new value -- the next segment (which
-             * starts at seg_end) will derive wy from the updated counter. */
+            /* Fire the IRQ. A yScroll write inside the handler is NOT
+             * applied to ppu_y here -- real hardware doesn't reload v's
+             * vertical bits until the next frame's pre-render line, so
+             * neither does this. ppu_y keeps free-running (see the ppu_y++
+             * below); xScroll, unlike yScroll, is simply re-read fresh by
+             * the next segment's wx0, so an X change the handler made is
+             * already picked up with no bookkeeping needed here. */
             if (fire) {
                 /* Clear before calling so a re-arm from inside the handler
                  * (a new irqPosition for the next hunk) survives the call. */
                 irq::irqPendingValid = false;
                 if (irq::irqHandler) irq::irqHandler();
-                if (yScroll_written) {
-                    ppu_y = static_cast<int>(yScroll);
-                    yScroll_written = 0;
-                }
             }
 
             seg_start = seg_end;
@@ -351,18 +363,22 @@ void InitMemory(const unsigned vram_bytes) {
     ppu::InitCartVRAM();
 }
 
-/* Raster-timeline walk for the GX backend. Same IRQ-dispatch and yScroll-reset
- * logic as GenerateFrame's outer loop, but with no inner pixel loop: it splits
- * the frame into scanline bands at IRQ boundaries, fires each handler (running
- * game logic, which may move the scroll), and hands each band's scroll to the
- * backend to render as a tilemap. See emu.hpp for the band semantics. */
+/* Raster-timeline walk for the GX backend. Same IRQ-dispatch logic as
+ * GenerateFrame's outer loop -- including the same real-hardware asymmetry
+ * between X and Y (see that function's own doc comment) -- but with no inner
+ * pixel loop: it splits the frame into scanline bands at IRQ boundaries,
+ * fires each handler (running game logic, which may move the scroll), and
+ * hands each band's scroll to the backend to render as a tilemap. See
+ * emu.hpp for the band semantics. */
 void GenerateBands(const band_emit_fn emit) {
     const int vph = video::viewport_py();
 
-    yScroll_written = 0;
     int  band_start = 0;
     u16  cur_xs = xScroll;
-    u16  cur_ys = yScroll;
+    // Latched once, here, for the whole frame -- a handler's yScroll write
+    // below is not picked up until the NEXT GenerateBands call, matching
+    // real hardware only reloading v's vertical bits at the pre-render line.
+    const u16 fixed_ys = yScroll;
 
     for (int py = 0; py < vph; py++) {
         /* Fire the pending IRQ when its scanline is reached. We band at
@@ -379,23 +395,21 @@ void GenerateBands(const band_emit_fn emit) {
                 irq::irqPendingValid = false;   // stale — past without firing
             } else if (static_cast<int>(pos.y) == py) {
                 if (py > band_start) {
-                    emit(band_start, py, cur_xs, cur_ys);
+                    emit(band_start, py, cur_xs, fixed_ys);
                     band_start = py;
                 }
                 /* Clear before calling so a re-arm from inside the handler
                  * survives the call. */
                 irq::irqPendingValid = false;
                 if (irq::irqHandler) irq::irqHandler();
-                if (yScroll_written) {
-                    cur_xs = xScroll;
-                    cur_ys = yScroll;
-                    yScroll_written = 0;
-                }
+                // X, unlike Y, reloads every scanline on real hardware --
+                // simply re-read fresh, no "did it change" bookkeeping needed.
+                cur_xs = xScroll;
             }
         }
     }
 
-    if (band_start < vph) emit(band_start, vph, cur_xs, cur_ys);
+    if (band_start < vph) emit(band_start, vph, cur_xs, fixed_ys);
 }
 
 const oam::sprite_t* OamShadow() { return oamShadow; }
@@ -485,13 +499,11 @@ void WriteSingleToNameTable(const int address, u8 value) {
 
 void SetScroll(const vec2<u16> pos) {
     xScroll = pos.x; yScroll = pos.y;
-    yScroll_written = 1;
 }
 
 void DeltaScroll(const vec2<i8> delta) {
     xScroll = static_cast<u16>(xScroll + delta.x);
     yScroll = static_cast<u16>(yScroll + delta.y);
-    yScroll_written = 1;
 }
 
 template <typename Idx>
