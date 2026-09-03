@@ -26,7 +26,7 @@ namespace ui::choice {
         // in the buffer buf points into. Not UI_BANK: tiny and internal-
         // linkage, cheaper inlined into Next()/Previous() than pulled out
         // as its own banked call.
-        AI void WriteOpTo(u8*& buf, const int addr, const u8 val) {
+        inline AI void WriteOpTo(u8*& buf, const int addr, const u8 val) {
             *buf++ = static_cast<u8>(addr >> 8);
             *buf++ = static_cast<u8>(addr & 0xFF);
             *buf++ = val;

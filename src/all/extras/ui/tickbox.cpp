@@ -27,7 +27,7 @@ namespace ui::button {
     // ::AI, not ::UI_BANK: must stay reachable without a bank switch from
     // wherever Pass() calls it -- the two are mutually exclusive (see
     // MODULE_PLACEMENT's own doc comment).
-    AI auto TickBox::Toggle(u8*& buf) -> void {
+    inline AI auto TickBox::Toggle(u8*& buf) -> void {
         *buf++ = static_cast<u8>(addr >> 8);
         *buf++ = static_cast<u8>(addr & 0xFF);
         *buf++ = (enabled ^= true);

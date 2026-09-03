@@ -36,7 +36,7 @@ namespace ui::button {
     // ::AI, not ::UI_BANK: must stay reachable without a bank switch from
     // wherever Pass() calls it -- the two are mutually exclusive (see
     // MODULE_PLACEMENT's own doc comment).
-    AI auto TextBox::Toggle() -> void {
+    inline AI auto TextBox::Toggle() -> void {
         enabled ^= true;
         text::Draw(
             enabled ? onBuff : offBuff,
