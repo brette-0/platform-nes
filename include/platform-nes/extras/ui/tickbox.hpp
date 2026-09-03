@@ -12,7 +12,7 @@ namespace ui::button {
 
         bool enabled;
     private:
-        auto Toggle() -> bool;
+        auto Toggle() -> void;
         vec2<u16> pos;
     };
 }

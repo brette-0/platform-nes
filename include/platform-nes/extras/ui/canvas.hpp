@@ -3,8 +3,9 @@
 #include <intsh>
 #include <br0/tuple>
 #include <type_traits>
-#include <platform-nes/extras/ui/button.hpp>
-#include <platform-nes/extras/ui/slider.hpp>
+#include <platform-nes/extras/ui/tickbox.hpp>
+#include <platform-nes/extras/ui/tileslider.hpp>
+#include <platform-nes/extras/ui/textbox.hpp>
 
 using namespace br0::intsh;
 
@@ -30,8 +31,14 @@ namespace ui {
     // reinterprets buff[i] as tuple_element_t<i, Tuple>* with no virtual
     // dispatch or RTTI to check it against, so this whitelist is what stops
     // an unrelated type (e.g. int*) from being smuggled in and cast to a
-    // widget pointer at runtime.
-    using ItemWhitelist = br0::tuple<button::TickBox, slider::TileSlider>;
+    // widget pointer at runtime. TileSlider is templated on its own
+    // orientation, so both instantiations are listed individually.
+    using ItemWhitelist = br0::tuple<
+        button::TickBox,
+        button::TextBox,
+        slider::TileSlider<true>,
+        slider::TileSlider<false>
+    >;
 
     template <bool vertical, typename Tuple>
     class Canvas {

@@ -61,13 +61,7 @@ namespace ui::text {
         const u8* buff,      const u8 sBuff,
         const vec2<u16> pos, const vec2<u8> box,
         const u8 splitter,   const Alignment align
-        ) {
-        this->buff     = buff;
-        this->sBuff    = sBuff;
-        this->pos      = pos;
-        this->box      = box;
-        this->splitter = splitter;
-        this->align    = align;
+        ) : sBuff(sBuff), buff(buff), pos(pos), box(box), splitter(splitter), align(align) {
 
         lastProgress = 0;
         progress = Draw(buff, sBuff, pos, box, splitter, align);

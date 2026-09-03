@@ -1,4 +1,4 @@
-#include <platform-nes/extras/ui/button.hpp>
+#include <platform-nes/extras/ui/tickbox.hpp>
 
 #include "platform-nes/video.hpp"
 
@@ -8,12 +8,11 @@ namespace ui::button {
         ppu::WriteSingleToNameTable(pos, enabled);
     }
 
-    AI auto TickBox::Toggle() -> bool {
+    AI auto TickBox::Toggle() -> void {
         ppu::WriteSingleToNameTable(pos, enabled ^= true);
-        return enabled;
     }
 
-    auto TickBox::Pass(const u8 inputs) -> void {
+    NI auto TickBox::Pass(const u8 inputs) -> void {
         Toggle();
     }
 }

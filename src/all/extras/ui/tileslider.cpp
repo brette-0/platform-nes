@@ -1,4 +1,4 @@
-#include <platform-nes/extras/ui/slider.hpp>
+#include <platform-nes/extras/ui/tileslider.hpp>
 
 #include "platform-nes/video.hpp"
 #include "platform-nes/extras/math.hpp"
@@ -23,7 +23,7 @@ namespace ui::slider {
     }
 
     template <bool vertical>
-    auto TileSlider<vertical>::Pass(const u8 inputs) -> void {
+    NI auto TileSlider<vertical>::Pass(const u8 inputs) -> void {
         Move(post(inputs));
     }
 
