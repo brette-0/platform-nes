@@ -27,11 +27,13 @@ namespace ui::button {
     // ::AI, not ::UI_BANK: must stay reachable without a bank switch from
     // wherever Pass() calls it -- the two are mutually exclusive (see
     // MODULE_PLACEMENT's own doc comment).
-    AI auto TickBox::Toggle(WriteQueue& q) -> void {
-        q.Push({addr, enabled ^= true});
+    AI auto TickBox::Toggle(u8*& buf) -> void {
+        *buf++ = static_cast<u8>(addr >> 8);
+        *buf++ = static_cast<u8>(addr & 0xFF);
+        *buf++ = (enabled ^= true);
     }
 
-    UI_BANK auto TickBox::Pass(const u8 inputs, WriteQueue& q) -> void {
-        Toggle(q);
+    UI_BANK auto TickBox::Pass(const u8 inputs, u8*& buf) -> void {
+        Toggle(buf);
     }
 }

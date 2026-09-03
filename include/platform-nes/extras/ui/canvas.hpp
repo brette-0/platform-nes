@@ -6,7 +6,6 @@
 #include <platform-nes/extras/ui/tickbox.hpp>
 #include <platform-nes/extras/ui/tileslider.hpp>
 #include <platform-nes/extras/ui/textbox.hpp>
-#include <platform-nes/extras/ui/writeop.hpp>
 
 using namespace br0::intsh;
 
@@ -48,15 +47,17 @@ namespace ui {
 
     public:
         Canvas(void* buff, u8 confirmButton);
-        // Queues whichever item's write(s) into q instead of touching the
-        // PPU directly -- see WriteQueue's own comment.
-        auto Pass(u8 inputs, WriteQueue& q) -> void;
+        // Writes whichever item's op(s) at *buf and advances buf past them,
+        // instead of touching the PPU directly. buf must point into a
+        // caller-owned buffer with enough room left for whatever the
+        // currently selected item may write.
+        auto Pass(u8 inputs, u8*& buf) -> void;
 
     private:
         static constexpr std::size_t ItemCount = br0::tuple_size_v<Tuple>;
 
         template <std::size_t... Is>
-        auto DispatchItem(u8 inputs, WriteQueue& q, br0::index_sequence<Is...>) -> void;
+        auto DispatchItem(u8 inputs, u8*& buf, br0::index_sequence<Is...>) -> void;
 
         void* buff;
         u8 selectedItem;

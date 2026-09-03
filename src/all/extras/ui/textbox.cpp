@@ -45,7 +45,7 @@ namespace ui::button {
         );
     }
 
-    UI_BANK auto TextBox::Pass(u8 inputs, WriteQueue&) -> void {
+    UI_BANK auto TextBox::Pass(u8 inputs, u8*&) -> void {
         Toggle();
     }
 }

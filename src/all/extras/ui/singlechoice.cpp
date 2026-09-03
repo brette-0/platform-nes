@@ -20,6 +20,19 @@ local.cmake.example has a worked example."
 #define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION)
 
 namespace ui::choice {
+    namespace {
+        // Encodes one pending write as 3 bytes (addr-hi, addr-lo, val) at
+        // *buf, then advances buf past them. Caller guarantees room is left
+        // in the buffer buf points into. Not UI_BANK: tiny and internal-
+        // linkage, cheaper inlined into Next()/Previous() than pulled out
+        // as its own banked call.
+        AI void WriteOpTo(u8*& buf, const int addr, const u8 val) {
+            *buf++ = static_cast<u8>(addr >> 8);
+            *buf++ = static_cast<u8>(addr & 0xFF);
+            *buf++ = val;
+        }
+    }
+
     template <u8 nOptions>
     UI_BANK SingleChoice<nOptions>::SingleChoice(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
@@ -92,33 +105,33 @@ namespace ui::choice {
     }
 
     template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Pass(const u8 inputs, WriteQueue& q) -> void {
+    UI_BANK auto SingleChoice<nOptions>::Pass(const u8 inputs, u8*& buf) -> void {
         // UP moves the cursor up the list (decrements option), DOWN moves it
         // down (increments) -- matches ui::Canvas's clamp convention and the
         // hand-rolled title-menu logic this replaced.
-        if      (inputs & input::UP)   Previous(q);
-        else if (inputs & input::DOWN) Next(q);
+        if      (inputs & input::UP)   Previous(buf);
+        else if (inputs & input::DOWN) Next(buf);
     }
 
     template<u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Next(WriteQueue& q) -> void {
+    UI_BANK auto SingleChoice<nOptions>::Next(u8*& buf) -> void {
         if (option == nOptions - 1) return;
 
         // optionAddr[]: precomputed at construction, see its own comment --
-        // no (x,y)->address divide+modulo here, just the two writes queued
-        // for whoever drains q to poke.
-        q.Push({optionAddr[option], emptyGraphic});
+        // no (x,y)->address divide+modulo here, just the two writes encoded
+        // for whoever replays the bytes to poke.
+        WriteOpTo(buf, optionAddr[option], emptyGraphic);
         option = static_cast<u8>(option + 1); // ++ on a volatile member is deprecated (C++20)
-        q.Push({optionAddr[option], arrowGraphic});
+        WriteOpTo(buf, optionAddr[option], arrowGraphic);
     }
 
     template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Previous(WriteQueue& q) -> void {
+    UI_BANK auto SingleChoice<nOptions>::Previous(u8*& buf) -> void {
         if (option == 0) return;
 
-        q.Push({optionAddr[option], emptyGraphic});
+        WriteOpTo(buf, optionAddr[option], emptyGraphic);
         option = static_cast<u8>(option - 1); // -- on a volatile member is deprecated (C++20)
-        q.Push({optionAddr[option], arrowGraphic});
+        WriteOpTo(buf, optionAddr[option], arrowGraphic);
     }
 
     // Explicit instantiation: SingleChoice's members are defined here (not

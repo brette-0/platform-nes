@@ -24,7 +24,7 @@ namespace ui {
 
     // need a draw call for movement of arrow
     template <bool vertical, typename Tuple>
-    UI_BANK auto Canvas<vertical, Tuple>::Pass(const u8 inputs, WriteQueue& q) -> void {
+    UI_BANK auto Canvas<vertical, Tuple>::Pass(const u8 inputs, u8*& buf) -> void {
         if constexpr (vertical) {
             if (inputs & input::UP) {
                 if (selectedItem > 0) --selectedItem;
@@ -45,14 +45,14 @@ namespace ui {
             }
         }
 
-        DispatchItem(inputs, q, br0::make_index_sequence<ItemCount>{});
+        DispatchItem(inputs, buf, br0::make_index_sequence<ItemCount>{});
     }
 
     template <bool vertical, typename Tuple>
     template <std::size_t... Is>
-    auto Canvas<vertical, Tuple>::DispatchItem(const u8 inputs, WriteQueue& q, br0::index_sequence<Is...>) -> void {
+    auto Canvas<vertical, Tuple>::DispatchItem(const u8 inputs, u8*& buf, br0::index_sequence<Is...>) -> void {
         ((selectedItem == Is
-              ? static_cast<br0::tuple_element_t<Is, Tuple>*>(static_cast<void**>(buff)[Is])->Pass(inputs, q)
+              ? static_cast<br0::tuple_element_t<Is, Tuple>*>(static_cast<void**>(buff)[Is])->Pass(inputs, buf)
               : void())
          , ...);
     }

@@ -3,7 +3,6 @@
 #include <intsh>
 
 #include "text.hpp"
-#include "writeop.hpp"
 #include "platform-nes/types.hpp"
 #include "platform-nes/technology.hpp"   // atomic
 
@@ -19,10 +18,13 @@ namespace ui::choice {
             u8 emptyGraphic, u8 arrowGraphic
         );
 
-        // Queues up to 2 writes (erase-old + draw-new) into q instead of
-        // touching the PPU -- see WriteQueue's own comment. Caller (e.g.
-        // title.cpp's nmi_handler) drains q wherever writing is actually safe.
-        auto Pass(u8 inputs, WriteQueue& q) -> void;
+        // Writes up to 2 pending ops (erase-old + draw-new) at *buf -- 3
+        // bytes each (addr-hi, addr-lo, val) -- and advances buf past them,
+        // instead of touching the PPU directly. buf must point into a
+        // caller-owned buffer with enough room left (2 ops = 6 bytes).
+        // Caller (e.g. title.cpp's nmi_handler) replays the bytes wherever
+        // writing is actually safe.
+        auto Pass(u8 inputs, u8*& buf) -> void;
         // atomic: written from wherever Pass() is called (an ISR, if the
         // caller defers input handling to vblank the way title.cpp does)
         // and read from ordinary code -- same cross-context contract as
@@ -43,7 +45,7 @@ namespace ui::choice {
         const u8 emptyGraphic;
         const u8 arrowGraphic;
 
-        auto Next(WriteQueue& q)     -> void;
-        auto Previous(WriteQueue& q) -> void;
+        auto Next(u8*& buf)     -> void;
+        auto Previous(u8*& buf) -> void;
     };
 }

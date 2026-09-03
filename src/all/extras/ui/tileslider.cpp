@@ -20,6 +20,17 @@ local.cmake.example has a worked example."
 #define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION)
 
 namespace ui::slider {
+    namespace {
+        // Encodes one pending write as 3 bytes (addr-hi, addr-lo, val) at
+        // *buf, then advances buf past them. Caller guarantees room is left
+        // in the buffer buf points into.
+        AI void WriteOpTo(u8*& buf, const int addr, const u8 val) {
+            *buf++ = static_cast<u8>(addr >> 8);
+            *buf++ = static_cast<u8>(addr & 0xFF);
+            *buf++ = val;
+        }
+    }
+
     template <bool vertical>
     UI_BANK TileSlider<vertical>::TileSlider(
         const vec2<u16> pos,        const u8 size,
@@ -39,13 +50,13 @@ namespace ui::slider {
     }
 
     template <bool vertical>
-    UI_BANK auto TileSlider<vertical>::Pass(const u8 inputs, WriteQueue& q) -> void {
-        Move(post(inputs), q);
+    UI_BANK auto TileSlider<vertical>::Pass(const u8 inputs, u8*& buf) -> void {
+        Move(post(inputs), buf);
     }
 
     template <bool vertical>
-    UI_BANK void TileSlider<vertical>::Move(const i8 amt, WriteQueue& q) {
-        q.Push({ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), unselectedGraphic});
+    UI_BANK void TileSlider<vertical>::Move(const i8 amt, u8*& buf) {
+        WriteOpTo(buf, ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), unselectedGraphic);
         const auto aamt = abs(amt);
         if (amt < 0) {
             selectedPosition -= aamt > selectedPosition
@@ -57,9 +68,9 @@ namespace ui::slider {
         }
 
         if constexpr (vertical) {
-            q.Push({ppu::CartesianToAddress({pos.x, static_cast<u16>(pos.y + selectedPosition)}), selectedGraphic});
+            WriteOpTo(buf, ppu::CartesianToAddress({pos.x, static_cast<u16>(pos.y + selectedPosition)}), selectedGraphic);
         } else {
-            q.Push({ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), selectedGraphic});
+            WriteOpTo(buf, ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), selectedGraphic);
         }
     }
 }

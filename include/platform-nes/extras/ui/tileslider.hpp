@@ -1,6 +1,5 @@
 #pragma once
 #include <platform-nes/types.hpp>
-#include <platform-nes/extras/ui/writeop.hpp>
 #include <intsh>
 
 using namespace br0::intsh;
@@ -18,12 +17,14 @@ namespace ui::slider {
             u8 (*post)(u8 inputs)
         );
 
-        // Queues the erase-old/draw-new writes into q instead of touching
-        // the PPU directly -- see WriteQueue's own comment.
-        auto Pass(u8 inputs, WriteQueue& q) -> void;
+        // Writes the erase-old/draw-new ops at *buf -- 3 bytes each
+        // (addr-hi, addr-lo, val) -- and advances buf past them, instead of
+        // touching the PPU directly. buf must point into a caller-owned
+        // buffer with enough room left (2 ops = 6 bytes).
+        auto Pass(u8 inputs, u8*& buf) -> void;
 
     private:
-        void Move(i8 amt, WriteQueue& q);
+        void Move(i8 amt, u8*& buf);
 
         vec2<u16> pos;
         u8 size;

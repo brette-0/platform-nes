@@ -10,7 +10,6 @@
 #include "level/dynamic.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
 #include "platform-nes/extras/ui/singlechoice.hpp"
-#include "platform-nes/extras/ui/writeop.hpp"
 
 namespace title {
     constexpr u8 kMenuOptions   = static_cast<u8>(End + 1);
@@ -21,16 +20,10 @@ namespace title {
     static atomic u8 framePressed = 0;
     static u8 prevInputs = 0;
 
-    // Write-queue storage for UI interaction writes -- see nmi_handler. This
-    // buffer, not ui::WriteQueue itself, is the actual storage ("user code"
-    // owns it, per the design this replaces direct PPU writes with): 2
-    // slots (6 bytes) covers SingleChoice's worst case today, one erase-old
-    // + one draw-new write per Next()/Previous(). softStackScratch is
-    // reserved room for a future larger queue, if some component ever needs
-    // more than 2 pending writes in one frame -- unused by anything today,
-    // just threaded through now so this doesn't need to change again later.
-    static ui::WriteOp writeBuf[2];
-    static u8 softStackScratch[64];
+    // UI interaction write buffer -- see nmi_handler. 6 bytes: 2 ops
+    // (SingleChoice's worst case today, one erase-old + one draw-new write
+    // per Next()/Previous()), 3 bytes each (addr-hi, addr-lo, val).
+    static u8 writeBuf[6];
 
     static oam::oam_t Clear(u16 _);
     static NI void DrawLevelPreview();
@@ -141,13 +134,14 @@ namespace title {
         framePressed = pressed;
 
         if (pMenu) {
-            ui::WriteQueue q{writeBuf, 2, 0, softStackScratch};
-            pMenu->Pass(pressed, q);
+            u8* cursor = writeBuf;
+            pMenu->Pass(pressed, cursor);   // advances cursor past whatever it wrote
             // Drain: the actual pokes, now that we're somewhere safe to do
             // them -- no arithmetic here, just replaying precomputed
-            // {addr, val} pairs.
-            for (u8 i = 0; i < q.count; i++) {
-                ppu::WriteSingleToNameTable(q.buf[i].addr, q.buf[i].val);
+            // (addr-hi, addr-lo, val) triples.
+            for (u8* p = writeBuf; p < cursor; p += 3) {
+                const int addr = (static_cast<int>(p[0]) << 8) | p[1];
+                ppu::WriteSingleToNameTable(addr, p[2]);
             }
         }
 
