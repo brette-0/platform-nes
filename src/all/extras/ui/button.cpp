@@ -14,6 +14,6 @@ namespace ui::button {
     }
 
     auto TickBox::Pass(const u8 inputs) -> void {
-
+        Toggle();
     }
 }
