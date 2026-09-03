@@ -21,38 +21,28 @@ local.cmake.example has a worked example."
 
 namespace ui::choice {
     namespace {
-        // Encodes one pending write as 3 bytes (addr-hi, addr-lo, val) at
-        // *buf, then advances buf past them. Caller guarantees room is left
-        // in the buffer buf points into. Not UI_BANK: tiny and internal-
-        // linkage, cheaper inlined into Next()/Previous() than pulled out
-        // as its own banked call.
-        inline AI void WriteOpTo(u8*& buf, const int addr, const u8 val) {
+        AI void WriteOpTo(u8*& buf, const u16 addr, const u8 val) {
             *buf++ = static_cast<u8>(addr >> 8);
             *buf++ = static_cast<u8>(addr & 0xFF);
             *buf++ = val;
         }
 
-        // ppu::CartesianToAddress carries no placement/noinline of its own
-        // (PLATFORM_NES_VIDEO_SECTION is unset in this project), so LLVM is
-        // free to inline it -- and the constructor's per-option loop below
-        // has a compile-time trip count (nOptions), which made LLVM unroll
-        // the loop AND duplicate the fully-inlined divide/modulo body once
-        // per option. NI forces a single real out-of-line copy that the
-        // (possibly still-unrolled) loop just calls into instead. Tried
-        // `#pragma nounroll` on the loop as a less invasive alternative --
-        // it does stop the duplication, but leaves one full inlined copy
-        // in place of the jsr, which measured 194 bytes worse than this.
         NI u16 ComputeOptionAddr(const u16 arrowCol, const u16 y) {
             return ppu::CartesianToAddress({arrowCol, y});
         }
     }
 
-    template <u8 nOptions>
-    UI_BANK SingleChoice<nOptions>::SingleChoice(
+    SingleChoice::~SingleChoice() {
+        delete[] optionPos;
+        delete[] optionAddr;
+    }
+
+    UI_BANK SingleChoice::SingleChoice(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
             const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
-            const u8 emptyGraphic, const u8 arrowGraphic
-        ) : option(0), pos(pos), box(box), emptyGraphic(emptyGraphic), arrowGraphic(arrowGraphic) {
+            const u8 emptyGraphic, const u8 arrowGraphic, const u8 nOptions
+        ) : option(0), pos(pos), box(box), optionPos(new u8[nOptions]), optionAddr(new u16[nOptions]),
+            emptyGraphic(emptyGraphic), arrowGraphic(arrowGraphic), nOptions(nOptions) {
 
         // Arrow sits one tile left of the text with a blank tile of gap in
         // between -- same layout title.cpp's menu arrow uses.
@@ -118,8 +108,7 @@ namespace ui::choice {
         ppu::WriteSingleToNameTable(optionAddr[0], arrowGraphic);
     }
 
-    template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Pass(const u8 inputs, u8*& buf) -> void {
+    UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {
         // UP moves the cursor up the list (decrements option), DOWN moves it
         // down (increments) -- matches ui::Canvas's clamp convention and the
         // hand-rolled title-menu logic this replaced.
@@ -127,8 +116,7 @@ namespace ui::choice {
         else if (inputs & input::DOWN) Step(true, buf);
     }
 
-    template<u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Step(const bool forward, u8*& buf) -> void {
+    UI_BANK auto SingleChoice::Step(const bool forward, u8*& buf) -> void {
         if (forward ? option == nOptions - 1 : option == 0) return;
 
         // optionAddr[]: precomputed at construction, see its own comment --
@@ -139,22 +127,4 @@ namespace ui::choice {
         option = static_cast<u8>(forward ? option + 1 : option - 1);
         WriteOpTo(buf, optionAddr[option], arrowGraphic);
     }
-
-    // Explicit instantiation: SingleChoice's members are defined here (not
-    // inline in the header, unlike a constexpr template such as
-    // demo/src/types.hpp's Regional<>) -- MODULE_PLACEMENT/UI_BANK needs a
-    // real, single out-of-line copy of each member to place into a section,
-    // which a header-inline template can't provide (every including TU
-    // would get its own copy). That means, unlike Regional<>'s own
-    // instantiations (demo/src/types.cpp), a consumer can't instantiate
-    // SingleChoice<N> itself from a TU that only sees the header -- the
-    // member definitions have to be visible where the instantiation happens,
-    // so it has to live here.
-    //
-    // 3 and 4 are the option counts demo/src/modes/title.cpp's menu
-    // currently needs (3 on console, 4 on PC targets with the extra Quit
-    // option -- see title.cpp's kMenuOptions). Add another instantiation
-    // here if a future SingleChoice<N> with a different N is needed.
-    template class SingleChoice<3>;
-    template class SingleChoice<4>;
 }

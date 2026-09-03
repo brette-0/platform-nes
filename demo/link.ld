@@ -153,6 +153,33 @@ SECTIONS {
 REGION_ALIAS("c_writeable", prg_ram)
 __stack = ORIGIN(prg_ram) + LENGTH(prg_ram) - 1;
 
+/* Heap: a hard-reserved 128 bytes, carved out of the TOP of prg_ram and
+ * walled off from both .data/.bss and the softstack -- not the SDK default
+ * of "however many bytes happen to be free between wherever .bss/.noinit
+ * end and wherever the stack has grown to".
+ *
+ * noinit.ld (pulled in via INCLUDE mmc3-helper.ld above) already set
+ * __heap_start to that default (right after .data/.bss/.noinit, growing up
+ * toward __stack) -- __static_writeable_end captures that SDK-computed
+ * value BEFORE the override below discards it, so the ASSERT still catches
+ * .data/.bss/.noinit (including any future __attribute__((section(".noinit")))
+ * globals) growing far enough to collide with the reserved heap.
+ *
+ * __heap_start is moved to the last 128 bytes of prg_ram, __heap_default_limit
+ * is capped at exactly that (a weak SDK default of 4096 would otherwise let
+ * the allocator walk past the reservation with no error), and __stack is
+ * pulled down to sit directly below it. Both boundaries are now fixed
+ * addresses baked into the layout, not "however big something else happened
+ * to be" -- .data/.bss can't grow into the heap (ASSERT below catches it at
+ * link time) and the stack can't grow into it either (it starts one byte
+ * below __heap_start, same top-of-region convention as __stack itself). */
+__static_writeable_end = __heap_start;
+__heap_default_limit = 128;
+__heap_start = ORIGIN(prg_ram) + LENGTH(prg_ram) - 128;
+__stack = __heap_start - 1;
+ASSERT(__static_writeable_end <= __heap_start,
+       "prg_ram's .data/.bss/.noinit grew into the reserved 128-byte heap at the top of prg_ram -- shrink static writeable usage or grow prg_ram/__prg_ram_size.")
+
 /* Regression guard: the audio engine's code really did land in its bank. A
  * typo in FAMISTUDIO_CA65_CODE_SEGMENT (demo/famistudio_config.s) is
  * otherwise silent -- the segment lands elsewhere and audio.cpp's farcalls

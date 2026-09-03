@@ -33,7 +33,7 @@ namespace ui::button {
         *buf++ = (enabled ^= true);
     }
 
-    UI_BANK auto TickBox::Pass(const u8 inputs, u8*& buf) -> void {
+    UI_BANK auto TickBox::Pass(const u8, u8*& buf) -> void {
         Toggle(buf);
     }
 }

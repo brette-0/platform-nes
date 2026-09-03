@@ -16,7 +16,7 @@ namespace title {
     // Longest label ("NEW GAME"/"CONTINUE", 8 chars) -- both the menu's box
     // width and, mirrored below, how far in from the screen edge it's placed.
     constexpr u8 kMenuBoxWidth  = 8;
-    static ui::choice::SingleChoice<kMenuOptions>* pMenu = nullptr;
+    static ui::choice::SingleChoice* pMenu = nullptr;
     static atomic u8 framePressed = 0;
     static u8 prevInputs = 0;
 
@@ -70,13 +70,13 @@ namespace title {
         // to the bottom-right nametable's own top row, same as the title
         // card and for the same reason.
         const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - kMenuBoxWidth;
-        ui::choice::SingleChoice<kMenuOptions> menu(
+        ui::choice::SingleChoice menu(
             SIZED_OBJ(msg_menu),
             {menuCol, static_cast<u16>(kBottomRightNT + 1)},
             {kMenuBoxWidth, kMenuOptions},
             chrHUDWhitespace_tile, 0,
             ui::text::Alignment::Left,
-            chrHUDWhitespace_tile, chrArrow_tile
+            chrHUDWhitespace_tile, chrArrow_tile, kMenuOptions
         );
         pMenu = &menu;
         prevInputs = 0;
