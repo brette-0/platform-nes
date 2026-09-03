@@ -1,4 +1,4 @@
-# platform-nes
+# platform-nes (pnes)
 ***
 
 `platform-nes` is a platform-agnostic library for creating games that run on both the Famicom and Nintendo
