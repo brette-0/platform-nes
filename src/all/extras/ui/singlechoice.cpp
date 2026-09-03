@@ -17,7 +17,7 @@ src/all/extras/ui/*.cpp is placed into. Set it from CMake -- \
 local.cmake.example has a worked example."
 #endif
 #endif
-#define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION)
+#define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION) MINSIZE
 
 namespace ui::choice {
     namespace {
