@@ -31,11 +31,16 @@ namespace ui::choice {
     }
 
     UI_BANK SingleChoice::SingleChoice(
+            const VisualFn clear, const VisualFn draw, const u8 nOptions
+        ) : option(0), optionAddr(new u16[nOptions]),
+            clear(clear), draw(draw), nOptions(nOptions) {
+    }
+
+    UI_BANK auto SingleChoice::Draw(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
             const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
-            const VisualFn clear, const VisualFn draw, const u8 nOptions, u8*& buf
-        ) : option(0), pos(pos), box(box), optionAddr(new u16[nOptions]),
-            clear(clear), draw(draw), nOptions(nOptions) {
+            const VisualFn draw, u16* const optionAddr, const u8 nOptions, u8*& buf
+        ) -> void {
 
         // Arrow sits one tile left of the text with a blank tile of gap in
         // between -- same layout title.cpp's menu arrow uses.
@@ -47,9 +52,9 @@ namespace ui::choice {
         for (u8 opt = 0; opt < nOptions && cursor < sBuff; opt++) {
             // Pay the (x,y)->address divide+modulo (ppu::CartesianToAddress,
             // internally the same cost ppu::WriteSingleToNameTable(vec2,u8)
-            // would pay per call) once per option, here at construction time
-            // -- not on every Next()/Previous() call, which runs inside the
-            // vblank window.
+            // would pay per call) once per option, here in Draw() -- not on
+            // every Next()/Previous() call, which runs inside the vblank
+            // window.
             optionAddr[opt] = ComputeOptionAddr(arrowCol, static_cast<u16>(pos.y + row));
 
             // this option's chunk runs up to the next optionSplitter, or the
@@ -99,6 +104,14 @@ namespace ui::choice {
         draw(optionAddr[0], buf);
     }
 
+    UI_BANK auto SingleChoice::Draw(
+            const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
+            const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
+            u8*& buf
+        ) -> void {
+        Draw(buff, sBuff, pos, box, wordSplitter, optionSplitter, align, draw, optionAddr, nOptions, buf);
+    }
+
     UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {
         // UP moves the cursor up the list (decrements option), DOWN moves it
         // down (increments) -- matches ui::Canvas's clamp convention and the
@@ -110,7 +123,7 @@ namespace ui::choice {
     UI_BANK auto SingleChoice::Step(const bool forward, u8*& buf) -> void {
         if (forward ? option == nOptions - 1 : option == 0) return;
 
-        // optionAddr[]: precomputed at construction, see its own comment --
+        // optionAddr[]: precomputed by Draw(), see its own comment --
         // no (x,y)->address divide+modulo here, just handing off the
         // address for clear/draw to queue whatever they want into buf.
         clear(optionAddr[option], buf);

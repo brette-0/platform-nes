@@ -95,13 +95,14 @@ namespace title {
         // card and for the same reason.
         const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - kMenuBoxWidth;
         u8* initCursor = writeBuf;
-        ui::choice::SingleChoice menu(
+        ui::choice::SingleChoice menu(TitleUnselect, TitleSelect, kMenuOptions);
+        menu.Draw(
             SIZED_OBJ(msg_menu),
             {menuCol, static_cast<u16>(kBottomRightNT + 1)},
             {kMenuBoxWidth, kMenuOptions},
             chrHUDWhitespace_tile, 0,
             ui::text::Alignment::Left,
-            TitleUnselect, TitleSelect, kMenuOptions, initCursor
+            initCursor
         );
         // Initial selection indicator: SingleChoice only queued it into
         // writeBuf (see VisualFn) -- draining it here is safe because

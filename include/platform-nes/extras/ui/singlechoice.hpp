@@ -21,16 +21,35 @@ namespace ui::choice {
         // decides *when* clear/draw run, never *how* selection is shown.
         using VisualFn = void (*)(u16 addr, u8*& buf);
 
-        // buf is passed straight to draw() for the first option's initial
-        // indicator, same as Pass() does for later selection changes --
-        // see VisualFn.
-        SingleChoice(
-            const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
-            u8 wordSplitter, u8 optionSplitter, text::Alignment align,
-            VisualFn clear, VisualFn draw, u8 nOptions, u8*& buf
-        );
+        // Allocates optionAddr and stores the callbacks -- touches nothing
+        // PPU-side, so this is safe to run while rendering/NMI is live.
+        // Layout and the actual nametable writes happen in Draw(), called
+        // separately whenever it's actually safe to poke the PPU.
+        SingleChoice(VisualFn clear, VisualFn draw, u8 nOptions);
 
         ~SingleChoice();
+
+        // Lays out option text into the nametable, computes each option's
+        // indicator address into optionAddr, and fires the initial
+        // indicator draw -- buf forwarded to it untouched, same contract
+        // Pass()/Step() use for later selection changes; see VisualFn.
+        // Static so it can run before -- or entirely without -- a
+        // SingleChoice instance, as long as the caller hands it storage for
+        // optionAddr (>= nOptions entries) and a VisualFn for the indicator.
+        static auto Draw(
+            const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
+            u8 wordSplitter, u8 optionSplitter, text::Alignment align,
+            VisualFn draw, u16* optionAddr, u8 nOptions, u8*& buf
+        ) -> void;
+
+        // Convenience wrapper over the static Draw() using this instance's
+        // own optionAddr/draw/nOptions -- the normal way to draw after
+        // construction.
+        auto Draw(
+            const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
+            u8 wordSplitter, u8 optionSplitter, text::Alignment align,
+            u8*& buf
+        ) -> void;
 
         // Forwards buf, untouched, into whichever of clear/draw ends up
         // running -- see VisualFn.
@@ -41,8 +60,6 @@ namespace ui::choice {
         // any other ISR-published state in this codebase.
         atomic u8 option;
     private:
-        vec2<u16> pos;
-        vec2<u8>  box;
         u16* optionAddr;
         const VisualFn clear;
         const VisualFn draw;
