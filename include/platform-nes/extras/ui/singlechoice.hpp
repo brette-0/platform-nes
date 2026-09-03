@@ -11,20 +11,29 @@ using namespace br0::intsh;
 namespace ui::choice {
     class SingleChoice {
     public:
+        // Called to clear/draw the selection indicator at addr. buf is
+        // opaque to SingleChoice: it's just a cursor into a caller-owned
+        // buffer, handed to whichever VisualFn runs and advanced however
+        // much (or little) that callback wants -- the encoding of what
+        // goes into it, whether anything does at all, and how/when it gets
+        // drained back out are entirely the caller's decision. SingleChoice
+        // never reads *buf and never writes through it itself; it only
+        // decides *when* clear/draw run, never *how* selection is shown.
+        using VisualFn = void (*)(u16 addr, u8*& buf);
+
+        // buf is passed straight to draw() for the first option's initial
+        // indicator, same as Pass() does for later selection changes --
+        // see VisualFn.
         SingleChoice(
             const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
             u8 wordSplitter, u8 optionSplitter, text::Alignment align,
-            u8 emptyGraphic, u8 arrowGraphic, u8 nOptions
+            VisualFn clear, VisualFn draw, u8 nOptions, u8*& buf
         );
 
         ~SingleChoice();
 
-        // Writes up to 2 pending ops (erase-old + draw-new) at *buf -- 3
-        // bytes each (addr-hi, addr-lo, val) -- and advances buf past them,
-        // instead of touching the PPU directly. buf must point into a
-        // caller-owned buffer with enough room left (2 ops = 6 bytes).
-        // Caller (e.g. title.cpp's nmi_handler) replays the bytes wherever
-        // writing is actually safe.
+        // Forwards buf, untouched, into whichever of clear/draw ends up
+        // running -- see VisualFn.
         auto Pass(u8 inputs, u8*& buf) -> void;
         // atomic: written from wherever Pass() is called (an ISR, if the
         // caller defers input handling to vblank the way title.cpp does)
@@ -34,10 +43,9 @@ namespace ui::choice {
     private:
         vec2<u16> pos;
         vec2<u8>  box;
-        u8*  optionPos;
         u16* optionAddr;
-        const u8 emptyGraphic;
-        const u8 arrowGraphic;
+        const VisualFn clear;
+        const VisualFn draw;
         const u8 nOptions;
 
         auto Step(bool forward, u8*& buf) -> void;

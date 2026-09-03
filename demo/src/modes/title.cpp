@@ -20,10 +20,34 @@ namespace title {
     static atomic u8 framePressed = 0;
     static u8 prevInputs = 0;
 
-    // UI interaction write buffer -- see nmi_handler. 6 bytes: 2 ops
-    // (SingleChoice's worst case today, one erase-old + one draw-new write
-    // per Next()/Previous()), 3 bytes each (addr-hi, addr-lo, val).
+    // UI interaction write buffer, and its encoding/draining -- entirely
+    // this file's own decision, not SingleChoice's; see TitleSelect/
+    // TitleUnselect. 6 bytes: 2 ops (one erase-old + one draw-new write per
+    // Next()/Previous(), the only two VisualFn calls Pass() makes per call),
+    // 3 bytes each (addr-hi, addr-lo, val).
+    //
+    // Built in main()'s loop, NOT in nmi_handler: Pass() (and whatever
+    // TitleSelect/TitleUnselect cost) has zero business running inside the
+    // vblank-critical ISR when the whole point of buffering is to let that
+    // work happen somewhere it isn't time-boxed. nmi_handler's only job on
+    // this buffer is the cheap, fixed-cost part: drain whatever's already
+    // sitting in it.
     static u8 writeBuf[6];
+    // Bytes currently pending in writeBuf, published by main()'s loop after
+    // Pass() finishes building them and consumed (then reset to 0) by
+    // nmi_handler -- single-byte atomic write/read, so an NMI landing
+    // mid-build only ever sees either the previous complete count or 0,
+    // never a torn buffer.
+    static atomic u8 writeBufLen = 0;
+
+    // Replays ops queued by WriteMenuOp between start and end, wherever
+    // it's actually safe to poke the PPU.
+    static void DrainWriteBuf(const u8* start, const u8* end) {
+        for (const u8* p = start; p < end; p += 3) {
+            const int addr = (static_cast<int>(p[0]) << 8) | p[1];
+            ppu::WriteSingleToNameTable(addr, p[2]);
+        }
+    }
 
     static oam::oam_t Clear(u16 _);
     static NI void DrawLevelPreview();
@@ -70,14 +94,19 @@ namespace title {
         // to the bottom-right nametable's own top row, same as the title
         // card and for the same reason.
         const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - kMenuBoxWidth;
+        u8* initCursor = writeBuf;
         ui::choice::SingleChoice menu(
             SIZED_OBJ(msg_menu),
             {menuCol, static_cast<u16>(kBottomRightNT + 1)},
             {kMenuBoxWidth, kMenuOptions},
             chrHUDWhitespace_tile, 0,
             ui::text::Alignment::Left,
-            chrHUDWhitespace_tile, chrArrow_tile, kMenuOptions
+            TitleUnselect, TitleSelect, kMenuOptions, initCursor
         );
+        // Initial selection indicator: SingleChoice only queued it into
+        // writeBuf (see VisualFn) -- draining it here is safe because
+        // nothing's rendering yet (NMI isn't enabled until below).
+        DrainWriteBuf(writeBuf, initCursor);
         pMenu = &menu;
         prevInputs = 0;
         framePressed = 0;
@@ -89,6 +118,17 @@ namespace title {
 
         while (true) {
             const u8 pressed = framePressed; // this frame's edge-detected input, published by nmi_handler
+
+            // Build this frame's pending selection-indicator writes here,
+            // outside the ISR -- see writeBuf/writeBufLen's own comments.
+            // Only touches writeBuf/writeBufLen if pMenu actually queues
+            // something (Pass() no-ops on anything but UP/DOWN), so most
+            // frames this is just the framePressed read above.
+            if (pMenu) {
+                u8* cursor = writeBuf;
+                pMenu->Pass(pressed, cursor);
+                writeBufLen = static_cast<u8>(cursor - writeBuf);
+            }
 
             bool proceed = false;
             if (pressed & input::A) {
@@ -119,7 +159,7 @@ namespace title {
         ppu::PPUMASK = 0;
         gameMode = eGameModes::Level;
     }
-    
+
     void nmi_handler() {
         // OAM DMA first, same as before this change: it needs to start as
         // early into vblank as possible to finish before sprite evaluation,
@@ -133,16 +173,13 @@ namespace title {
         prevInputs = inputs;
         framePressed = pressed;
 
-        if (pMenu) {
-            u8* cursor = writeBuf;
-            pMenu->Pass(pressed, cursor);   // advances cursor past whatever it wrote
-            // Drain: the actual pokes, now that we're somewhere safe to do
-            // them -- no arithmetic here, just replaying precomputed
-            // (addr-hi, addr-lo, val) triples.
-            for (u8* p = writeBuf; p < cursor; p += 3) {
-                const int addr = (static_cast<int>(p[0]) << 8) | p[1];
-                ppu::WriteSingleToNameTable(addr, p[2]);
-            }
+        // writeBuf's actual contents are built in main()'s loop, not here --
+        // see writeBuf's own comment. This is the only part that has to run
+        // in the ISR: replay whatever's pending, then clear the count so a
+        // quiet frame (nothing newly queued) doesn't redrain stale bytes.
+        if (writeBufLen) {
+            DrainWriteBuf(writeBuf, writeBuf + writeBufLen);
+            writeBufLen = 0;
         }
 
         ppu::SetScroll({0, PreviewScrollY()});
@@ -170,17 +207,6 @@ namespace title {
     }
 
     void InitTitleScreen() {
-        // No explicit attribute writes here: the title/menu region only
-        // ever needed a constant 0xff, which main()'s
-        // ppu::Flush(chrHUDWhitespace_tile, 0xff) already stamped across
-        // every nametable's attribute bytes (all 4 pages, under this
-        // board's four-screen wiring) before this runs -- writing the same
-        // constant again over the title/menu region was always redundant.
-
-        // Title card lives in the bottom-right nametable now, not stacked
-        // above the menu items in the top-right one -- same box size and
-        // the same 1-tile padding it always had, just anchored to that
-        // page's own top row instead of splitRow.
         ui::text::Draw(
             SIZED_OBJ(msg_title),
             {kMenuNT + 1, static_cast<u16>(kBottomRightNT + 1)},
@@ -199,15 +225,8 @@ namespace title {
     static NI void DrawLevelPreview() {
         using namespace level;
 
-        const bool loaded = mmc3::CallInBlock<level_code_tag>([] { return LoadLevel(0); });
-        if (!loaded) return;
+        if (const bool loaded = mmc3::CallInBlock<level_code_tag>([] { return LoadLevel(0); }); !loaded) return;
 
-        // Full playfield, uncropped: HUD occupies tile rows 0-1 (kHudRows
-        // metatile row), the level fills all 14 metatile rows (28 tile
-        // rows) below it -- 2 + 28 = 30, the whole nametable height. What's
-        // visible above SplitRow() vs covered by the menu split is a
-        // display-time concern (ApplySplit's scroll switch); NT0 itself is
-        // preloaded in full regardless of where the split lands.
         constexpr u16 tyBase = kHudRows * 2;
 
         CallLevelGraphics([] {
@@ -225,10 +244,6 @@ namespace title {
         const bool hasDynamic = DynLengths != nullptr;
         DynamicCursor dyn{DynLengths, DynData, 0};
 
-        // Two metatile columns at a time (an attribute cell's width): buffer
-        // both composited columns, then emit their tiles and attribute
-        // bytes together, since one attribute byte packs all four quadrants
-        // of a 2x2-metatile block and needs all four ids to compute.
         u8 colBuf[2][levelHeight];
         for (u16 mc = 0; mc < blockCols; mc += 2) {
             for (u8 dc = 0; dc < 2; ++dc) {
@@ -256,17 +271,6 @@ namespace title {
                 ppu::WriteSingleToNameTable({static_cast<u16>(tx + 2), static_cast<u16>(ty + 1)}, Metatiles_UR[mR]);
                 ppu::WriteSingleToNameTable({static_cast<u16>(tx + 3), static_cast<u16>(ty + 1)}, Metatiles_BR[mR]);
             }
-            // Attribute cells are a hardware-fixed 4-tile-row grid starting
-            // at absolute nametable row 0, but tyBase (2 tile rows of HUD)
-            // shifts every metatile row's tile_row to an odd multiple of 2
-            // -- so a metatile row pair (br, br+1) does NOT land in one
-            // cell the way pairing by loop index assumes; the real pairing
-            // is offset by one metatile row (see level::GetNextWrite, which
-            // handles this same kHudRows shift for the live level). Classify
-            // each metatile row independently by its own tile_row instead
-            // of assuming an aligned pair, and accumulate into a per-cell
-            // buffer since two DIFFERENT loop iterations can (correctly)
-            // contribute to the same byte.
             u8 attrBuf[8] = {};
             attrBuf[0] = 0x0F;   // HUD rows 0-1 share attr cell 0's top quadrant with level row 0; pin it to palette 3
             for (u8 r = 0; r < levelHeight; ++r) {
@@ -291,15 +295,22 @@ namespace title {
             ppu::pal::WriteFromBuffer(5, BGColours + 5, 3);
         });
 
-        // Stand on top of the ground row (levelHeight-2/-1, TileData's
-        // bottom two rows), feet flush with its top edge. groundNtRow is
-        // where that edge lands in NT0 (nametable/pixel space, tyBase
-        // offset included); PreviewScrollY() converts it to screen space,
-        // same as nmi_handler's own scroll write.
         const u16 groundNtRow = tyBase * 8 + (levelHeight - 2) * 16;
         const i16 rawFeetY    = static_cast<i16>(groundNtRow) - 16 - static_cast<i16>(PreviewScrollY());
         const auto feetY      = static_cast<oam::oam_t>(rawFeetY < 0 ? 0 : rawFeetY);
         OAMBuffer[0].y = feetY; OAMBuffer[1].y = feetY;
         OAMBuffer[0].x = 32;    OAMBuffer[1].x = 40;
+    }
+
+    auto TitleUnselect(const u16 addr, u8*& buf) -> void {
+        *buf++ = static_cast<u8>(addr >> 8);
+        *buf++ = static_cast<u8>(addr & 0xFF);
+        *buf++ = chrHUDWhitespace_tile;
+    }
+
+    auto TitleSelect(const u16 addr, u8*& buf) -> void {
+        *buf++ = static_cast<u8>(addr >> 8);
+        *buf++ = static_cast<u8>(addr & 0xFF);
+        *buf++ = chrArrow_tile;
     }
 }

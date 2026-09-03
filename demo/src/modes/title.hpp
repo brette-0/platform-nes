@@ -21,4 +21,7 @@ namespace title {
         End      = Options
 #endif
     };
+
+    auto TitleUnselect(u16 addr, u8*& buf) -> void;
+    auto TitleSelect  (u16 addr, u8*& buf) -> void;
 }

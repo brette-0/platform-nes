@@ -21,28 +21,21 @@ local.cmake.example has a worked example."
 
 namespace ui::choice {
     namespace {
-        AI void WriteOpTo(u8*& buf, const u16 addr, const u8 val) {
-            *buf++ = static_cast<u8>(addr >> 8);
-            *buf++ = static_cast<u8>(addr & 0xFF);
-            *buf++ = val;
-        }
-
         NI u16 ComputeOptionAddr(const u16 arrowCol, const u16 y) {
             return ppu::CartesianToAddress({arrowCol, y});
         }
     }
 
     SingleChoice::~SingleChoice() {
-        delete[] optionPos;
         delete[] optionAddr;
     }
 
     UI_BANK SingleChoice::SingleChoice(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
             const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
-            const u8 emptyGraphic, const u8 arrowGraphic, const u8 nOptions
-        ) : option(0), pos(pos), box(box), optionPos(new u8[nOptions]), optionAddr(new u16[nOptions]),
-            emptyGraphic(emptyGraphic), arrowGraphic(arrowGraphic), nOptions(nOptions) {
+            const VisualFn clear, const VisualFn draw, const u8 nOptions, u8*& buf
+        ) : option(0), pos(pos), box(box), optionAddr(new u16[nOptions]),
+            clear(clear), draw(draw), nOptions(nOptions) {
 
         // Arrow sits one tile left of the text with a blank tile of gap in
         // between -- same layout title.cpp's menu arrow uses.
@@ -52,7 +45,12 @@ namespace ui::choice {
         u8 row    = 0;
 
         for (u8 opt = 0; opt < nOptions && cursor < sBuff; opt++) {
-            optionPos[opt] = row;
+            // Pay the (x,y)->address divide+modulo (ppu::CartesianToAddress,
+            // internally the same cost ppu::WriteSingleToNameTable(vec2,u8)
+            // would pay per call) once per option, here at construction time
+            // -- not on every Next()/Previous() call, which runs inside the
+            // vblank window.
+            optionAddr[opt] = ComputeOptionAddr(arrowCol, static_cast<u16>(pos.y + row));
 
             // this option's chunk runs up to the next optionSplitter, or the
             // end of the buffer for the last option
@@ -96,16 +94,9 @@ namespace ui::choice {
             cursor = (chunkEnd < sBuff) ? chunkEnd + 1 : chunkEnd;
         }
 
-        // Pay the (x,y)->address divide+modulo (ppu::CartesianToAddress,
-        // internally the same cost ppu::WriteSingleToNameTable(vec2,u8)
-        // would pay per call) once per option, here at construction time --
-        // not on every Next()/Previous() call, which runs inside the vblank
-        // window.
-        for (u8 opt = 0; opt < nOptions; opt++) {
-            optionAddr[opt] = ComputeOptionAddr(arrowCol, static_cast<u16>(pos.y + optionPos[opt]));
-        }
-
-        ppu::WriteSingleToNameTable(optionAddr[0], arrowGraphic);
+        // Initial selection indicator -- buf forwarded as-is, same contract
+        // Pass()/Step() use for every later selection change; see VisualFn.
+        draw(optionAddr[0], buf);
     }
 
     UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {
@@ -120,11 +111,11 @@ namespace ui::choice {
         if (forward ? option == nOptions - 1 : option == 0) return;
 
         // optionAddr[]: precomputed at construction, see its own comment --
-        // no (x,y)->address divide+modulo here, just the two writes encoded
-        // for whoever replays the bytes to poke.
-        WriteOpTo(buf, optionAddr[option], emptyGraphic);
+        // no (x,y)->address divide+modulo here, just handing off the
+        // address for clear/draw to queue whatever they want into buf.
+        clear(optionAddr[option], buf);
         // ++/-- on a volatile member is deprecated (C++20)
         option = static_cast<u8>(forward ? option + 1 : option - 1);
-        WriteOpTo(buf, optionAddr[option], arrowGraphic);
+        draw(optionAddr[option], buf);
     }
 }
