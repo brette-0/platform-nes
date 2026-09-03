@@ -46,9 +46,4 @@ namespace ui::slider {
             ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
         }
     }
-
-    template <bool vertical>
-    auto TileSlider::Pass(const u8 inputs) -> void {
-
-    }
 }

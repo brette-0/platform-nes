@@ -4,9 +4,7 @@
 
 namespace ui {
     template <bool vertical, typename Tuple>
-    Canvas<vertical, Tuple>::Canvas(void* buff, const u8 confirmButton) : buff(buff), confirmButton(confirmButton) {
-
-    }
+    Canvas<vertical, Tuple>::Canvas(void* buff, const u8 confirmButton) : buff(buff), confirmButton(confirmButton) { }
 
     // need a draw call for movement of arrow
     template <bool vertical, typename Tuple>
