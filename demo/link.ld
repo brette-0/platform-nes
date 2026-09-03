@@ -24,12 +24,12 @@
 PROVIDE(__prg_rom_size = 128);
 PROVIDE(__chr_rom_size = 8);
 
-/* Nine banked domains, claiming banks that would otherwise be prg_rom_spare:
+/* Eight banked domains, claiming banks that would otherwise be prg_rom_spare:
  * level code (0), level data (1), audio (2), audio_data (3), cold (4),
- * actors (5), level's dynamic-plane source (6), level graphics (7), UI (8)
- * -- see banks.hpp. MUST be set before `INCLUDE mmc3-helper.ld`: PROVIDE()
- * only takes its first value. */
-PROVIDE(__mmc3_reserved_banks = 9);
+ * actors (5), level's dynamic-plane source (6), level graphics (7) -- see
+ * banks.hpp. MUST be set before `INCLUDE mmc3-helper.ld`: PROVIDE() only
+ * takes its first value. */
+PROVIDE(__mmc3_reserved_banks = 8);
 
 /* ONE resident window ($C000-$DFFF), not the default three. Both switchable
  * windows go to the level domain below (16 KiB contiguous, since no farcall
@@ -103,13 +103,6 @@ MEMORY {
    * mmc3::CallInBlock<level_graphics_tag>, switched in and back out around
    * the reads that need it. See banks.hpp's ::level_graphics_tag. */
   prg_rom_level_graphics : ORIGIN = 0x0008a000, LENGTH = 0x2000  /* bank 7, window 2 */
-  /* UI CODE: platform-nes's UI toolkit (src/all/extras/ui/*.cpp), placed via
-   * PLATFORM_NES_UI_SECTION. No adjacency contract like audio's -- UI has no
-   * external engine it must share a bank with; this is just where the
-   * toolkit's out-of-line code lives once placement is opted into (see
-   * PLATFORM_NES_UI_SECTION's own comment in CMakeLists.txt/
-   * local.cmake.example). */
-  prg_rom_ui : ORIGIN = 0x00098000, LENGTH = 0x2000  /* bank 8, window 1 */
 }
 
 /* Published for the build-time space report -- see mmc3-helper.ld's own
@@ -130,8 +123,6 @@ __space_origin_prg_rom_level_dynamic = ORIGIN(prg_rom_level_dynamic);
 __space_length_prg_rom_level_dynamic = LENGTH(prg_rom_level_dynamic);
 __space_origin_prg_rom_level_graphics = ORIGIN(prg_rom_level_graphics);
 __space_length_prg_rom_level_graphics = LENGTH(prg_rom_level_graphics);
-__space_origin_prg_rom_ui = ORIGIN(prg_rom_ui);
-__space_length_prg_rom_ui = LENGTH(prg_rom_ui);
 
 SECTIONS {
   /* Level's interrupt path needs no rule at all: nmi_handler, irq_handler and
@@ -148,7 +139,6 @@ SECTIONS {
   .prg_rom_actors : { *(.prg_rom_actors .prg_rom_actors.*) } >prg_rom_actors
   .prg_rom_level_dynamic : { *(.prg_rom_level_dynamic .prg_rom_level_dynamic.*) } >prg_rom_level_dynamic
   .prg_rom_level_graphics : { *(.prg_rom_level_graphics .prg_rom_level_graphics.*) } >prg_rom_level_graphics
-  .prg_rom_ui : { *(.prg_rom_ui .prg_rom_ui.*) } >prg_rom_ui
 }
 
 /* Moves the C writable arena (.data/.bss/heap/soft stack) into PRG-RAM
@@ -182,10 +172,10 @@ ASSERT(__audio_engine_size > 0 || !DEFINED(nmi_handler),
  * Order is the whole layout contract:
  * - Banked domains come FIRST, and THIS ORDER ASSIGNS THEIR BANK NUMBERS
  *   (level_code=0, level_data=1, audio=2, audio_data=3, cold=4, actors=5,
- *   level_dynamic=6, level_graphics=7, ui=8 -- bank is just file offset /
- *   0x2000). Their MEMORY ORIGINs above and section()s in banks.hpp
- *   hard-code those same numbers; reordering these lines silently re-banks
- *   everything with no warning.
+ *   level_dynamic=6, level_graphics=7 -- bank is just file offset / 0x2000).
+ *   Their MEMORY ORIGINs above and section()s in banks.hpp hard-code those
+ *   same numbers; reordering these lines silently re-banks everything with
+ *   no warning.
  * - prg_rom_spare is the zero padding filling out __prg_rom_size.
  * - prg_rom_switchable then prg_rom_fixed occupy the top banks: real MMC3
  *   hardware always shows the last bank at $E000, second-to-last at $C000. */
@@ -198,7 +188,6 @@ OUTPUT_FORMAT {
   FULL(prg_rom_actors)
   FULL(prg_rom_level_dynamic)
   FULL(prg_rom_level_graphics)
-  FULL(prg_rom_ui)
   FULL(prg_rom_spare)
   FULL(prg_rom_switchable)
   FULL(prg_rom_fixed)

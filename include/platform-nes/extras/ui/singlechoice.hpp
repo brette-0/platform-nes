@@ -3,7 +3,9 @@
 #include <intsh>
 
 #include "text.hpp"
+#include "writeop.hpp"
 #include "platform-nes/types.hpp"
+#include "platform-nes/technology.hpp"   // atomic
 
 using namespace br0::intsh;
 
@@ -17,16 +19,31 @@ namespace ui::choice {
             u8 emptyGraphic, u8 arrowGraphic
         );
 
-        auto Pass(u8 inputs) -> void;
-        u8 option;
+        // Queues up to 2 writes (erase-old + draw-new) into q instead of
+        // touching the PPU -- see WriteQueue's own comment. Caller (e.g.
+        // title.cpp's nmi_handler) drains q wherever writing is actually safe.
+        auto Pass(u8 inputs, WriteQueue& q) -> void;
+        // atomic: written from wherever Pass() is called (an ISR, if the
+        // caller defers input handling to vblank the way title.cpp does)
+        // and read from ordinary code -- same cross-context contract as
+        // any other ISR-published state in this codebase.
+        atomic u8 option;
     private:
         vec2<u16> pos;
         vec2<u8>  box;
         u8 optionPos[nOptions]{};
+        // Precomputed arrow-column VRAM address for each option's row, via
+        // ppu::CartesianToAddress -- Next()/Previous() run inside the vblank
+        // window (see title.cpp's nmi_handler), where the (x,y)->address
+        // divide+modulo ppu::WriteSingleToNameTable(vec2,u8) does internally
+        // is expensive enough to blow the frame budget. Paying that cost
+        // once here, off the hot path, lets Next()/Previous() use the
+        // address overload instead -- three register pokes, no arithmetic.
+        int optionAddr[nOptions]{};
         const u8 emptyGraphic;
         const u8 arrowGraphic;
 
-        auto Next()     -> void;
-        auto Previous() -> void;
+        auto Next(WriteQueue& q)     -> void;
+        auto Previous(WriteQueue& q) -> void;
     };
 }

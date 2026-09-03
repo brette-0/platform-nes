@@ -20,18 +20,18 @@ local.cmake.example has a worked example."
 
 namespace ui::button {
     UI_BANK TickBox::TickBox(const vec2<u16> pos, const bool defaultState)
-        : enabled(defaultState), pos(pos) {
+        : enabled(defaultState), addr(ppu::CartesianToAddress(pos)) {
         ppu::WriteSingleToNameTable(pos, enabled);
     }
 
     // ::AI, not ::UI_BANK: must stay reachable without a bank switch from
     // wherever Pass() calls it -- the two are mutually exclusive (see
     // MODULE_PLACEMENT's own doc comment).
-    AI auto TickBox::Toggle() -> void {
-        ppu::WriteSingleToNameTable(pos, enabled ^= true);
+    AI auto TickBox::Toggle(WriteQueue& q) -> void {
+        q.Push({addr, enabled ^= true});
     }
 
-    UI_BANK auto TickBox::Pass(const u8 inputs) -> void {
-        Toggle();
+    UI_BANK auto TickBox::Pass(const u8 inputs, WriteQueue& q) -> void {
+        Toggle(q);
     }
 }

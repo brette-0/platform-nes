@@ -39,13 +39,13 @@ namespace ui::slider {
     }
 
     template <bool vertical>
-    UI_BANK auto TileSlider<vertical>::Pass(const u8 inputs) -> void {
-        Move(post(inputs));
+    UI_BANK auto TileSlider<vertical>::Pass(const u8 inputs, WriteQueue& q) -> void {
+        Move(post(inputs), q);
     }
 
     template <bool vertical>
-    UI_BANK void TileSlider<vertical>::Move(const i8 amt) {
-        ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, unselectedGraphic);
+    UI_BANK void TileSlider<vertical>::Move(const i8 amt, WriteQueue& q) {
+        q.Push({ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), unselectedGraphic});
         const auto aamt = abs(amt);
         if (amt < 0) {
             selectedPosition -= aamt > selectedPosition
@@ -57,9 +57,9 @@ namespace ui::slider {
         }
 
         if constexpr (vertical) {
-            ppu::WriteSingleToNameTable({pos.x, pos.y + selectedPosition}, selectedGraphic);
+            q.Push({ppu::CartesianToAddress({pos.x, static_cast<u16>(pos.y + selectedPosition)}), selectedGraphic});
         } else {
-            ppu::WriteSingleToNameTable({pos.x + selectedPosition, pos.y}, selectedGraphic);
+            q.Push({ppu::CartesianToAddress({static_cast<u16>(pos.x + selectedPosition), pos.y}), selectedGraphic});
         }
     }
 }

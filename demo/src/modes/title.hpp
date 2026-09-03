@@ -21,6 +21,4 @@ namespace title {
         End      = Options
 #endif
     };
-
-    extern atomic u8 menuOption;
 }

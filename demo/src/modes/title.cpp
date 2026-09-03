@@ -9,26 +9,33 @@
 #include "level/levels.hpp"
 #include "level/dynamic.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
+#include "platform-nes/extras/ui/singlechoice.hpp"
+#include "platform-nes/extras/ui/writeop.hpp"
 
 namespace title {
-    // ReSharper disable once CppUseAuto
-    atomic u8 menuOption = NewGame;
-    // ReSharper disable once CppUseAuto
-    static atomic u8 lastMenuOption = NewGame;
+    constexpr u8 kMenuOptions   = static_cast<u8>(End + 1);
+    // Longest label ("NEW GAME"/"CONTINUE", 8 chars) -- both the menu's box
+    // width and, mirrored below, how far in from the screen edge it's placed.
+    constexpr u8 kMenuBoxWidth  = 8;
+    static ui::choice::SingleChoice<kMenuOptions>* pMenu = nullptr;
+    static atomic u8 framePressed = 0;
+    static u8 prevInputs = 0;
+
+    // Write-queue storage for UI interaction writes -- see nmi_handler. This
+    // buffer, not ui::WriteQueue itself, is the actual storage ("user code"
+    // owns it, per the design this replaces direct PPU writes with): 2
+    // slots (6 bytes) covers SingleChoice's worst case today, one erase-old
+    // + one draw-new write per Next()/Previous(). softStackScratch is
+    // reserved room for a future larger queue, if some component ever needs
+    // more than 2 pending writes in one frame -- unused by anything today,
+    // just threaded through now so this doesn't need to change again later.
+    static ui::WriteOp writeBuf[2];
+    static u8 softStackScratch[64];
+
     static oam::oam_t Clear(u16 _);
-    // NI: sole call site is main() (::TITLE, shares the tight ::COLD bank) --
-    // without it LTO inlines the whole body there instead of the roomier
-    // default resident bank (prg_rom_switchable).
     static NI void DrawLevelPreview();
 
     constexpr u16 kMenuNT = 32;
-
-    // Tile-row 30 selects the nametable quadrant below the current one (see
-    // src/nes/video.cpp's xy_to_nt_addr: y>=30 folds in nametable bit 1,
-    // same as kMenuNT's x>=32 folding in bit 0) -- combined with kMenuNT's
-    // column range, {kMenuNT.., kBottomRightNT..} lands in the bottom-right
-    // physical page ($2C00), distinct storage from the menu's own top-right
-    // page under this board's four-screen wiring.
     constexpr u16 kBottomRightNT = 30;
 
     // On-screen row where the IRQ crosses from the level (nametable 0) into
@@ -37,16 +44,6 @@ namespace title {
         return (((viewport_my() + 1) >> 1) - 2) << 2;
     }
 
-    // DrawLevelPreview now fills NT0 top-to-bottom with HUD (kHudRows) then
-    // the whole level (levelHeight metatile rows) -- exactly one nametable's
-    // worth (video::viewport_py() px). Only SplitRow()<<3 px of that fits
-    // above the menu split, so the initial scroll can't be 0 (that would
-    // show the HUD, then crop off the level's own bottom/ground rows into
-    // the space the menu covers). Bottom-align instead: scroll down by
-    // whatever doesn't fit -- the HUD plus however many rows off the top of
-    // the level get pushed past the split -- so the level's actual ground
-    // row lands right at the split, same alignment the preview used back
-    // when it only ever wrote the cropped slice.
     static u16 PreviewScrollY() {
         return video::viewport_py() - (static_cast<u16>(SplitRow()) << 3);
     }
@@ -75,30 +72,34 @@ namespace title {
         DrawLevelPreview();
         InitTitleScreen();
 
+        // Menu items -- all start at the same column, with a 1-tile gap from
+        // the right edge for the longest entry (NEW GAME/CONTINUE). Anchored
+        // to the bottom-right nametable's own top row, same as the title
+        // card and for the same reason.
+        const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - kMenuBoxWidth;
+        ui::choice::SingleChoice<kMenuOptions> menu(
+            SIZED_OBJ(msg_menu),
+            {menuCol, static_cast<u16>(kBottomRightNT + 1)},
+            {kMenuBoxWidth, kMenuOptions},
+            chrHUDWhitespace_tile, 0,
+            ui::text::Alignment::Left,
+            chrHUDWhitespace_tile, chrArrow_tile
+        );
+        pMenu = &menu;
+        prevInputs = 0;
+        framePressed = 0;
+
         ppu::SetScroll({0, 0xff});
         ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::SPRITE_SIZE | ppu::ctrl::GEN_NMI, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
         irq::EnableInterrupts();
 
-        u8 port1, port2, prevInputs = 0;
-
         while (true) {
-            input::PollControllers(&port1, &port2);
-
-            const auto inputs  = port1 | port2;
-            const auto pressed = inputs & static_cast<u8>(~prevInputs); // strobe: only the frame a button goes down
-            prevInputs = inputs;
-
-            if (pressed & (input::UP | input::DOWN)) {
-                menuOption -= (pressed & input::UP)   == input::UP;
-                if (menuOption > End) menuOption = 0;
-                menuOption += (pressed & input::DOWN) == input::DOWN;
-                if (menuOption > End) menuOption = End;
-            }
+            const u8 pressed = framePressed; // this frame's edge-detected input, published by nmi_handler
 
             bool proceed = false;
             if (pressed & input::A) {
-                switch (menuOption) {
+                switch (menu.option) {
                     case NewGame:
                         proceed = true;
                         break;
@@ -125,18 +126,31 @@ namespace title {
         ppu::PPUMASK = 0;
         gameMode = eGameModes::Level;
     }
-
+    
     void nmi_handler() {
-        const u16 menuCol  = kMenuNT + (viewport_mx() << 1) - 1 - sizeof(msg_continue);
-        const u16 menuRow1 = kBottomRightNT + 1;
-
-        // write chrEmpty_tile where arrow was
-        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(menuRow1 + lastMenuOption)}, chrHUDWhitespace_tile);
-        // write chrArrow_tile where arrow now is
-        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(menuRow1 + menuOption)}, chrArrow_tile);
-        lastMenuOption = menuOption;
-
+        // OAM DMA first, same as before this change: it needs to start as
+        // early into vblank as possible to finish before sprite evaluation,
+        // so nothing goes ahead of it -- input polling included.
         oam::RefreshSprites(OAMBuffer);
+
+        u8 port1, port2;
+        input::PollControllers(&port1, &port2);
+        const u8 inputs  = port1 | port2;
+        const u8 pressed = inputs & static_cast<u8>(~prevInputs); // strobe: only the frame a button goes down
+        prevInputs = inputs;
+        framePressed = pressed;
+
+        if (pMenu) {
+            ui::WriteQueue q{writeBuf, 2, 0, softStackScratch};
+            pMenu->Pass(pressed, q);
+            // Drain: the actual pokes, now that we're somewhere safe to do
+            // them -- no arithmetic here, just replaying precomputed
+            // {addr, val} pairs.
+            for (u8 i = 0; i < q.count; i++) {
+                ppu::WriteSingleToNameTable(q.buf[i].addr, q.buf[i].val);
+            }
+        }
+
         ppu::SetScroll({0, PreviewScrollY()});
 
         // Arm the preview/menu split for this frame -- see ApplySplit.
@@ -180,23 +194,8 @@ namespace title {
             ui::text::Alignment::Left
         );
 
-        // menu items -- all start at the same column, with a 1-tile gap from
-        // the right edge for the longest entry (msg_newGame/msg_continue).
-        // Anchored to the bottom-right nametable's own top row now, same as
-        // the title card and for the same reason -- not stacked below the
-        // title inside the top-right page anymore.
-        const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - sizeof(msg_continue);
-
-        // selection cursor -- starts on New Game, one tile of gap before the text.
-        ppu::WriteSingleToNameTable({static_cast<u16>(menuCol - 2), static_cast<u16>(kBottomRightNT + 1)}, chrArrow_tile);
-
-        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(kBottomRightNT + 1)}, SIZED_OBJ(msg_newGame), 0);
-        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(kBottomRightNT + 2)}, SIZED_OBJ(msg_continue), 0);
-        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(kBottomRightNT + 3)}, SIZED_OBJ(msg_options), 0);
-#if defined(TARGET_MACOS) || defined(TARGET_WINDOWS) || defined(TARGET_LINUX)
-        // consoles have no OS to quit back to -- PC targets only.
-        ppu::WriteFromBufferToNameTable({menuCol, static_cast<u16>(kBottomRightNT + 4)}, SIZED_OBJ(msg_quit), 0);
-#endif
+        // Menu items + selection cursor: drawn by the ui::choice::SingleChoice
+        // constructed in main(), not here -- see its own comment there.
     }
 
     static oam::oam_t Clear(const u16) {

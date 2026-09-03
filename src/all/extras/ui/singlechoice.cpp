@@ -79,30 +79,63 @@ namespace ui::choice {
             cursor = (chunkEnd < sBuff) ? chunkEnd + 1 : chunkEnd;
         }
 
-        ppu::WriteSingleToNameTable({arrowCol, static_cast<u16>(pos.y + optionPos[0])}, arrowGraphic);
+        // Pay the (x,y)->address divide+modulo (ppu::CartesianToAddress,
+        // internally the same cost ppu::WriteSingleToNameTable(vec2,u8)
+        // would pay per call) once per option, here at construction time --
+        // not on every Next()/Previous() call, which runs inside the vblank
+        // window.
+        for (u8 opt = 0; opt < nOptions; opt++) {
+            optionAddr[opt] = ppu::CartesianToAddress({arrowCol, static_cast<u16>(pos.y + optionPos[opt])});
+        }
+
+        ppu::WriteSingleToNameTable(optionAddr[0], arrowGraphic);
     }
 
     template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Pass(const u8 inputs) -> void {
-        if      (inputs & input::UP)   Next();
-        else if (inputs & input::DOWN) Previous();
+    UI_BANK auto SingleChoice<nOptions>::Pass(const u8 inputs, WriteQueue& q) -> void {
+        // UP moves the cursor up the list (decrements option), DOWN moves it
+        // down (increments) -- matches ui::Canvas's clamp convention and the
+        // hand-rolled title-menu logic this replaced.
+        if      (inputs & input::UP)   Previous(q);
+        else if (inputs & input::DOWN) Next(q);
     }
 
     template<u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Next() -> void {
+    UI_BANK auto SingleChoice<nOptions>::Next(WriteQueue& q) -> void {
         if (option == nOptions - 1) return;
 
-        ppu::WriteSingleToNameTable({static_cast<u16>(pos.x - 2), static_cast<u16>(pos.y + optionPos[option])}, emptyGraphic);
-        option++;
-        ppu::WriteSingleToNameTable({static_cast<u16>(pos.x - 2), static_cast<u16>(pos.y + optionPos[option])}, arrowGraphic);
+        // optionAddr[]: precomputed at construction, see its own comment --
+        // no (x,y)->address divide+modulo here, just the two writes queued
+        // for whoever drains q to poke.
+        q.Push({optionAddr[option], emptyGraphic});
+        option = static_cast<u8>(option + 1); // ++ on a volatile member is deprecated (C++20)
+        q.Push({optionAddr[option], arrowGraphic});
     }
 
     template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Previous() -> void {
+    UI_BANK auto SingleChoice<nOptions>::Previous(WriteQueue& q) -> void {
         if (option == 0) return;
 
-        ppu::WriteSingleToNameTable({static_cast<u16>(pos.x - 2), static_cast<u16>(pos.y + optionPos[option])}, emptyGraphic);
-        option--;
-        ppu::WriteSingleToNameTable({static_cast<u16>(pos.x - 2), static_cast<u16>(pos.y + optionPos[option])}, arrowGraphic);
+        q.Push({optionAddr[option], emptyGraphic});
+        option = static_cast<u8>(option - 1); // -- on a volatile member is deprecated (C++20)
+        q.Push({optionAddr[option], arrowGraphic});
     }
+
+    // Explicit instantiation: SingleChoice's members are defined here (not
+    // inline in the header, unlike a constexpr template such as
+    // demo/src/types.hpp's Regional<>) -- MODULE_PLACEMENT/UI_BANK needs a
+    // real, single out-of-line copy of each member to place into a section,
+    // which a header-inline template can't provide (every including TU
+    // would get its own copy). That means, unlike Regional<>'s own
+    // instantiations (demo/src/types.cpp), a consumer can't instantiate
+    // SingleChoice<N> itself from a TU that only sees the header -- the
+    // member definitions have to be visible where the instantiation happens,
+    // so it has to live here.
+    //
+    // 3 and 4 are the option counts demo/src/modes/title.cpp's menu
+    // currently needs (3 on console, 4 on PC targets with the extra Quit
+    // option -- see title.cpp's kMenuOptions). Add another instantiation
+    // here if a future SingleChoice<N> with a different N is needed.
+    template class SingleChoice<3>;
+    template class SingleChoice<4>;
 }
