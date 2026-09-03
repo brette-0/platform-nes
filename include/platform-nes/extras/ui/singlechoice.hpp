@@ -18,10 +18,10 @@ namespace ui::choice {
         );
 
         auto Pass(u8 inputs) -> void;
+        u8 option;
     private:
         vec2<u16> pos;
         vec2<u8>  box;
-        u8 option;
         u8 optionPos[nOptions];
         const u8 emptyGraphic;
         const u8 arrowGraphic;
