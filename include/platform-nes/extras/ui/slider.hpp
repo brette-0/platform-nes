@@ -16,6 +16,7 @@ namespace ui::slider {
         );
 
         void Move(i8 amt);
+        auto Pass(u8 inputs) -> void;
 
     private:
         vec2<u16> pos;

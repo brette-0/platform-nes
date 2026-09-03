@@ -12,4 +12,8 @@ namespace ui::button {
         ppu::WriteSingleToNameTable(pos, enabled ^= true);
         return enabled;
     }
+
+    auto TickBox::Pass(const u8 inputs) -> void {
+
+    }
 }
