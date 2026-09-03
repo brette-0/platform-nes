@@ -446,6 +446,13 @@ void EnableRendering(u8 ppuCtrl_, u8 ppuMask_) {
     ppu::PPUCTRL = ppuCtrl_;
 }
 
+/* Weak default ::ppu::Flush: walks only "row 0" (::video::nametable_row_bytes()
+ * worth of pages) -- correct for an ordinary mirrored board, where those 2
+ * physical pages alias to cover all 4 logical nametables. A four-screen
+ * board's row 1 (::mmc3::cartVRAM) is genuinely separate storage this never
+ * reaches; its own mapper TU supplies a strong override that walks every
+ * physical page instead -- see src/emu/mappers/mmc3.cpp's own comment. */
+__attribute__((weak))
 void Flush(const u8 nt, const u8 at) {
     // The page count tracks the nametable addressing used by GenerateFrame /
     // xy_to_nt_addr: a single virtual-pixel width of <512 maps to two pages,

@@ -25,7 +25,7 @@
  * wins over the emu PPU's own weak default with no runtime dispatch, and
  * ALTERNATIVE_NAMETABLE == 1 (four-screen)'s own comments below for the
  * matching ::ppu::ReadNametable/::WriteNametable/::nametableRows/
- * ::InitCartVRAM overrides.
+ * ::InitCartVRAM/::ppu::Flush overrides.
  */
 #include <platform-nes/mappers/mmc3.hpp>
 #include <platform-nes/video.hpp>
@@ -217,5 +217,38 @@ u8 ppu::ReadNametable(const u16 logical) {
 void ppu::WriteNametable(const u16 logical, const u8 value) {
     if (logical < mmc3::cartVRAMRowBytes) VideoRAM[logical] = value;
     else mmc3::cartVRAM[logical - mmc3::cartVRAMRowBytes] = value;
+}
+
+/**
+ * @brief Strong override of ::ppu::Flush for the four-screen board.
+ *
+ * The weak default (src/emu/ppu.cpp) only walks ::video::nametable_row_bytes()
+ * worth of pages -- "row 0" (::VideoRAM), correct for an ordinary mirrored
+ * board where 2 physical pages alias to cover all 4 logical nametables. A
+ * four-screen board has no such mirroring: row 1 (::mmc3::cartVRAM) is
+ * genuinely separate physical storage and never gets touched by the weak
+ * default at all, so anything placed there (e.g. this demo's title/menu
+ * text, which ::title.cpp's own comment says deliberately lands in the
+ * "bottom-right" quadrant -- nt_v==1, row 1) keeps whatever attribute bytes
+ * ::ppu::InitCartVRAM's calloc left (0x00, palette 0) instead of the
+ * palette ::Flush's caller asked for. Same page-order convention as this
+ * file's own logical addressing (page = nt_h + nt_v*nt_cols, see
+ * xy_to_nt_addr, src/emu/ppu.cpp) and matches the real NES-side strong
+ * override (src/nes/mappers/mmc3.cpp) walking every physical page instead
+ * of relying on mirroring.
+ */
+void ppu::Flush(const u8 nt, const u8 at) {
+    const unsigned vpw     = video::viewport_px();
+    const u16      nt_cols = static_cast<u16>(vpw < 512 ? 2 : (vpw + 255) / 256);
+    const u16      pages   = static_cast<u16>(nt_cols * ppu::nametableRows);
+
+    for (u16 page = 0; page < pages; page++) {
+        for (u16 i = 0; i < 0x3c0; i++) {
+            ppu::WriteNametable(static_cast<u16>(page * 0x400 + i), nt);
+        }
+        for (u16 i = 0; i < 0x40; i++) {
+            ppu::WriteNametable(static_cast<u16>(page * 0x400 + 0x3c0 + i), at);
+        }
+    }
 }
 #endif
