@@ -45,7 +45,12 @@ namespace ui::choice {
         const u8 emptyGraphic;
         const u8 arrowGraphic;
 
-        auto Next(u8*& buf)     -> void;
-        auto Previous(u8*& buf) -> void;
+        // Next()/Previous() used to be separate member functions -- mirror
+        // images of each other except for the increment direction and the
+        // boundary check. Merged into one so their WriteOpTo(emptyGraphic)/
+        // WriteOpTo(arrowGraphic) pair (each WriteOpTo call inlines, see its
+        // own comment in singlechoice.cpp) exists in the emitted code once
+        // per instantiation instead of twice.
+        auto Step(bool forward, u8*& buf) -> void;
     };
 }

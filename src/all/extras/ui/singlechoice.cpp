@@ -31,6 +31,20 @@ namespace ui::choice {
             *buf++ = static_cast<u8>(addr & 0xFF);
             *buf++ = val;
         }
+
+        // ppu::CartesianToAddress carries no placement/noinline of its own
+        // (PLATFORM_NES_VIDEO_SECTION is unset in this project), so LLVM is
+        // free to inline it -- and the constructor's per-option loop below
+        // has a compile-time trip count (nOptions), which made LLVM unroll
+        // the loop AND duplicate the fully-inlined divide/modulo body once
+        // per option. NI forces a single real out-of-line copy that the
+        // (possibly still-unrolled) loop just calls into instead. Tried
+        // `#pragma nounroll` on the loop as a less invasive alternative --
+        // it does stop the duplication, but leaves one full inlined copy
+        // in place of the jsr, which measured 194 bytes worse than this.
+        NI u16 ComputeOptionAddr(const u16 arrowCol, const u16 y) {
+            return ppu::CartesianToAddress({arrowCol, y});
+        }
     }
 
     template <u8 nOptions>
@@ -98,7 +112,7 @@ namespace ui::choice {
         // not on every Next()/Previous() call, which runs inside the vblank
         // window.
         for (u8 opt = 0; opt < nOptions; opt++) {
-            optionAddr[opt] = ppu::CartesianToAddress({arrowCol, static_cast<u16>(pos.y + optionPos[opt])});
+            optionAddr[opt] = ComputeOptionAddr(arrowCol, static_cast<u16>(pos.y + optionPos[opt]));
         }
 
         ppu::WriteSingleToNameTable(optionAddr[0], arrowGraphic);
@@ -109,28 +123,20 @@ namespace ui::choice {
         // UP moves the cursor up the list (decrements option), DOWN moves it
         // down (increments) -- matches ui::Canvas's clamp convention and the
         // hand-rolled title-menu logic this replaced.
-        if      (inputs & input::UP)   Previous(buf);
-        else if (inputs & input::DOWN) Next(buf);
+        if      (inputs & input::UP)   Step(false, buf);
+        else if (inputs & input::DOWN) Step(true, buf);
     }
 
     template<u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Next(u8*& buf) -> void {
-        if (option == nOptions - 1) return;
+    UI_BANK auto SingleChoice<nOptions>::Step(const bool forward, u8*& buf) -> void {
+        if (forward ? option == nOptions - 1 : option == 0) return;
 
         // optionAddr[]: precomputed at construction, see its own comment --
         // no (x,y)->address divide+modulo here, just the two writes encoded
         // for whoever replays the bytes to poke.
         WriteOpTo(buf, optionAddr[option], emptyGraphic);
-        option = static_cast<u8>(option + 1); // ++ on a volatile member is deprecated (C++20)
-        WriteOpTo(buf, optionAddr[option], arrowGraphic);
-    }
-
-    template <u8 nOptions>
-    UI_BANK auto SingleChoice<nOptions>::Previous(u8*& buf) -> void {
-        if (option == 0) return;
-
-        WriteOpTo(buf, optionAddr[option], emptyGraphic);
-        option = static_cast<u8>(option - 1); // -- on a volatile member is deprecated (C++20)
+        // ++/-- on a volatile member is deprecated (C++20)
+        option = static_cast<u8>(forward ? option + 1 : option - 1);
         WriteOpTo(buf, optionAddr[option], arrowGraphic);
     }
 
