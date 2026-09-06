@@ -40,8 +40,10 @@ namespace ui::slider {
     ) : pos(pos), size(size), unselectedGraphic(unselectedGraphic),
         selectedGraphic(selectedGraphic), selectedPosition(defaultPosition),
         post(post) {
-        // slider body is presumed to be drawn, but not the slider piece itself
-        // does not edit attributes, as we presume an attribute has 16x16 finity
+    }
+
+    template <bool vertical>
+    AI auto TileSlider<vertical>::Draw() -> void {
         if constexpr (vertical) {
             ppu::WriteSingleToNameTable({pos.x, pos.y + selectedPosition}, selectedGraphic);
         } else {

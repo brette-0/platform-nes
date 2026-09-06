@@ -96,13 +96,19 @@ namespace title {
         const u16 menuCol = kMenuNT + (viewport_mx() << 1) - 1 - kMenuBoxWidth;
         u8* initCursor = writeBuf;
         ui::choice::SingleChoice menu(TitleUnselect, TitleSelect, kMenuOptions);
-        menu.Draw(
+        const auto menuChunks = menu.Make(
             SIZED_OBJ(msg_menu),
             {menuCol, static_cast<u16>(kBottomRightNT + 1)},
             {kMenuBoxWidth, kMenuOptions},
-            chrHUDWhitespace_tile, 0,
+            chrHUDWhitespace_tile, 0
+        );
+        menu.Draw(
+            menuChunks,
+            {menuCol, static_cast<u16>(kBottomRightNT + 1)},
+            kMenuOptions,
             initCursor
         );
+        delete[] menuChunks;
         // Initial selection indicator: SingleChoice only queued it into
         // writeBuf (see VisualFn) -- draining it here is safe because
         // nothing's rendering yet (NMI isn't enabled until below).

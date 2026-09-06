@@ -19,8 +19,15 @@ local.cmake.example has a worked example."
 #define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION) MINSIZE
 
 namespace ui::button {
+    UI_BANK int TickBox::Make(const vec2<u16> pos) {
+        return ppu::CartesianToAddress(pos);
+    }
+
     UI_BANK TickBox::TickBox(const vec2<u16> pos, const bool defaultState)
-        : enabled(defaultState), addr(ppu::CartesianToAddress(pos)) {
+        : enabled(defaultState), addr(Make(pos)) {
+    }
+
+    AI auto TickBox::Draw(const vec2<u16> pos) -> void {
         ppu::WriteSingleToNameTable(pos, enabled);
     }
 

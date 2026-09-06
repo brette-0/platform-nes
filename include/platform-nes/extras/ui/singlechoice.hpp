@@ -29,27 +29,44 @@ namespace ui::choice {
 
         ~SingleChoice();
 
-        // Lays out option text into the nametable, computes each option's
-        // indicator address into optionAddr, and fires the initial
-        // indicator draw -- buf forwarded to it untouched, same contract
-        // Pass()/Step() use for later selection changes; see VisualFn.
-        // Static so it can run before -- or entirely without -- a
-        // SingleChoice instance, as long as the caller hands it storage for
-        // optionAddr (>= nOptions entries) and a VisualFn for the indicator.
-        static auto Draw(
+        // Word-wraps every option's text (same rule as text::Draw, except
+        // the row cursor carries on across options instead of resetting)
+        // and computes each option's indicator address into optionAddr --
+        // touches nothing PPU-side, safe to run while rendering/NMI is
+        // live. Static so it can run before -- or entirely without -- a
+        // SingleChoice instance, as long as the caller hands it storage
+        // for optionAddr (>= nOptions entries).
+        //
+        // Returns a heap-allocated array of box.y buffer<u8*> entries --
+        // one per row, caller owns it (delete[] once done) and hands it
+        // to Draw() below. Same layout as text::Make's result.
+        static NI buffer<u8*>* Make(
             const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
             u8 wordSplitter, u8 optionSplitter,
-            VisualFn draw, u16* optionAddr, u8 nOptions, u8*& buf
-        ) -> void;
+            u16* optionAddr, u8 nOptions
+        );
+
+        // Convenience wrapper over the static Make() using this instance's
+        // own optionAddr/nOptions.
+        NI auto Make(
+            const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
+            u8 wordSplitter, u8 optionSplitter
+        ) -> buffer<u8*>*;
+
+        // Draws a Make() result -- writes chunks to the nametable (same
+        // early-break-on-nullptr rule as text::Draw) and fires the initial
+        // indicator draw at optionAddr[0], buf forwarded to it untouched,
+        // same contract Pass()/Step() use for later selection changes; see
+        // VisualFn. Does not take ownership of chunks -- caller allocated
+        // it via Make() and is responsible for delete[]ing it.
+        static AI void Draw(
+            const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY,
+            VisualFn draw, u16* optionAddr, u8*& buf
+        );
 
         // Convenience wrapper over the static Draw() using this instance's
-        // own optionAddr/draw/nOptions -- the normal way to draw after
-        // construction.
-        auto Draw(
-            const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
-            u8 wordSplitter, u8 optionSplitter,
-            u8*& buf
-        ) -> void;
+        // own optionAddr/draw -- the normal way to draw after construction.
+        AI auto Draw(const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY, u8*& buf) -> void;
 
         // Forwards buf, untouched, into whichever of clear/draw ends up
         // running -- see VisualFn.

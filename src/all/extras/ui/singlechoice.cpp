@@ -36,11 +36,12 @@ namespace ui::choice {
             clear(clear), draw(draw), nOptions(nOptions) {
     }
 
-    UI_BANK auto SingleChoice::Draw(
+    UI_BANK buffer<u8*>* SingleChoice::Make(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
             const u8 wordSplitter, const u8 optionSplitter,
-            const VisualFn draw, u16* const optionAddr, const u8 nOptions, u8*& buf
-        ) -> void {
+            u16* const optionAddr, const u8 nOptions
+        ) {
+        const auto chunks = new buffer<u8*>[box.y]();
 
         // Arrow sits one tile left of the text with a blank tile of gap in
         // between -- same layout title.cpp's menu arrow uses.
@@ -52,7 +53,7 @@ namespace ui::choice {
         for (u8 opt = 0; opt < nOptions && cursor < sBuff; opt++) {
             // Pay the (x,y)->address divide+modulo (ppu::CartesianToAddress,
             // internally the same cost ppu::WriteSingleToNameTable(vec2,u8)
-            // would pay per call) once per option, here in Draw() -- not on
+            // would pay per call) once per option, here in Make() -- not on
             // every Next()/Previous() call, which runs inside the vblank
             // window.
             optionAddr[opt] = ComputeOptionAddr(arrowCol, static_cast<u16>(pos.y + row));
@@ -62,7 +63,7 @@ namespace ui::choice {
             u8 chunkEnd = cursor;
             while (chunkEnd < sBuff && *(buff + chunkEnd) != optionSplitter) chunkEnd++;
 
-            // word-wrap this option's chunk exactly like text::Draw, except
+            // word-wrap this option's chunk exactly like text::Make, except
             // the row cursor carries on across options instead of resetting
             u8 last = cursor;
             while (last < chunkEnd && row < box.y) {
@@ -79,14 +80,10 @@ namespace ui::choice {
 
                 const u8 end = (c == chunkEnd) ? c : (foundWhite ? lastWhite : c);
 
-                ppu::WriteFromBufferToNameTable(
-                    {pos.x, static_cast<u16>(pos.y + row)},
-                    buff + last,
-                    end - last,
-                    0
-                );
-
+                chunks[row].addr = const_cast<u8*>(buff + last);
+                chunks[row].size = end - last;
                 row++;
+
                 last = (end < chunkEnd) ? end + 1 : end;
             }
 
@@ -94,17 +91,40 @@ namespace ui::choice {
             cursor = (chunkEnd < sBuff) ? chunkEnd + 1 : chunkEnd;
         }
 
+        return chunks;
+    }
+
+    UI_BANK buffer<u8*>* SingleChoice::Make(
+            const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
+            const u8 wordSplitter, const u8 optionSplitter
+        ) {
+        return Make(buff, sBuff, pos, box, wordSplitter, optionSplitter, optionAddr, nOptions);
+    }
+
+    void SingleChoice::Draw(
+            const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY,
+            const VisualFn draw, u16* const optionAddr, u8*& buf
+        ) {
+        for (u8 row = 0; row < boxY; row++) {
+            if (chunks[row].addr == nullptr) {
+                break;
+            }
+
+            ppu::WriteFromBufferToNameTable(
+                {pos.x, static_cast<u16>(pos.y + row)},
+                chunks[row].addr,
+                chunks[row].size,
+                0
+            );
+        }
+
         // Initial selection indicator -- buf forwarded as-is, same contract
         // Pass()/Step() use for every later selection change; see VisualFn.
         draw(optionAddr[0], buf);
     }
 
-    UI_BANK auto SingleChoice::Draw(
-            const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
-            const u8 wordSplitter, const u8 optionSplitter,
-            u8*& buf
-        ) -> void {
-        Draw(buff, sBuff, pos, box, wordSplitter, optionSplitter, draw, optionAddr, nOptions, buf);
+    void SingleChoice::Draw(const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY, u8*& buf) {
+        Draw(chunks, pos, boxY, draw, optionAddr, buf);
     }
 
     UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {
@@ -118,7 +138,7 @@ namespace ui::choice {
     UI_BANK auto SingleChoice::Step(const bool forward, u8*& buf) -> void {
         if (forward ? option == nOptions - 1 : option == 0) return;
 
-        // optionAddr[]: precomputed by Draw(), see its own comment --
+        // optionAddr[]: precomputed by Make(), see its own comment --
         // no (x,y)->address divide+modulo here, just handing off the
         // address for clear/draw to queue whatever they want into buf.
         clear(optionAddr[option], buf);

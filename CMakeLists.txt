@@ -223,7 +223,6 @@ if(TARGET_PLATFORM STREQUAL "nes" OR TARGET_PLATFORM STREQUAL "nes_pal")
             ${CMAKE_SOURCE_DIR}/src/all/extras/ui/tickbox.cpp
             ${CMAKE_SOURCE_DIR}/src/all/extras/ui/tileslider.cpp
             ${CMAKE_SOURCE_DIR}/src/all/extras/ui/text.cpp
-            ${CMAKE_SOURCE_DIR}/src/all/extras/ui/textbox.cpp
             ${CMAKE_SOURCE_DIR}/src/all/extras/ui/singlechoice.cpp)
     set_source_files_properties(${PLATFORM_NES_UI_SOURCES}
             PROPERTIES COMPILE_DEFINITIONS
