@@ -25,6 +25,8 @@ extern atomic eGameModes gameMode;
 extern void (*pNMI)();
 extern void (*pIRQ)();
 
+extern u8 scratchpad[];
+
 // Shared OAM staging buffer -- every mode (title, level, ...) refreshes its
 // own sprites into the same 64-sprite table rather than each owning one, so
 // it lives here instead of any one mode's header.

@@ -11,6 +11,8 @@
 #include "banks.hpp"
 
 
+u8 scratchpad[2];
+
 // ReSharper disable once CppUseAuto
 atomic eGameModes gameMode = eGameModes::Title;
 

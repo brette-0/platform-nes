@@ -903,6 +903,21 @@ namespace ppu {
     void WriteFromBufferToNameTable(vec2<u16> pos, const u8* source, u8 sBuffer, u8 polarity);
 
     /**
+     * @brief Writes an array of bytes into nametable memory with a stride,
+     *        at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteFromBufferToNameTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this
+     * exists (skips the (x,y)->address divide+modulo).
+     *
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param source   Source buffer to push into PPU video RAM.
+     * @param sBuffer  Size of @p source in bytes.
+     * @param polarity Non-zero for vertical writes, zero for horizontal.
+     */
+    void WriteFromBufferToNameTable(u16 address, const u8* source, u8 sBuffer, u8 polarity);
+
+    /**
      * @brief Writes a single byte into nametable memory.
      * @param pos   Tile position.
      * @param value Byte value to write.
@@ -918,12 +933,12 @@ namespace ppu {
      * then replay the write -- e.g. inside the tight vblank window -- as three register
      * pokes with no arithmetic. @p address must be what ::ppu::CartesianToAddress returns
      * for the active backend (a \$2000-based PPU address on NES, a 0-based VRAM offset on
-     * desktop). It is `int` so it stays 16-bit on llvm-mos yet widens on hosts.
+     * desktop).
      *
      * @param address Precomputed VRAM address (see ::ppu::CartesianToAddress).
      * @param value   Byte value to write.
      */
-    void WriteSingleToNameTable(int address, u8 value);
+    void WriteSingleToNameTable(u16 address, u8 value);
 
     /**
      * @brief Writes bytes produced by a provider callback into nametable memory.
@@ -946,6 +961,22 @@ namespace ppu {
     void WriteFromProviderToNameTable(vec2<u16> pos, u8 (*fn)(Idx), u8 amt, u8 polarity);
 
     /**
+     * @brief Writes bytes produced by a provider callback into nametable
+     *        memory, at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteFromProviderToNameTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param fn       Provider returning the byte to write for iteration `i`.
+     * @param amt      Number of iterations.
+     * @param polarity Non-zero for vertical writes, zero for horizontal.
+     */
+    template <typename Idx>
+    void WriteFromProviderToNameTable(u16 address, u8 (*fn)(Idx), u8 amt, u8 polarity);
+
+    /**
      * @brief Writes an array of bytes into the attribute table with a stride.
      *
      * Same layout as ::ppu::WriteFromBufferToNameTable but targets attribute
@@ -959,11 +990,36 @@ namespace ppu {
     void WriteFromBufferToAttributeTable(vec2<u16> pos, const u8* source, u8 sBuffer, u8 polarity);
 
     /**
+     * @brief Writes an array of bytes into the attribute table with a
+     *        stride, at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteFromBufferToAttributeTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param source   Source buffer of attribute bytes.
+     * @param sBuffer  Size of @p source in bytes.
+     * @param polarity Non-zero for vertical, zero for horizontal.
+     */
+    void WriteFromBufferToAttributeTable(u16 address, const u8* source, u8 sBuffer, u8 polarity);
+
+    /**
      * @brief Writes a single byte into attribute memory.
      * @param pos   Tile position.
      * @param value Attribute byte (palette + flip flags).
      */
     void WriteSingleToAttributeTable(vec2<u16> pos, u8 value);
+
+    /**
+     * @brief Writes a single byte into attribute memory at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteSingleToAttributeTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @param address Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param value   Attribute byte (palette + flip flags).
+     */
+    void WriteSingleToAttributeTable(u16 address, u8 value);
 
     /**
      * @brief Writes bytes produced by a provider callback into attribute memory.
@@ -984,6 +1040,22 @@ namespace ppu {
      */
     template <typename Idx>
     void WriteFromProviderToAttributeTable(vec2<u16> pos, u8 (*fn)(Idx), u8 amt, u8 polarity);
+
+    /**
+     * @brief Writes bytes produced by a provider callback into attribute
+     *        memory, at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteFromProviderToAttributeTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @tparam Idx     Parameter type of @p fn (the value handed to the callback).
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param fn       Provider returning the attribute byte to write for iteration `i`.
+     * @param amt      Number of iterations.
+     * @param polarity Non-zero for vertical, zero for horizontal.
+     */
+    template <typename Idx>
+    void WriteFromProviderToAttributeTable(u16 address, u8 (*fn)(Idx), u8 amt, u8 polarity);
 
     /**
      * @brief Flushes pending nametable and attribute-table writes to the PPU.

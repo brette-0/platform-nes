@@ -29,4 +29,14 @@ namespace level {
     void BuildNextColumn(u8* buf, u16 worldCol);   // right-scroll: reads window column
     void BuildPrevColumn(u8* buf, u16 worldCol);   // left-scroll: reads window column
     bool LoadLevel(u16 n);
+
+    // Resets edgeR/dynEdgeR to the level start (world column 0) and fills
+    // nCols nametable columns (i in [0, nCols), so nCols should be even)
+    // from there via GetNextWrite/GetCurrentNext -- the same streaming
+    // fill EnterLevelSetup uses to seed the level view, and title.cpp's
+    // level preview to render a shorter version of the same thing. Always
+    // writes at nametable row 2 (just below the 2-row HUD) and 28 rows
+    // tall (levelHeight metatiles) -- both GetNextWrite/GetCurrentNext's
+    // own attribute math are hardwired to that placement.
+    void PopulateNameTableColumns(u16 nCols);
 }

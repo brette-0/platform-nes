@@ -439,6 +439,40 @@ inline static u16 xy_to_at_addr(u16 x, u16 y) {
          + 0x3C0 + (row / 4) * 8 + (col / 4);
 }
 
+// Inverse of xy_to_nt_addr: recovers an (x,y) the multi-byte writers' own
+// per-byte page-wrap logic can walk from, given only the flattened address a
+// caller precomputed via CartesianToAddress. Native division is cheap here
+// (unlike the 6502 NES backend, where CartesianToAddress's cost is the whole
+// reason an address overload exists) -- so rather than re-deriving a
+// division-free page-wrap scheme (fragile: it would have to assume nt_cols
+// stays 2, which isn't guaranteed on a resizable LANDSCAPE window), this just
+// reconstructs the coordinate the existing, already-wraparound-safe pos-based
+// implementation needs, and defers to it unchanged.
+inline static void nt_addr_to_xy(const u16 address, u16& x, u16& y) {
+    const u16 nt_cols   = (video::viewport_tx() < 64 ? 2 : (video::viewport_tx() + 31) / 32);
+    const u16 pageIndex = address >> 10;
+    const u16 nt_h      = pageIndex % nt_cols;
+    const u16 nt_v       = pageIndex / nt_cols;
+    const u16 local      = address & 0x3FF;
+    x = static_cast<u16>(nt_h * 32 + (local & 0x1F));
+    y = static_cast<u16>(nt_v * 30 + (local >> 5));
+}
+
+// Attribute counterpart of ::nt_addr_to_xy. An attribute address only encodes
+// row/4 and col/4 (4 metatile rows/cols share one attribute byte), so this
+// can't recover the exact (x,y) that produced it -- only picks the top-left
+// corner of that 4x4 block, which is fine: xy_to_at_addr(x,y) depends only on
+// x/4 and y/4, so any (x,y) inside the block round-trips to the same address.
+inline static void at_addr_to_xy(const u16 address, u16& x, u16& y) {
+    const u16 nt_cols   = (video::viewport_tx() < 64 ? 2 : (video::viewport_tx() + 31) / 32);
+    const u16 pageIndex = address >> 10;
+    const u16 nt_h      = pageIndex % nt_cols;
+    const u16 nt_v       = pageIndex / nt_cols;
+    const u16 local      = static_cast<u16>((address & 0x3FF) - 0x3C0);
+    x = static_cast<u16>(nt_h * 32 + (local & 0x7) * 4);
+    y = static_cast<u16>(nt_v * 30 + (local >> 3) * 4);
+}
+
 namespace ppu {
 
 void EnableRendering(u8 ppuCtrl_, u8 ppuMask_) {
@@ -492,6 +526,17 @@ void WriteFromBufferToNameTable(
     }
 }
 
+// Address overload -- see ::nt_addr_to_xy's own comment for why this
+// reconstructs (x,y) and defers to the pos-based version above instead of
+// re-deriving the page-wrap logic against a flat address.
+void WriteFromBufferToNameTable(
+    const u16 address, const u8* source, const u8 sBuffer, const u8 polarity
+) {
+    u16 x, y;
+    nt_addr_to_xy(address, x, y);
+    WriteFromBufferToNameTable({x, y}, source, sBuffer, polarity);
+}
+
 void WriteSingleToNameTable(const vec2<u16> pos, u8 value) {
     const u16 offset = xy_to_nt_addr(pos.x, pos.y);
     ppu::WriteNametable(offset, value);
@@ -500,8 +545,8 @@ void WriteSingleToNameTable(const vec2<u16> pos, u8 value) {
 // Address overload: @p address is the 0-based VRAM offset CartesianToAddress returns
 // on this backend (xy_to_nt_addr is already 0-based here), so it routes through the
 // same nametable accessor -- the desktop mirror of the NES poke-by-address path.
-void WriteSingleToNameTable(const int address, u8 value) {
-    ppu::WriteNametable(static_cast<u16>(address), value);
+void WriteSingleToNameTable(const u16 address, u8 value) {
+    ppu::WriteNametable(address, value);
 }
 
 void SetScroll(const vec2<u16> pos) {
@@ -537,6 +582,19 @@ void WriteFromProviderToNameTable(
 template void WriteFromProviderToNameTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
 template void WriteFromProviderToNameTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
+// Address overload -- see ::nt_addr_to_xy's own comment.
+template <typename Idx>
+void WriteFromProviderToNameTable(
+    const u16 address, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+) {
+    u16 x, y;
+    nt_addr_to_xy(address, x, y);
+    WriteFromProviderToNameTable({x, y}, fn, amt, polarity);
+}
+
+template void WriteFromProviderToNameTable<u8>(u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(u16, u8 (*)(u16), u8, u8);
+
 void WriteFromBufferToAttributeTable(
     const vec2<u16> pos, const u8* source,
     const u8 sBuffer, const u8 polarity
@@ -563,9 +621,23 @@ void WriteFromBufferToAttributeTable(
     }
 }
 
+// Address overload -- see ::at_addr_to_xy's own comment.
+void WriteFromBufferToAttributeTable(
+    const u16 address, const u8* source, const u8 sBuffer, const u8 polarity
+) {
+    u16 x, y;
+    at_addr_to_xy(address, x, y);
+    WriteFromBufferToAttributeTable({x, y}, source, sBuffer, polarity);
+}
+
 void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {
     const u16 offset = xy_to_at_addr(pos.x, pos.y);
     ppu::WriteNametable(offset, value);
+}
+
+// Address overload -- see ::at_addr_to_xy's own comment.
+void WriteSingleToAttributeTable(const u16 address, const u8 value) {
+    ppu::WriteNametable(address, value);
 }
 
 template <typename Idx>
@@ -594,6 +666,19 @@ void WriteFromProviderToAttributeTable(
 // host video RAM, so it must stay in this backend rather than the header.
 template void WriteFromProviderToAttributeTable<u8>(vec2<u16>, u8 (*)(u8), u8, u8);
 template void WriteFromProviderToAttributeTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
+
+// Address overload -- see ::at_addr_to_xy's own comment.
+template <typename Idx>
+void WriteFromProviderToAttributeTable(
+    const u16 address, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+) {
+    u16 x, y;
+    at_addr_to_xy(address, x, y);
+    WriteFromProviderToAttributeTable({x, y}, fn, amt, polarity);
+}
+
+template void WriteFromProviderToAttributeTable<u8>(u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(u16, u8 (*)(u16), u8, u8);
 
 u16 CartesianToAddress(const vec2<u16> pos) {
     return xy_to_nt_addr(pos.x, pos.y);

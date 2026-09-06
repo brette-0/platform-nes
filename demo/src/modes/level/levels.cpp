@@ -3,6 +3,7 @@
 #include "../../graphics/metatiles.hpp"
 #include "../../banks.hpp"     // ACTORS, level_graphics_tag
 #include <platform-nes/mappers/mmc3.hpp>  // mmc3::CallInBlock
+#include <platform-nes/video.hpp>         // ppu::WriteFromProviderToNameTable/WriteFromBufferToAttributeTable
 
 #include <intsh>
 #include <platform-nes/technology.hpp>
@@ -253,6 +254,21 @@ namespace level {
             buf[step + 1]      = Metatiles_UR[m];
             buf[28 + step]     = Metatiles_BL[m];
             buf[28 + step + 1] = Metatiles_BR[m];
+        }
+    }
+
+    // NI LEVEL_CODE: same reasoning as LoadLevel's own NI -- this is called
+    // from both level.cpp's EnterLevelSetup and title.cpp's level preview,
+    // each an out-of-bank farcall target, not worth letting LTO duplicate
+    // inline at either call site.
+    NI LEVEL_CODE void PopulateNameTableColumns(const u16 nCols) {
+        edgeR    = { TileData };
+        dynEdgeR = { DynLengths, DynData, 0 };
+
+        for (u16 i = 0; i < nCols; i += 2) {
+            ppu::WriteFromProviderToNameTable({i, 2}, GetNextWrite, 28, 1);
+            ppu::WriteFromProviderToNameTable({static_cast<u16>(i + 1), 2}, GetCurrentNext, 28, 1);
+            ppu::WriteFromBufferToAttributeTable({static_cast<u16>(i & ~3), 2}, AttributeBuffer, 8, 1);
         }
     }
 

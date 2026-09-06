@@ -188,21 +188,13 @@ namespace level {
         constexpr u8 coinUI[] = {chrHUDCoin_tile, chrFont_tile + 0, chrFont_tile + 0};
         ppu::WriteFromBufferToNameTable({static_cast<u16>(video::viewport_tx() - sizeof(coinUI)), 1}, SIZED_OBJ(coinUI), 0);
 
-        edgeR = { TileData };
-        dynEdgeR = { DynLengths, DynData, 0 }; // dyn forward edge, lockstep w/ edgeR
-        for (auto i = 0; i < 2 + video::viewport_tx(); i += 2) {
-            ppu::WriteFromProviderToNameTable(
-                {static_cast<u16>(i), 2},
-                GetNextWrite, 28, 1
-            );
-
-            ppu::WriteFromProviderToNameTable(
-                {static_cast<u16>(i + 1), 2},
-                GetCurrentNext, 28, 1
-            );
-
-            ppu::WriteFromBufferToAttributeTable({static_cast<u16>(i & ~3), 2}, AttributeBuffer, 8, 1);
-        }
+        // PopulateNameTableColumns is ::LEVEL_CODE too -- same reason and
+        // pattern as LoadLevel's wrap above. Leaves edgeR/dynEdgeR seeded
+        // at the level start; edgeRAbs/edgeL/dynEdgeL below pick up from
+        // there for the backward-scroll edge.
+        mmc3::CallInBlock<level_code_tag>([] {
+            PopulateNameTableColumns(static_cast<u16>(2 + video::viewport_tx()));
+        });
 
         edgeRAbs    = (1 + viewport_mx()) * levelHeight;
         edgeL    = { TileData };

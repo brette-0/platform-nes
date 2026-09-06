@@ -5,9 +5,7 @@
 #include "../graphics/strings.hpp"
 #include "../graphics/graphics.hpp"
 #include "../graphics/metasprites.hpp"
-#include "../graphics/metatiles.hpp"
 #include "level/levels.hpp"
-#include "level/dynamic.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
 #include "platform-nes/extras/ui/singlechoice.hpp"
 
@@ -16,9 +14,29 @@ namespace title {
     // Longest label ("NEW GAME"/"CONTINUE", 8 chars) -- both the menu's box
     // width and, mirrored below, how far in from the screen edge it's placed.
     constexpr u8 kMenuBoxWidth  = 8;
+
+    // Play-mode choice -- see msg_playMode. Not wired into the title screen
+    // yet, just prepared: [[wire up play mode screen]] follow-up.
+#if defined(TARGET_NES)
+    constexpr u8 kPlayModeOptions  = 2;
+    constexpr u8 kPlayModeBoxWidth = 12;   // "MULTIPLAYER"
+#else
+    constexpr u8 kPlayModeOptions  = 3;
+    constexpr u8 kPlayModeBoxWidth = 17;   // "LOCAL MULTIPLAYER"
+#endif
     static ui::choice::SingleChoice* pMenu = nullptr;
-    static atomic u8 framePressed = 0;
-    static u8 prevInputs = 0;
+
+    // Play-mode picker: prepared (word-wrapped, optionAddr computed) at
+    // startup but not drawn until New Game/Continue is picked -- see
+    // nmi_handler_drawPlayMode.
+    static ui::choice::SingleChoice* pPlayMode = nullptr;
+    static buffer<u8*>* pPlayModeChunks = nullptr;
+    static vec2<u16> playModePos;
+    // Row-0 nametable address for playModePos, precomputed in main()'s loop
+    // (ordinary context, a division there costs nothing worth avoiding) and
+    // read by nmi_handler_drawPlayMode via SingleChoice::Draw's address
+    // overload, so the ISR itself never pays CartesianToAddress's divide.
+    static u16 playModeAddr;
 
     // UI interaction write buffer, and its encoding/draining -- entirely
     // this file's own decision, not SingleChoice's; see TitleSelect/
@@ -51,6 +69,7 @@ namespace title {
 
     static oam::oam_t Clear(u16 _);
     static NI void DrawLevelPreview();
+    static void nmi_handler_drawPlayMode();
 
     constexpr u16 kMenuNT = 32;
     constexpr u16 kBottomRightNT = 30;
@@ -113,37 +132,69 @@ namespace title {
         // writeBuf (see VisualFn) -- draining it here is safe because
         // nothing's rendering yet (NMI isn't enabled until below).
         DrainWriteBuf(writeBuf, initCursor);
+
+        // Play-mode choice: prepared (word-wrapped, optionAddr computed)
+        // but not drawn -- see kPlayModeOptions/msg_playMode's own comments.
+        // Same row as the menu (drawn straight over that text later, see
+        // nmi_handler_drawPlayMode) but its own right-anchored column --
+        // its box is wider than the menu's ("LOCAL MULTIPLAYER" vs. "NEW
+        // GAME"), so reusing menuCol verbatim would run the box off the
+        // right edge of the viewport instead of fitting the text.
+        const u16 playModeCol = kMenuNT + (viewport_mx() << 1) - 1 - kPlayModeBoxWidth;
+        ui::choice::SingleChoice playMode(TitleUnselect, TitleSelect, kPlayModeOptions);
+        playModePos = {playModeCol, static_cast<u16>(kBottomRightNT + 1)};
+        pPlayModeChunks = playMode.Make(
+            SIZED_OBJ(msg_playMode),
+            playModePos,
+            {kPlayModeBoxWidth, kPlayModeOptions},
+            chrHUDWhitespace_tile, 0
+        );
+        pPlayMode = &playMode;
         pMenu = &menu;
-        prevInputs = 0;
-        framePressed = 0;
 
         ppu::SetScroll({0, 0xff});
         ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::SPRITE_SIZE | ppu::ctrl::GEN_NMI, ppu::mask::BG_L | ppu::mask::SPRITE_L);
 
         irq::EnableInterrupts();
 
+        // Edge-detect state for the polling below -- local to main(), not
+        // shared with the ISR: polling doesn't touch the PPU, so it has no
+        // reason to run inside nmi_handler or to be published/consumed
+        // across the ISR boundary the way writeBuf is.
+        u8 prevInputs = 0;
+
         while (true) {
-            const u8 pressed = framePressed; // this frame's edge-detected input, published by nmi_handler
+            u8 port1, port2;
+            input::PollControllers(&port1, &port2);
+            const u8 inputs  = port1 | port2;
+            const u8 pressed = inputs & static_cast<u8>(~prevInputs); // strobe: only the frame a button goes down
+            prevInputs = inputs;
 
             // Build this frame's pending selection-indicator writes here,
             // outside the ISR -- see writeBuf/writeBufLen's own comments.
             // Only touches writeBuf/writeBufLen if pMenu actually queues
-            // something (Pass() no-ops on anything but UP/DOWN), so most
-            // frames this is just the framePressed read above.
+            // something (Pass() no-ops on anything but UP/DOWN).
             if (pMenu) {
                 u8* cursor = writeBuf;
                 pMenu->Pass(pressed, cursor);
                 writeBufLen = static_cast<u8>(cursor - writeBuf);
             }
 
-            bool proceed = false;
             if (pressed & input::A) {
                 switch (menu.option) {
                     case NewGame:
-                        proceed = true;
+                    case Continue:
+                        // Show the player-count picker over the current menu
+                        // text instead of proceeding straight to gameplay --
+                        // actually starting the level once a mode is picked
+                        // is a follow-up, not wired up yet. One-shot NMI
+                        // swap, not a flag: see nmi_handler_drawPlayMode.
+                        // CartesianToAddress paid here, in ordinary code, not
+                        // inside the ISR -- see playModeAddr's own comment.
+                        playModeAddr = ppu::CartesianToAddress(playModePos);
+                        pNMI = nmi_handler_drawPlayMode;
                         break;
 
-                    case Continue:
                     case Options:
                         break;
 
@@ -159,25 +210,18 @@ namespace title {
 
             video::WaitForPresent();
             if (quit) return;
-            if (proceed) break;
         }
-
-        ppu::PPUMASK = 0;
-        gameMode = eGameModes::Level;
+        // No more break out of the loop above: New Game/Continue only show
+        // the player-count picker now (see the switch above), they don't
+        // proceed to gameplay by themselves. Actually leaving the title
+        // screen (ppu::PPUMASK = 0; gameMode = eGameModes::Level;) is a
+        // follow-up, triggered once a play mode is picked.
     }
 
     void nmi_handler() {
-        // OAM DMA first, same as before this change: it needs to start as
-        // early into vblank as possible to finish before sprite evaluation,
-        // so nothing goes ahead of it -- input polling included.
+        // OAM DMA first: it needs to start as early into vblank as possible
+        // to finish before sprite evaluation, so nothing goes ahead of it.
         oam::RefreshSprites(OAMBuffer);
-
-        u8 port1, port2;
-        input::PollControllers(&port1, &port2);
-        const u8 inputs  = port1 | port2;
-        const u8 pressed = inputs & static_cast<u8>(~prevInputs); // strobe: only the frame a button goes down
-        prevInputs = inputs;
-        framePressed = pressed;
 
         // writeBuf's actual contents are built in main()'s loop, not here --
         // see writeBuf's own comment. This is the only part that has to run
@@ -200,6 +244,30 @@ namespace title {
         const u8 splitReload = splitPixelRow > kSplitLatency
             ? static_cast<u8>(splitPixelRow - kSplitLatency) : 0;
         mmc3::ScheduleScanlineIRQ(splitReload, {0, splitPixelRow});
+    }
+
+    // One-shot: installed as pNMI by main()'s loop when New Game/Continue is
+    // picked (see the switch there), instead of a flag polled every frame
+    // inside the steady-state handler above -- this way the draw actually
+    // runs unconditionally, on the very next vblank, as ordinary mainline
+    // code in its own handler, not a rarely-true branch buried in the
+    // handler that runs every other frame.
+    //
+    // Runs nmi_handler() first -- OAM DMA, the HUD split IRQ, etc. still
+    // need to happen every frame regardless -- then draws the player-count
+    // picker straight over the existing menu text (no clear first: same
+    // Draw() that never clears, just overwrites), and hands back to
+    // nmi_handler for every frame after.
+    static void nmi_handler_drawPlayMode() {
+        u8 indicatorBuf[3];
+        u8* cursor = indicatorBuf;
+        pPlayMode->Draw(pPlayModeChunks, playModeAddr, kPlayModeOptions, cursor);
+        DrainWriteBuf(indicatorBuf, cursor);
+        ppu::SetScroll({0, PreviewScrollY()});
+        delete[] pPlayModeChunks;
+        pPlayModeChunks = nullptr;
+
+        pNMI = nmi_handler;
     }
 
     void irq_handler() {
@@ -235,6 +303,9 @@ namespace title {
 
         if (const bool loaded = mmc3::CallInBlock<level_code_tag>([] { return LoadLevel(0); }); !loaded) return;
 
+        // PopulateNameTableColumns always draws at row 2 (kHudRows*2) --
+        // see its own comment -- so this mirrors that placement for the
+        // feet-Y math below instead of hardcoding a second copy of it.
         constexpr u16 tyBase = kHudRows * 2;
 
         CallLevelGraphics([] {
@@ -249,51 +320,16 @@ namespace title {
         // a trailing half-block. Costs at most one preview column there.
         const u16 blockCols = colsWide & ~static_cast<u16>(1);
 
-        const bool hasDynamic = DynLengths != nullptr;
-        DynamicCursor dyn{DynLengths, DynData, 0};
-
-        u8 colBuf[2][levelHeight];
-        for (u16 mc = 0; mc < blockCols; mc += 2) {
-            for (u8 dc = 0; dc < 2; ++dc) {
-                const u8* col = TileData + (mc + dc) * levelHeight;
-                for (u8 r = 0; r < levelHeight; ++r) {
-                    u8 m = col[r];
-                    if (hasDynamic) {
-                        if (const u8 d = dyn.Fetch()) m = d;
-                        dyn.Move(1);
-                    }
-                    colBuf[dc][r] = m;
-                }
-            }
-
-            const u16 tx = mc << 1;   // tile-x of this block's left edge
-            for (u8 r = 0; r < levelHeight; ++r) {
-                const u8  mL = colBuf[0][r], mR = colBuf[1][r];
-                const u16 ty = static_cast<u16>(tyBase + 2 * r);
-                ppu::WriteSingleToNameTable({tx,     ty},     Metatiles_UL[mL]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 1), ty},     Metatiles_BL[mL]);
-                ppu::WriteSingleToNameTable({tx,     static_cast<u16>(ty + 1)}, Metatiles_UR[mL]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 1), static_cast<u16>(ty + 1)}, Metatiles_BR[mL]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 2), ty},     Metatiles_UL[mR]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 3), ty},     Metatiles_BL[mR]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 2), static_cast<u16>(ty + 1)}, Metatiles_UR[mR]);
-                ppu::WriteSingleToNameTable({static_cast<u16>(tx + 3), static_cast<u16>(ty + 1)}, Metatiles_BR[mR]);
-            }
-            u8 attrBuf[8] = {};
-            attrBuf[0] = 0x0F;   // HUD rows 0-1 share attr cell 0's top quadrant with level row 0; pin it to palette 3
-            for (u8 r = 0; r < levelHeight; ++r) {
-                const u8 tileRow  = static_cast<u8>(tyBase + 2 * r);
-                const u8 attrIdx  = tileRow >> 2;
-                const u8 isBottom = (tileRow >> 1) & 1;
-                const u8 palL = Metatiles_ATTR[colBuf[0][r]] & MetatilePaletteMask;
-                const u8 palR = Metatiles_ATTR[colBuf[1][r]] & MetatilePaletteMask;
-                attrBuf[attrIdx] |= static_cast<u8>(palL << (isBottom ? 4 : 0));
-                attrBuf[attrIdx] |= static_cast<u8>(palR << (isBottom ? 6 : 2));
-            }
-            for (u8 cell = 0; cell < 8; ++cell) {
-                ppu::WriteSingleToAttributeTable({tx, static_cast<u16>(cell * 4)}, attrBuf[cell]);
-            }
-        }
+        // Same streaming fill EnterLevelSetup uses to draw the real level
+        // view (see its own comment) -- reuses the level bank's metatile/
+        // attribute logic for the preview instead of a second, independent
+        // copy of it living here. blockCols counts metatile columns (2
+        // tiles wide each); PopulateNameTableColumns counts tile columns,
+        // same units as EnterLevelSetup's own viewport_tx()-based call.
+        const u16 previewTileCols = static_cast<u16>(blockCols * 2);
+        mmc3::CallInBlock<level_code_tag>([previewTileCols] {
+            PopulateNameTableColumns(previewTileCols);
+        });
 
         CallLevelGraphics([] {
             oam::PopulateFromBuffer(OAMBuffer, 0, oam::tile,       msMary, kMarySprites);

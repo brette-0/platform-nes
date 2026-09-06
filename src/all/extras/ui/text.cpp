@@ -50,18 +50,19 @@ namespace ui::text {
         return chunks;
     }
 
-    AI void Draw(const buffer<u8*>* chunks, const vec2<u16> pos, const u8 boxY) {
+    AI void Draw(const buffer<u8*>* chunks, const u16 address, const u8 boxY) {
+        u16 rowAddr = address;
         for (u8 row = 0; row < boxY; row++) {
             if (chunks[row].addr == nullptr) {
                 break;
             }
 
-            ppu::WriteFromBufferToNameTable(
-                {pos.x, static_cast<u16>(pos.y + row)},
-                chunks[row].addr,
-                chunks[row].size,
-                0
-            );
+            ppu::WriteFromBufferToNameTable(rowAddr, chunks[row].addr, chunks[row].size, 0);
+            rowAddr = static_cast<u16>(rowAddr + 32);
         }
+    }
+
+    AI void Draw(const buffer<u8*>* chunks, const vec2<u16> pos, const u8 boxY) {
+        Draw(chunks, ppu::CartesianToAddress(pos), boxY);
     }
 }

@@ -25,3 +25,12 @@ TITLE_DATA inline constexpr auto msg_menu = ::tech::nes_str::encode<charmap_gene
 #else
 TITLE_DATA inline constexpr auto msg_menu = ::tech::nes_str::encode<charmap_generic>("NEW GAME\nCONTINUE\nOPTIONS");
 #endif
+
+// Play-mode choice, same '\n'-as-boundary convention as msg_menu. NES has no
+// network stack to drive a LAN option -- other targets get it, plus the
+// distinction between local and networked multiplayer.
+#if defined(TARGET_NES)
+TITLE_DATA inline constexpr auto msg_playMode = ::tech::nes_str::encode<charmap_generic>("SINGLEPLAYER\nMULTIPLAYER");
+#else
+TITLE_DATA inline constexpr auto msg_playMode = ::tech::nes_str::encode<charmap_generic>("SINGLEPLAYER\nLOCAL MULTIPLAYER\nLAN MULTIPLAYER");
+#endif

@@ -59,14 +59,37 @@ namespace ui::choice {
         // same contract Pass()/Step() use for later selection changes; see
         // VisualFn. Does not take ownership of chunks -- caller allocated
         // it via Make() and is responsible for delete[]ing it.
+        //
+        // Pays (x,y)->address (a divide+modulo) exactly once, up front, then
+        // walks rows by a plain +32 add -- see the address overload below if
+        // even that one division doesn't belong on the caller's hot path.
         static AI void Draw(
             const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY,
+            VisualFn draw, u16* optionAddr, u8*& buf
+        );
+
+        // Address overload of Draw(): @p address is row 0's nametable
+        // address (see ::ppu::CartesianToAddress), for a caller that
+        // already has it precomputed -- e.g. from inside an ISR, where the
+        // divide+modulo the vec2 overload above pays isn't affordable at
+        // all. Every later row is address + row*32 (one nametable
+        // tile-row), so this does zero division of its own.
+        //
+        // Only correct within a single nametable page (address's row < 30)
+        // -- a caller whose box could cross that boundary needs the vec2
+        // overload, which still gets it right via CartesianToAddress.
+        static AI void Draw(
+            const buffer<u8*>* chunks, u16 address, u8 boxY,
             VisualFn draw, u16* optionAddr, u8*& buf
         );
 
         // Convenience wrapper over the static Draw() using this instance's
         // own optionAddr/draw -- the normal way to draw after construction.
         AI auto Draw(const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY, u8*& buf) -> void;
+
+        // Convenience wrapper over the static address-overload Draw() using
+        // this instance's own optionAddr/draw.
+        AI auto Draw(const buffer<u8*>* chunks, u16 address, u8 boxY, u8*& buf) -> void;
 
         // Forwards buf, untouched, into whichever of clear/draw ends up
         // running -- see VisualFn.

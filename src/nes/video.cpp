@@ -157,16 +157,15 @@ AI void DeltaScroll(const vec2<i8> delta) {
 
 __attribute__((hot))
 AI void WriteFromBufferToNameTable(
-    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
+    const u16 address, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
-    const auto offset = xy_to_nt_addr(pos.x, pos.y);
     u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
 
     tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
 
     for (auto i = 0; i < sBuffer; i++) {
         tech::poke(raw::PPUDATA, source[i]);
@@ -174,12 +173,10 @@ AI void WriteFromBufferToNameTable(
 }
 
 __attribute__((hot))
-VIDEO_BANK void WriteSingleToNameTable(const vec2<u16> pos, const u8 value) {
-    const auto offset = xy_to_nt_addr(pos.x, pos.y);
-    tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
-    tech::poke(raw::PPUDATA, value);
+AI void WriteFromBufferToNameTable(
+    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
+) {
+    WriteFromBufferToNameTable(xy_to_nt_addr(pos.x, pos.y), source, sBuffer, polarity);
 }
 
 // Address overload: the caller already projected (x,y) -> a $2000-based PPU address
@@ -187,30 +184,47 @@ VIDEO_BANK void WriteSingleToNameTable(const vec2<u16> pos, const u8 value) {
 // reset and three pokes. Meant for the vblank window, where the divide/modulo in the
 // (x,y) form is the cost worth hoisting out.
 __attribute__((hot))
-AI void WriteSingleToNameTable(const int address, const u8 value) {
+AI void WriteSingleToNameTable(const u16 address, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
     tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
     tech::poke(raw::PPUDATA, value);
 }
 
+__attribute__((hot))
+VIDEO_BANK void WriteSingleToNameTable(const vec2<u16> pos, const u8 value) {
+    WriteSingleToNameTable(xy_to_nt_addr(pos.x, pos.y), value);
+}
+
 template <typename Idx>
 __attribute__((hot))
 VIDEO_BANK void WriteFromProviderToNameTable(
-    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+    const u16 address, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
-    const auto offset = xy_to_nt_addr(pos.x, pos.y);
     u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
     if (polarity) ctrl = ctrl | ctrl::POLARITY;
     PPUCTRL = ctrl;   // one write back: shadow + hardware
 
     tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
 
     for (Idx i = 0; i < amt; ++i) {
         tech::poke(raw::PPUDATA, fn(i));
     }
+}
+
+// Explicit instantiations for the provider index types in use. The body pokes
+// PPU registers, so it must stay in this backend rather than the header.
+template void WriteFromProviderToNameTable<u8>(u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToNameTable<u16>(u16, u8 (*)(u16), u8, u8);
+
+template <typename Idx>
+__attribute__((hot))
+VIDEO_BANK void WriteFromProviderToNameTable(
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+) {
+    WriteFromProviderToNameTable(xy_to_nt_addr(pos.x, pos.y), fn, amt, polarity);
 }
 
 // Explicit instantiations for the provider index types in use. The body pokes
@@ -220,10 +234,8 @@ template void WriteFromProviderToNameTable<u16>(vec2<u16>, u8 (*)(u16), u8, u8);
 
 __attribute__((hot))
 AI void WriteFromBufferToAttributeTable(
-    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
+    const u16 address, const u8* source, const u8 sBuffer, const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(pos.x, pos.y);
-
     PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
 
     if (polarity) {
@@ -231,8 +243,8 @@ AI void WriteFromBufferToAttributeTable(
         // byte explicitly (peek PPUSTATUS + 2 pokes = 12 cycles/byte) instead of
         // seven dummy PPUDATA reads (7×4 = 28 cycles/byte) to stride between rows.
         // base_lo + i*8 stays ≤ $FF for sBuffer≤8 (base_lo ≤ $C7, 7×8 = $38).
-        const u8 hi = static_cast<u8>(offset >> 8);
-        const u8 lo = static_cast<u8>(offset & 0xFF);
+        const u8 hi = static_cast<u8>(address >> 8);
+        const u8 lo = static_cast<u8>(address & 0xFF);
         for (u8 i = 0; i < sBuffer; i++) {
             tech::peek(raw::PPUSTATUS);
             tech::poke(raw::PPUADDR, hi);
@@ -243,29 +255,36 @@ AI void WriteFromBufferToAttributeTable(
     }
 
     tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
     for (u8 i = 0; i < sBuffer; i++) {
         tech::poke(raw::PPUDATA, source[i]);
     }
 }
 
-AI void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {
-    const auto offset = xy_to_at_addr(pos.x, pos.y);
+__attribute__((hot))
+AI void WriteFromBufferToAttributeTable(
+    const vec2<u16> pos, const u8* source, const u8 sBuffer, const u8 polarity
+) {
+    WriteFromBufferToAttributeTable(xy_to_at_addr(pos.x, pos.y), source, sBuffer, polarity);
+}
 
+AI void WriteSingleToAttributeTable(const u16 address, const u8 value) {
     tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
     tech::poke(raw::PPUDATA, value);
+}
+
+AI void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {
+    WriteSingleToAttributeTable(xy_to_at_addr(pos.x, pos.y), value);
 }
 
 template <typename Idx>
 __attribute__((hot))
 AI void WriteFromProviderToAttributeTable(
-    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+    const u16 address, u8 (*fn)(Idx), const u8 amt, const u8 polarity
 ) {
-    const u16 offset = xy_to_at_addr(pos.x, pos.y);
-
     PPUCTRL = PPUCTRL & ~ctrl::POLARITY;
 
     if (polarity) {
@@ -275,7 +294,7 @@ AI void WriteFromProviderToAttributeTable(
         // past 8 (e.g. title::InitTitleScreen's full-height pass), so the stride
         // is carried through a 16-bit add rather than truncated to the low byte.
         for (Idx i = 0; i < amt; ++i) {
-            const u16 addr = static_cast<u16>(offset + (static_cast<u16>(i) << 3));
+            const u16 addr = static_cast<u16>(address + (static_cast<u16>(i) << 3));
             tech::peek(raw::PPUSTATUS);
             tech::poke(raw::PPUADDR, static_cast<u8>(addr >> 8));
             tech::poke(raw::PPUADDR, static_cast<u8>(addr & 0xFF));
@@ -285,11 +304,24 @@ AI void WriteFromProviderToAttributeTable(
     }
 
     tech::peek(raw::PPUSTATUS);
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset >> 8));
-    tech::poke(raw::PPUADDR, static_cast<u8>(offset & 0xFF));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
     for (Idx i = 0; i < amt; ++i) {
         tech::poke(raw::PPUDATA, fn(i));
     }
+}
+
+// Explicit instantiations for the provider index types in use. The body pokes
+// PPU registers, so it must stay in this backend rather than the header.
+template void WriteFromProviderToAttributeTable<u8>(u16, u8 (*)(u8), u8, u8);
+template void WriteFromProviderToAttributeTable<u16>(u16, u8 (*)(u16), u8, u8);
+
+template <typename Idx>
+__attribute__((hot))
+AI void WriteFromProviderToAttributeTable(
+    const vec2<u16> pos, u8 (*fn)(Idx), const u8 amt, const u8 polarity
+) {
+    WriteFromProviderToAttributeTable(xy_to_at_addr(pos.x, pos.y), fn, amt, polarity);
 }
 
 // Explicit instantiations for the provider index types in use. The body pokes
