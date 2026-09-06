@@ -26,11 +26,28 @@ namespace title {
     constexpr u8 kPlayModeBoxWidth = 17;   // "LOCAL MULTIPLAYER"
 #endif
     static ui::choice::SingleChoice* pMenu = nullptr;
+    // Always the main menu widget, regardless of what pMenu currently points
+    // at -- mirrors pPlayMode below. Needed by nmi_handler_drawMenu (a free
+    // function, no access to main()'s local `menu`) to redraw the menu when
+    // B cancels back out of the play-mode picker.
+    static ui::choice::SingleChoice* pMainMenu = nullptr;
+    // Kept alive for the lifetime of the title screen (not delete[]d after
+    // the first draw, unlike a one-shot dialog would be) so cancelling back
+    // from the play-mode picker can redraw it without regenerating chunks --
+    // nothing here needs destroying until a level actually loads.
+    static buffer<u8*>* pMenuChunks = nullptr;
+    // Row-0 nametable address of the menu's draw position, precomputed once
+    // in main() -- see playModeAddr's own comment for why this is paid in
+    // ordinary code instead of inside nmi_handler_drawMenu.
+    static u16 menuAddr;
 
     // Play-mode picker: prepared (word-wrapped, optionAddr computed) at
     // startup but not drawn until New Game/Continue is picked -- see
     // nmi_handler_drawPlayMode.
     static ui::choice::SingleChoice* pPlayMode = nullptr;
+    // Kept alive for the title screen's lifetime -- see pMenuChunks' own
+    // comment; this is what lets B redraw the picker again after a
+    // cancel-then-reselect without remaking it.
     static buffer<u8*>* pPlayModeChunks = nullptr;
     static vec2<u16> playModePos;
     // Row-0 nametable address for playModePos, precomputed in main()'s loop
@@ -45,6 +62,11 @@ namespace title {
     // nmi_handler_drawPlayMode, which uses it to blank the menu out before
     // drawing the play-mode picker over the same rows.
     static u16 menuClearAddr;
+    // Row-0 nametable address of the play-mode picker's own arrow+text
+    // region -- same idea as menuClearAddr, mirrored, for
+    // nmi_handler_drawMenu to blank the picker out before redrawing the
+    // menu when B cancels back.
+    static u16 playModeClearAddr;
 
     // UI interaction write buffer, and its encoding/draining -- entirely
     // this file's own decision, not SingleChoice's; see TitleSelect/
@@ -78,6 +100,7 @@ namespace title {
     static oam::oam_t Clear(u16 _);
     static NI void DrawLevelPreview();
     static void nmi_handler_drawPlayMode();
+    static void nmi_handler_drawMenu();
 
     constexpr u16 kMenuNT = 32;
     constexpr u16 kBottomRightNT = 30;
@@ -135,11 +158,16 @@ namespace title {
             kMenuOptions,
             initCursor
         );
-        delete[] menuChunks;
+        // Kept alive (not delete[]d) -- see pMenuChunks' own comment: a
+        // cancel-back via B needs to redraw this same content.
+        pMenuChunks = menuChunks;
         // Arrow sits 2 columns left of the text (see SingleChoice::Make's
         // own comment) -- precompute the whole cleared region's row-0
         // address here, once, for nmi_handler_drawPlayMode to blank later.
         menuClearAddr = ppu::CartesianToAddress({static_cast<u16>(menuCol - 2), static_cast<u16>(kBottomRightNT + 1)});
+        // Row-0 address of the menu's own draw position -- see menuAddr's
+        // own comment.
+        menuAddr = ppu::CartesianToAddress({menuCol, static_cast<u16>(kBottomRightNT + 1)});
         // Initial selection indicator: SingleChoice only queued it into
         // writeBuf (see VisualFn) -- draining it here is safe because
         // nothing's rendering yet (NMI isn't enabled until below).
@@ -161,8 +189,12 @@ namespace title {
             {kPlayModeBoxWidth, kPlayModeOptions},
             chrHUDWhitespace_tile, 0
         );
+        // Row-0 address of the play-mode picker's own cleared region -- see
+        // playModeClearAddr's own comment.
+        playModeClearAddr = ppu::CartesianToAddress({static_cast<u16>(playModeCol - 2), static_cast<u16>(kBottomRightNT + 1)});
         pPlayMode = &playMode;
         pMenu = &menu;
+        pMainMenu = &menu;
 
         ppu::SetScroll({0, 0xff});
         ppu::EnableRendering(ppu::ctrl::SPRITE_ADDR | ppu::ctrl::SPRITE_SIZE | ppu::ctrl::GEN_NMI, ppu::mask::BG_L | ppu::mask::SPRITE_L);
@@ -246,6 +278,18 @@ namespace title {
                 }
             }
 
+            // Cancels back out of the play-mode picker to the main menu --
+            // only meaningful once New Game/Continue has swapped focus over
+            // (see the pMenu == pPlayMode check above); a no-op on the main
+            // menu itself. Just a redraw with some clearing, mirroring the
+            // forward transition: nothing is destroyed here, since both
+            // widgets' chunks are kept alive for the title screen's whole
+            // lifetime -- see pMenuChunks/pPlayModeChunks's own comments.
+            if ((pressed & input::B) && pMenu == pPlayMode) {
+                pNMI = nmi_handler_drawMenu;
+                pMenu = pMainMenu;
+            }
+
             video::WaitForPresent();
             if (quit) return;
         }
@@ -318,8 +362,32 @@ namespace title {
         DrainWriteBuf(indicatorBuf, cursor);
         ppu::SetScroll({0, PreviewScrollY()});
         ArmSplitIRQ();
-        delete[] pPlayModeChunks;
-        pPlayModeChunks = nullptr;
+        // pPlayModeChunks is kept alive (not delete[]d) -- see its own
+        // comment: B cancelling back to the menu and then reselecting New
+        // Game/Continue needs to redraw this same content again.
+
+        pNMI = nmi_handler;
+    }
+
+    // One-shot: installed as pNMI when B cancels back out of the play-mode
+    // picker (see the input loop in main()). Exact mirror of
+    // nmi_handler_drawPlayMode above -- blanks the picker's old text/arrow
+    // out (using playModeClearAddr, precomputed in main()), then redraws the
+    // menu over those same rows from its still-alive chunks (pMenuChunks --
+    // never freed, see its own comment) and hands back to nmi_handler.
+    static void nmi_handler_drawMenu() {
+        u16 clearAddr = playModeClearAddr;
+        for (u8 row = 0; row < kPlayModeOptions; row++) {
+            ppu::WriteRepeatedToNameTable(clearAddr, chrHUDWhitespace_tile, kPlayModeBoxWidth + 2, 0);
+            clearAddr = static_cast<u16>(clearAddr + 32);
+        }
+
+        u8 indicatorBuf[3];
+        u8* cursor = indicatorBuf;
+        pMainMenu->Draw(pMenuChunks, menuAddr, kMenuOptions, cursor);
+        DrainWriteBuf(indicatorBuf, cursor);
+        ppu::SetScroll({0, PreviewScrollY()});
+        ArmSplitIRQ();
 
         pNMI = nmi_handler;
     }
