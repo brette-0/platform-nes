@@ -310,8 +310,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: cmake-build-mac-release
-          key: mac-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
-          restore-keys: mac-
+          key: mac-v2-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: mac-v2-
 
       - name: Build demo
         run: |
@@ -345,8 +345,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: cmake-build-win-release
-          key: win-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
-          restore-keys: win-
+          key: win-v2-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}
+          restore-keys: win-v2-
 
       - name: Build demo
         shell: cmd

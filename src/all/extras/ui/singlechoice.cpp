@@ -101,40 +101,6 @@ namespace ui::choice {
         return Make(buff, sBuff, pos, box, wordSplitter, optionSplitter, optionAddr, nOptions);
     }
 
-    void SingleChoice::Draw(
-            const buffer<u8*>* const chunks, const u16 address, const u8 boxY,
-            const VisualFn draw, u16* const optionAddr, u8*& buf
-        ) {
-        u16 rowAddr = address;
-        for (u8 row = 0; row < boxY; row++) {
-            if (chunks[row].addr == nullptr) {
-                break;
-            }
-
-            ppu::WriteFromBufferToNameTable(rowAddr, chunks[row].addr, chunks[row].size, 0);
-            rowAddr = static_cast<u16>(rowAddr + 32);
-        }
-
-        // Initial selection indicator -- buf forwarded as-is, same contract
-        // Pass()/Step() use for every later selection change; see VisualFn.
-        draw(optionAddr[0], buf);
-    }
-
-    void SingleChoice::Draw(
-            const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY,
-            const VisualFn draw, u16* const optionAddr, u8*& buf
-        ) {
-        Draw(chunks, ppu::CartesianToAddress(pos), boxY, draw, optionAddr, buf);
-    }
-
-    void SingleChoice::Draw(const buffer<u8*>* const chunks, const u16 address, const u8 boxY, u8*& buf) {
-        Draw(chunks, address, boxY, draw, optionAddr, buf);
-    }
-
-    void SingleChoice::Draw(const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY, u8*& buf) {
-        Draw(chunks, pos, boxY, draw, optionAddr, buf);
-    }
-
     UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {
         // UP moves the cursor up the list (decrements option), DOWN moves it
         // down (increments) -- matches ui::Canvas's clamp convention and the

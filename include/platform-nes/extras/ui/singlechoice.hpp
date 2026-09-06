@@ -5,6 +5,7 @@
 #include "text.hpp"
 #include "platform-nes/types.hpp"
 #include "platform-nes/technology.hpp"   // atomic
+#include "platform-nes/video.hpp"        // ppu::CartesianToAddress / WriteFromBufferToNameTable
 
 using namespace br0::intsh;
 
@@ -63,10 +64,16 @@ namespace ui::choice {
         // Pays (x,y)->address (a divide+modulo) exactly once, up front, then
         // walks rows by a plain +32 add -- see the address overload below if
         // even that one division doesn't belong on the caller's hot path.
+        // Defined here, not in singlechoice.cpp: ::AI promises the body is
+        // copied into every caller, which under GCC + LTO requires the body
+        // to be visible at each call site -- see ::AI's own comment in
+        // technology.hpp.
         static AI void Draw(
-            const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY,
-            VisualFn draw, u16* optionAddr, u8*& buf
-        );
+            const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY,
+            const VisualFn draw, u16* const optionAddr, u8*& buf
+        ) {
+            Draw(chunks, ppu::CartesianToAddress(pos), boxY, draw, optionAddr, buf);
+        }
 
         // Address overload of Draw(): @p address is row 0's nametable
         // address (see ::ppu::CartesianToAddress), for a caller that
@@ -79,17 +86,36 @@ namespace ui::choice {
         // -- a caller whose box could cross that boundary needs the vec2
         // overload, which still gets it right via CartesianToAddress.
         static AI void Draw(
-            const buffer<u8*>* chunks, u16 address, u8 boxY,
-            VisualFn draw, u16* optionAddr, u8*& buf
-        );
+            const buffer<u8*>* const chunks, const u16 address, const u8 boxY,
+            const VisualFn draw, u16* const optionAddr, u8*& buf
+        ) {
+            u16 rowAddr = address;
+            for (u8 row = 0; row < boxY; row++) {
+                if (chunks[row].addr == nullptr) {
+                    break;
+                }
+
+                ppu::WriteFromBufferToNameTable(rowAddr, chunks[row].addr, chunks[row].size, 0);
+                rowAddr = static_cast<u16>(rowAddr + 32);
+            }
+
+            // Initial selection indicator -- buf forwarded as-is, same
+            // contract Pass()/Step() use for every later selection change;
+            // see VisualFn.
+            draw(optionAddr[0], buf);
+        }
 
         // Convenience wrapper over the static Draw() using this instance's
         // own optionAddr/draw -- the normal way to draw after construction.
-        AI auto Draw(const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY, u8*& buf) -> void;
+        AI auto Draw(const buffer<u8*>* const chunks, const vec2<u16> pos, const u8 boxY, u8*& buf) -> void {
+            Draw(chunks, pos, boxY, draw, optionAddr, buf);
+        }
 
         // Convenience wrapper over the static address-overload Draw() using
         // this instance's own optionAddr/draw.
-        AI auto Draw(const buffer<u8*>* chunks, u16 address, u8 boxY, u8*& buf) -> void;
+        AI auto Draw(const buffer<u8*>* const chunks, const u16 address, const u8 boxY, u8*& buf) -> void {
+            Draw(chunks, address, boxY, draw, optionAddr, buf);
+        }
 
         // Forwards buf, untouched, into whichever of clear/draw ends up
         // running -- see VisualFn.

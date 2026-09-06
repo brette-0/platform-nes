@@ -4,6 +4,7 @@
 
 #include <platform-nes/technology.hpp>
 #include <platform-nes/types.hpp>
+#include <platform-nes/video.hpp>
 
 using namespace br0::intsh;
 
@@ -37,7 +38,7 @@ namespace ui::text {
      *  walks rows by a plain +32 add -- see the address overload below if
      *  even that one division doesn't belong on the caller's hot path.
      */
-    AI void Draw(const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY);
+    AI void Draw(const buffer<u8*>* chunks, const vec2<u16> pos, const u8 boxY);
 
     /*
      *  Address overload of Draw(): @p address is row 0's nametable address
@@ -50,6 +51,29 @@ namespace ui::text {
      *  Only correct within a single nametable page (address's row < 30) --
      *  callers whose box could cross that boundary need the vec2 overload,
      *  which still gets it right via CartesianToAddress.
+     *
+     *  Both overloads are defined here (not in text.cpp), and both take an
+     *  explicit `inline` alongside ::AI: as free functions (not class
+     *  members, which are implicitly inline when defined in-class) included
+     *  by more than one .cpp, they'd otherwise be an ODR violation -- each
+     *  including TU would emit its own external-linkage definition. `inline`
+     *  gives them vague (COMDAT) linkage instead, which is also what GCC's
+     *  always_inline needs to accept a body under LTO -- see ::AI's own
+     *  comment in technology.hpp.
      */
-    AI void Draw(const buffer<u8*>* chunks, u16 address, u8 boxY);
+    inline AI void Draw(const buffer<u8*>* chunks, const u16 address, const u8 boxY) {
+        u16 rowAddr = address;
+        for (u8 row = 0; row < boxY; row++) {
+            if (chunks[row].addr == nullptr) {
+                break;
+            }
+
+            ppu::WriteFromBufferToNameTable(rowAddr, chunks[row].addr, chunks[row].size, 0);
+            rowAddr = static_cast<u16>(rowAddr + 32);
+        }
+    }
+
+    inline AI void Draw(const buffer<u8*>* chunks, const vec2<u16> pos, const u8 boxY) {
+        Draw(chunks, ppu::CartesianToAddress(pos), boxY);
+    }
 }

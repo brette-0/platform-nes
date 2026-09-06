@@ -27,19 +27,6 @@ namespace ui::button {
         : enabled(defaultState), addr(Make(pos)) {
     }
 
-    AI auto TickBox::Draw(const vec2<u16> pos) -> void {
-        ppu::WriteSingleToNameTable(pos, enabled);
-    }
-
-    // ::AI, not ::UI_BANK: must stay reachable without a bank switch from
-    // wherever Pass() calls it -- the two are mutually exclusive (see
-    // MODULE_PLACEMENT's own doc comment).
-    inline AI auto TickBox::Toggle(u8*& buf) -> void {
-        *buf++ = static_cast<u8>(addr >> 8);
-        *buf++ = static_cast<u8>(addr & 0xFF);
-        *buf++ = (enabled ^= true);
-    }
-
     UI_BANK auto TickBox::Pass(const u8, u8*& buf) -> void {
         Toggle(buf);
     }
