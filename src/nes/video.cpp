@@ -184,6 +184,30 @@ AI void WriteFromBufferToNameTable(
 // reset and three pokes. Meant for the vblank window, where the divide/modulo in the
 // (x,y) form is the cost worth hoisting out.
 __attribute__((hot))
+AI void WriteRepeatedToNameTable(
+    const u16 address, const u8 value, const u8 amt, const u8 polarity
+) {
+    u8 ctrl = PPUCTRL & ~ctrl::POLARITY;
+    if (polarity) ctrl = ctrl | ctrl::POLARITY;
+    PPUCTRL = ctrl;   // one write back: shadow + hardware
+
+    tech::peek(raw::PPUSTATUS);
+    tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));
+    tech::poke(raw::PPUADDR, static_cast<u8>(address & 0xFF));
+
+    for (u8 i = 0; i < amt; i++) {
+        tech::poke(raw::PPUDATA, value);
+    }
+}
+
+__attribute__((hot))
+AI void WriteRepeatedToNameTable(
+    const vec2<u16> pos, const u8 value, const u8 amt, const u8 polarity
+) {
+    WriteRepeatedToNameTable(xy_to_nt_addr(pos.x, pos.y), value, amt, polarity);
+}
+
+__attribute__((hot))
 AI void WriteSingleToNameTable(const u16 address, const u8 value) {
     tech::peek(raw::PPUSTATUS);
     tech::poke(raw::PPUADDR, static_cast<u8>(address >> 8));

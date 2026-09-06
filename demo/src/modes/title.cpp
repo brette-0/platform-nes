@@ -5,6 +5,7 @@
 #include "../graphics/strings.hpp"
 #include "../graphics/graphics.hpp"
 #include "../graphics/metasprites.hpp"
+#include "level.hpp"
 #include "level/levels.hpp"
 #include "platform-nes/mappers/mmc3.hpp"
 #include "platform-nes/extras/ui/singlechoice.hpp"
@@ -37,6 +38,13 @@ namespace title {
     // read by nmi_handler_drawPlayMode via SingleChoice::Draw's address
     // overload, so the ISR itself never pays CartesianToAddress's divide.
     static u16 playModeAddr;
+
+    // Row-0 nametable address of the menu's own arrow+text region (arrowCol,
+    // kBottomRightNT+1), precomputed in main() -- see playModeAddr's own
+    // comment for why this is paid once in ordinary code instead of inside
+    // nmi_handler_drawPlayMode, which uses it to blank the menu out before
+    // drawing the play-mode picker over the same rows.
+    static u16 menuClearAddr;
 
     // UI interaction write buffer, and its encoding/draining -- entirely
     // this file's own decision, not SingleChoice's; see TitleSelect/
@@ -128,6 +136,10 @@ namespace title {
             initCursor
         );
         delete[] menuChunks;
+        // Arrow sits 2 columns left of the text (see SingleChoice::Make's
+        // own comment) -- precompute the whole cleared region's row-0
+        // address here, once, for nmi_handler_drawPlayMode to blank later.
+        menuClearAddr = ppu::CartesianToAddress({static_cast<u16>(menuCol - 2), static_cast<u16>(kBottomRightNT + 1)});
         // Initial selection indicator: SingleChoice only queued it into
         // writeBuf (see VisualFn) -- draining it here is safe because
         // nothing's rendering yet (NMI isn't enabled until below).
@@ -181,6 +193,27 @@ namespace title {
             }
 
             if (pressed & input::A) {
+                // pMenu == pPlayMode once New Game/Continue has swapped input
+                // focus over to the player-count picker (see the case below)
+                // -- this A press is that picker's confirm, not the menu's.
+                // Option 0 is always "SinglePlayer" (see msg_playMode), any
+                // other option is a multiplayer variant.
+                if (pMenu == pPlayMode) {
+#ifdef PLAYER2_SUPPORTED
+                    level::multiplayer = pPlayMode->option != 0;
+#endif
+                    // EnterLevelSetup does its nametable/CHR/palette writes
+                    // assuming rendering is already off (see its own comment:
+                    // "title leaves PPUCTRL's GEN_NMI bit set -- it only
+                    // clears PPUMASK on exit") -- GEN_NMI stays on so its
+                    // video::WaitForPresent() still works, only PPUMASK
+                    // clears here. Without this, those writes land mid-frame
+                    // while still visible, hence the corruption.
+                    ppu::PPUMASK = 0;
+                    gameMode = eGameModes::Level;
+                    return;
+                }
+
                 switch (menu.option) {
                     case NewGame:
                     case Continue:
@@ -193,6 +226,11 @@ namespace title {
                         // inside the ISR -- see playModeAddr's own comment.
                         playModeAddr = ppu::CartesianToAddress(playModePos);
                         pNMI = nmi_handler_drawPlayMode;
+                        // Input polling above dispatches through pMenu --
+                        // repoint it at the play-mode picker so UP/DOWN now
+                        // move its arrow instead of the old menu's (already
+                        // erased by nmi_handler_drawPlayMode's clear).
+                        pMenu = pPlayMode;
                         break;
 
                     case Options:
@@ -211,11 +249,30 @@ namespace title {
             video::WaitForPresent();
             if (quit) return;
         }
-        // No more break out of the loop above: New Game/Continue only show
-        // the player-count picker now (see the switch above), they don't
-        // proceed to gameplay by themselves. Actually leaving the title
-        // screen (ppu::PPUMASK = 0; gameMode = eGameModes::Level;) is a
-        // follow-up, triggered once a play mode is picked.
+        // Only reachable via quit (PC targets) -- New Game/Continue leave the
+        // loop directly, from the pMenu == pPlayMode branch above, once a
+        // play mode is actually picked.
+    }
+
+    // Arms the preview/menu split IRQ for this frame -- see ApplySplit.
+    // Reload value is latency-corrected the same way level.cpp's
+    // kHudSplitMMC3 is (the IRQ fires a few scanlines late relative to the
+    // reload count); position.y is the real target row, used as-is by the
+    // off-NES software rasterizer.
+    //
+    // Deliberately its own function, not folded into nmi_handler(): the IRQ
+    // must be re-armed every single frame regardless of which NMI variant
+    // is currently installed as pNMI, or it silently stops firing on
+    // whichever frame runs a variant that forgot to call it (exactly what
+    // happened when nmi_handler_drawPlayMode hand-reimplemented part of
+    // nmi_handler() instead of sharing this). Call it directly from every
+    // NMI variant, not through nmi_handler().
+    static void ArmSplitIRQ() {
+        const u16 splitPixelRow = static_cast<u16>(SplitRow()) << 3;
+        constexpr u8 kSplitLatency = REGION ? 4 : 3;
+        const u8 splitReload = splitPixelRow > kSplitLatency
+            ? static_cast<u8>(splitPixelRow - kSplitLatency) : 0;
+        mmc3::ScheduleScanlineIRQ(splitReload, {0, splitPixelRow});
     }
 
     void nmi_handler() {
@@ -234,16 +291,7 @@ namespace title {
 
         ppu::SetScroll({0, PreviewScrollY()});
 
-        // Arm the preview/menu split for this frame -- see ApplySplit.
-        // Reload value is latency-corrected the same way level.cpp's
-        // kHudSplitMMC3 is (the IRQ fires a few scanlines late relative to
-        // the reload count); position.y is the real target row, used as-is
-        // by the off-NES software rasterizer.
-        const u16 splitPixelRow = static_cast<u16>(SplitRow()) << 3;
-        constexpr u8 kSplitLatency = REGION ? 4 : 3;
-        const u8 splitReload = splitPixelRow > kSplitLatency
-            ? static_cast<u8>(splitPixelRow - kSplitLatency) : 0;
-        mmc3::ScheduleScanlineIRQ(splitReload, {0, splitPixelRow});
+        ArmSplitIRQ();
     }
 
     // One-shot: installed as pNMI by main()'s loop when New Game/Continue is
@@ -253,17 +301,23 @@ namespace title {
     // code in its own handler, not a rarely-true branch buried in the
     // handler that runs every other frame.
     //
-    // Runs nmi_handler() first -- OAM DMA, the HUD split IRQ, etc. still
-    // need to happen every frame regardless -- then draws the player-count
-    // picker straight over the existing menu text (no clear first: same
-    // Draw() that never clears, just overwrites), and hands back to
-    // nmi_handler for every frame after.
+    // Blanks the menu's old text and arrow out (WriteRepeatedToNameTable's
+    // address overload, using menuClearAddr precomputed in main() -- no
+    // division here), then draws the player-count picker over those same
+    // now-blank rows, and hands back to nmi_handler for every frame after.
     static void nmi_handler_drawPlayMode() {
+        u16 clearAddr = menuClearAddr;
+        for (u8 row = 0; row < kMenuOptions; row++) {
+            ppu::WriteRepeatedToNameTable(clearAddr, chrHUDWhitespace_tile, kMenuBoxWidth + 2, 0);
+            clearAddr = static_cast<u16>(clearAddr + 32);
+        }
+
         u8 indicatorBuf[3];
         u8* cursor = indicatorBuf;
         pPlayMode->Draw(pPlayModeChunks, playModeAddr, kPlayModeOptions, cursor);
         DrainWriteBuf(indicatorBuf, cursor);
         ppu::SetScroll({0, PreviewScrollY()});
+        ArmSplitIRQ();
         delete[] pPlayModeChunks;
         pPlayModeChunks = nullptr;
 

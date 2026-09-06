@@ -537,6 +537,32 @@ void WriteFromBufferToNameTable(
     WriteFromBufferToNameTable({x, y}, source, sBuffer, polarity);
 }
 
+void WriteRepeatedToNameTable(
+    const vec2<u16> pos, const u8 value, const u8 amt, u8 polarity
+) {
+    const u16 x = pos.x, y = pos.y;
+    ppu::PPUCTRL &= ~ppu::ctrl::POLARITY;
+    if (polarity) ppu::PPUCTRL |= ppu::ctrl::POLARITY;
+    const bool vertical = ppu::PPUCTRL & ppu::ctrl::POLARITY;
+
+    // See WriteFromBufferToNameTable above: page-aware address per tile, not
+    // a flat stride off one precomputed offset.
+    for (u8 i = 0; i < amt; i++) {
+        const u16 addr = vertical ? xy_to_nt_addr(x, static_cast<u16>(y + i))
+                                   : xy_to_nt_addr(static_cast<u16>(x + i), y);
+        ppu::WriteNametable(addr, value);
+    }
+}
+
+// Address overload -- see ::nt_addr_to_xy's own comment.
+void WriteRepeatedToNameTable(
+    const u16 address, const u8 value, const u8 amt, const u8 polarity
+) {
+    u16 x, y;
+    nt_addr_to_xy(address, x, y);
+    WriteRepeatedToNameTable({x, y}, value, amt, polarity);
+}
+
 void WriteSingleToNameTable(const vec2<u16> pos, u8 value) {
     const u16 offset = xy_to_nt_addr(pos.x, pos.y);
     ppu::WriteNametable(offset, value);
@@ -628,6 +654,33 @@ void WriteFromBufferToAttributeTable(
     u16 x, y;
     at_addr_to_xy(address, x, y);
     WriteFromBufferToAttributeTable({x, y}, source, sBuffer, polarity);
+}
+
+void WriteRepeatedToAttributeTable(
+    const vec2<u16> pos, const u8 value, const u8 amt, const u8 polarity
+) {
+    const u16 x = pos.x, y = pos.y;
+    // See WriteFromBufferToAttributeTable above: vertical stays a flat stride
+    // off one base address; horizontal recomputes the page-aware address per cell.
+    if (polarity) {
+        const u16 offset = xy_to_at_addr(x, y);
+        for (u8 i = 0; i < amt; i++) {
+            ppu::WriteNametable(static_cast<u16>(offset + i * 8), value);
+        }
+        return;
+    }
+    for (u8 i = 0; i < amt; i++) {
+        ppu::WriteNametable(xy_to_at_addr(static_cast<u16>(x + i * 4), y), value);
+    }
+}
+
+// Address overload -- see ::at_addr_to_xy's own comment.
+void WriteRepeatedToAttributeTable(
+    const u16 address, const u8 value, const u8 amt, const u8 polarity
+) {
+    u16 x, y;
+    at_addr_to_xy(address, x, y);
+    WriteRepeatedToAttributeTable({x, y}, value, amt, polarity);
 }
 
 void WriteSingleToAttributeTable(const vec2<u16> pos, const u8 value) {

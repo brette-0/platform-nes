@@ -918,6 +918,35 @@ namespace ppu {
     void WriteFromBufferToNameTable(u16 address, const u8* source, u8 sBuffer, u8 polarity);
 
     /**
+     * @brief Writes the same byte value repeatedly into nametable memory.
+     *
+     * Same layout as ::ppu::WriteFromBufferToNameTable but pokes one fixed
+     * @p value @p amt times instead of copying a source buffer -- for filling
+     * a run of tiles (e.g. clearing a row) without needing a buffer or a
+     * per-element callback.
+     *
+     * @param pos      Tile position (pixels / 8).
+     * @param value    Byte value to repeat.
+     * @param amt      Number of bytes to write.
+     * @param polarity Non-zero for vertical writes, zero for horizontal.
+     */
+    void WriteRepeatedToNameTable(vec2<u16> pos, u8 value, u8 amt, u8 polarity);
+
+    /**
+     * @brief Writes the same byte value repeatedly into nametable memory,
+     *        at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteRepeatedToNameTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param value    Byte value to repeat.
+     * @param amt      Number of bytes to write.
+     * @param polarity Non-zero for vertical writes, zero for horizontal.
+     */
+    void WriteRepeatedToNameTable(u16 address, u8 value, u8 amt, u8 polarity);
+
+    /**
      * @brief Writes a single byte into nametable memory.
      * @param pos   Tile position.
      * @param value Byte value to write.
@@ -1002,6 +1031,35 @@ namespace ppu {
      * @param polarity Non-zero for vertical, zero for horizontal.
      */
     void WriteFromBufferToAttributeTable(u16 address, const u8* source, u8 sBuffer, u8 polarity);
+
+    /**
+     * @brief Writes the same byte value repeatedly into attribute memory.
+     *
+     * Same layout as ::ppu::WriteFromBufferToAttributeTable but pokes one
+     * fixed @p value @p amt times instead of copying a source buffer,
+     * mirroring how ::ppu::WriteRepeatedToNameTable relates to
+     * ::ppu::WriteFromBufferToNameTable.
+     *
+     * @param pos      Tile position.
+     * @param value    Attribute byte to repeat.
+     * @param amt      Number of bytes to write.
+     * @param polarity Non-zero for vertical, zero for horizontal.
+     */
+    void WriteRepeatedToAttributeTable(vec2<u16> pos, u8 value, u8 amt, u8 polarity);
+
+    /**
+     * @brief Writes the same byte value repeatedly into attribute memory,
+     *        at a precomputed address.
+     *
+     * Address overload of ::ppu::WriteRepeatedToAttributeTable -- see
+     * ::ppu::WriteSingleToNameTable's own address overload for why this exists.
+     *
+     * @param address  Precomputed VRAM address (see ::ppu::CartesianToAddress).
+     * @param value    Attribute byte to repeat.
+     * @param amt      Number of bytes to write.
+     * @param polarity Non-zero for vertical, zero for horizontal.
+     */
+    void WriteRepeatedToAttributeTable(u16 address, u8 value, u8 amt, u8 polarity);
 
     /**
      * @brief Writes a single byte into attribute memory.
