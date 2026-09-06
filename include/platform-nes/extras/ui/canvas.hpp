@@ -5,7 +5,8 @@
 #include <type_traits>
 #include <platform-nes/extras/ui/tickbox.hpp>
 #include <platform-nes/extras/ui/tileslider.hpp>
-#include <platform-nes/extras/ui/textbox.hpp>
+// textbox.hpp's TextBox is disabled for now -- see [[remove Scrollable Text feature]] follow-up.
+// #include <platform-nes/extras/ui/textbox.hpp>
 
 using namespace br0::intsh;
 
@@ -35,7 +36,7 @@ namespace ui {
     // orientation, so both instantiations are listed individually.
     using ItemWhitelist = br0::tuple<
         button::TickBox,
-        button::TextBox,
+        // button::TextBox disabled for now -- see [[remove Scrollable Text feature]] follow-up.
         slider::TileSlider<true>,
         slider::TileSlider<false>
     >;

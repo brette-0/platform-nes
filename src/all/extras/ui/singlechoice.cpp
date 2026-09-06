@@ -38,7 +38,7 @@ namespace ui::choice {
 
     UI_BANK auto SingleChoice::Draw(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
-            const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
+            const u8 wordSplitter, const u8 optionSplitter,
             const VisualFn draw, u16* const optionAddr, const u8 nOptions, u8*& buf
         ) -> void {
 
@@ -79,13 +79,8 @@ namespace ui::choice {
 
                 const u8 end = (c == chunkEnd) ? c : (foundWhite ? lastWhite : c);
 
-                const u16 xpos = pos.x + (align == text::Alignment::Left
-                    ? 0
-                    : (box.x - (end - last)) >> 1
-                );
-
                 ppu::WriteFromBufferToNameTable(
-                    {xpos, static_cast<u16>(pos.y + row)},
+                    {pos.x, static_cast<u16>(pos.y + row)},
                     buff + last,
                     end - last,
                     0
@@ -106,10 +101,10 @@ namespace ui::choice {
 
     UI_BANK auto SingleChoice::Draw(
             const u8* buff, const u8 sBuff, const vec2<u16> pos, const vec2<u8> box,
-            const u8 wordSplitter, const u8 optionSplitter, const text::Alignment align,
+            const u8 wordSplitter, const u8 optionSplitter,
             u8*& buf
         ) -> void {
-        Draw(buff, sBuff, pos, box, wordSplitter, optionSplitter, align, draw, optionAddr, nOptions, buf);
+        Draw(buff, sBuff, pos, box, wordSplitter, optionSplitter, draw, optionAddr, nOptions, buf);
     }
 
     UI_BANK auto SingleChoice::Pass(const u8 inputs, u8*& buf) -> void {

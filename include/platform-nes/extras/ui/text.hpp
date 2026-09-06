@@ -2,51 +2,36 @@
 
 #include <intsh>
 
-#include "platform-nes/types.hpp"
+#include <platform-nes/technology.hpp>
+#include <platform-nes/types.hpp>
 
 using namespace br0::intsh;
 
 // text boxes
 
 namespace ui::text {
-    enum class Alignment {
-        Left,
-        Centre
-    };
+    /*
+     *  Same wrapping rule as Draw, but instead of writing rows to the
+     *  nametable it records where each row would have started and how
+     *  long it is.
+     *
+     *  Returns a heap-allocated array of box.y buffer<u8*> entries --
+     *  one per row, caller owns it (delete[] once done). addr points
+     *  into buff at that row's first byte, size is the row's length in
+     *  bytes, splitter excluded. Rows left unused because the buffer
+     *  ran out first are zeroed (addr == nullptr, size == 0).
+     */
+    NI buffer<u8*>* Make(const u8* buff, u8 sBuff, vec2<u8> box, u8 splitter);
 
     /*
-     *  This function presumes no word will go unsplit by the splitter for longer
-     *  than (box.x - 1)
+     *  Draws a Make() result: writes chunks[row] to nametable row
+     *  pos.y + row for row in [0, boxY), stopping early the first time
+     *  it hits a row Make left zeroed (addr == nullptr) -- i.e. the
+     *  buffer ran out before boxY rows were filled.
      *
-     *  Every row, including the last row of the box, is wrapped to the last
-     *  splitter within box.x - the last row is never crammed with as many
-     *  characters as physically fit regardless of word boundaries.
-     *
-     *  Returns progress: the offset into buff of the first byte not yet drawn.
-     *  Equal to sBuff when the whole buffer was drawn; less than sBuff when the
-     *  box ran out of rows first, so the caller can resume from that offset in
-     *  a subsequent box/page.
+     *  Does not take ownership of chunks -- caller allocated it via
+     *  Make() and is responsible for delete[]ing it, whether or not
+     *  this broke out early.
      */
-    u8 Draw(const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box, u8 splitter, Alignment align);
-
-    class ContinuousDrawer {
-    public:
-        ContinuousDrawer(const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box, u8 splitter, Alignment align);
-        bool Next();
-        bool Previous();
-
-    private:
-        u8 AdvanceToNextLine(u8 offset) const;
-        u8 AdvanceToPreviousLine(u8 offset) const;
-
-        u8        sBuff;
-        const u8* buff;
-        vec2<u16> pos;
-        vec2<u8>  box;
-        u8        splitter;
-        Alignment align;
-
-        u8 lastProgress;
-        u8 progress;
-    };
+    AI void Draw(const buffer<u8*>* chunks, vec2<u16> pos, u8 boxY);
 }

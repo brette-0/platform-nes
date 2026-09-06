@@ -101,7 +101,6 @@ namespace title {
             {menuCol, static_cast<u16>(kBottomRightNT + 1)},
             {kMenuBoxWidth, kMenuOptions},
             chrHUDWhitespace_tile, 0,
-            ui::text::Alignment::Left,
             initCursor
         );
         // Initial selection indicator: SingleChoice only queued it into
@@ -208,15 +207,17 @@ namespace title {
     }
 
     void InitTitleScreen() {
+         const auto titleText = ui::text::Make(
+                SIZED_OBJ(msg_title),
+                {static_cast<u8>((viewport_mx() >> 1) - 1), 3}, chrHUDWhitespace_tile
+            );
         ui::text::Draw(
-            SIZED_OBJ(msg_title),
+            titleText,
             {kMenuNT + 1, static_cast<u16>(kBottomRightNT + 1)},
-            {static_cast<u8>((viewport_mx() >> 1) - 1), 3}, chrHUDWhitespace_tile,
-            ui::text::Alignment::Left
+            3
         );
 
-        // Menu items + selection cursor: drawn by the ui::choice::SingleChoice
-        // constructed in main(), not here -- see its own comment there.
+        delete[] titleText;
     }
 
     static oam::oam_t Clear(const u16) {

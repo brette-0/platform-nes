@@ -31,6 +31,7 @@ constexpr auto MINSIZE bcd(T hex) -> std::make_unsigned_t<T> {
     return digits;
 }
 
+// delete response after using
 template <typename T>
 constexpr auto MINSIZE bcdtext(const T hex, const u8* conversionTable) -> char* {
     using U = std::make_unsigned_t<T>;

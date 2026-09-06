@@ -17,19 +17,21 @@ local.cmake.example has a worked example."
 #endif
 #define UI_BANK MODULE_PLACEMENT(PLATFORM_NES_UI_SECTION) MINSIZE
 
+// TextBox disabled for now -- see [[remove Scrollable Text feature]] follow-up.
+/*
 namespace ui::button {
     UI_BANK TextBox::TextBox(
         const vec2<u16> pos, const vec2<u8> box, const bool defaultState,
         u8* offBuff, const u8 sOffBuff,
         u8* onBuff, const u8 sOnBuff,
-        const text::Alignment align, u8 const splitter
+        u8 const splitter
     ) : enabled(defaultState), pos(pos), box(box), splitter(splitter),
-        align(align), sOffBuff(sOffBuff), sOnBuff(sOnBuff),
+        sOffBuff(sOffBuff), sOnBuff(sOnBuff),
         offBuff(offBuff), onBuff(onBuff) {
         text::Draw(
             enabled ? onBuff : offBuff,
             enabled ? sOnBuff : sOffBuff,
-            pos, box, splitter, align
+            pos, box, splitter
         );
     }
 
@@ -41,7 +43,7 @@ namespace ui::button {
         text::Draw(
             enabled ? onBuff : offBuff,
             enabled ? sOnBuff : sOffBuff,
-            pos, box, splitter, align
+            pos, box, splitter
         );
     }
 
@@ -49,3 +51,4 @@ namespace ui::button {
         Toggle();
     }
 }
+*/

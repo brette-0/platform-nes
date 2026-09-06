@@ -38,7 +38,7 @@ namespace ui::choice {
         // optionAddr (>= nOptions entries) and a VisualFn for the indicator.
         static auto Draw(
             const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
-            u8 wordSplitter, u8 optionSplitter, text::Alignment align,
+            u8 wordSplitter, u8 optionSplitter,
             VisualFn draw, u16* optionAddr, u8 nOptions, u8*& buf
         ) -> void;
 
@@ -47,7 +47,7 @@ namespace ui::choice {
         // construction.
         auto Draw(
             const u8* buff, u8 sBuff, vec2<u16> pos, vec2<u8> box,
-            u8 wordSplitter, u8 optionSplitter, text::Alignment align,
+            u8 wordSplitter, u8 optionSplitter,
             u8*& buf
         ) -> void;
 
